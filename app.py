@@ -50,6 +50,8 @@ def send_mail(
     to: list[str],
     html_body: str | None = None,
     from_email: str | None = None,
+    inline_logo_path: str | None = None,   # ← NUEVO (opcional)
+    inline_logo_cid: str = "uplaylogo",    # ← NUEVO (opcional)
 ) -> bool:
     # logger seguro dentro/fuera de app context
     try:
@@ -84,8 +86,40 @@ def send_mail(
     # Contenido: siempre algo en texto; si hay HTML, se adjunta como alternativa
     texto_plano = body or " "
     msg.set_content(texto_plano)
+
+    html_part = None
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+        # Localizar la parte HTML para adjuntar el logo inline (si corresponde)
+        for part in msg.iter_parts():
+            if part.get_content_type() == "text/html":
+                html_part = part
+                break
+
+        # Adjuntar logo inline usando CID (client-friendly)
+        if inline_logo_path and html_part:
+            try:
+                import os as _os
+                import mimetypes as _mimetypes
+
+                mime_type, _ = _mimetypes.guess_type(inline_logo_path)
+                maintype, subtype = ("image", "png")
+                if mime_type and "/" in mime_type:
+                    m_maintype, m_subtype = mime_type.split("/", 1)
+                    if m_maintype == "image" and m_subtype:
+                        maintype, subtype = m_maintype, m_subtype
+
+                with open(inline_logo_path, "rb") as f:
+                    img_bytes = f.read()
+
+                # Importante: Content-ID con <...>
+                cid_value = f"<{inline_logo_cid}>"
+                html_part.add_related(img_bytes, maintype=maintype, subtype=subtype, cid=cid_value)
+
+                logger.info("SMTP: logo inline embebido cid=%s desde %s (%s/%s)",
+                            inline_logo_cid, inline_logo_path, maintype, subtype)
+            except Exception as e:
+                logger.warning("SMTP: no pude adjuntar logo inline (%s): %s", inline_logo_path, e)
 
     try:
         logger.info(
@@ -130,6 +164,7 @@ def send_mail(
     except Exception as e:
         logger.exception("SMTP error inesperado: %s", e)
         return False
+
 
 
 
@@ -2946,22 +2981,147 @@ def olvide_pin():
         db.session.add(pr)
         db.session.commit()
 
+        # === URLs útiles para el email (botón y logo)
+        try:
+            confirmar_url = url_for('olvide_pin_confirmar', _external=True)
+        except Exception:
+            confirmar_url = request.url_root.rstrip('/') + '/olvide-pin-confirmar'
+
+        # Resolver logo (priorizar PNG por compatibilidad)
+        logo_url = None
+        # 1) fuerza el path donde lo subiste
+        try:
+            logo_url = url_for('static', filename='logo/uplay.png', _external=True)
+        except Exception:
+            logo_url = None
+        # 2) fallbacks por si cambia la ubicación
+        if not logo_url:
+            for candidate in (
+                ('static', 'uplay.png'),
+                ('static', 'logo/uplay.svg'),
+                ('static', 'uplay.svg'),
+            ):
+                try:
+                    logo_url = url_for(candidate[0], filename=candidate[1], _external=True)
+                    if logo_url:
+                        break
+                except Exception:
+                    continue
+
+        current_app.logger.info("olvide-pin: logo_url=%s", logo_url)
+
+        # === HTML con logo (soporta dark mode básico y botón)
+        subject = f"UPLAY · Código para restablecer tu PIN ({code})"
+        html_body = f"""\
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Restablecer PIN</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    @media (prefers-color-scheme: dark) {{
+      body {{ background:#111111 !important; color:#ECECEC !important; }}
+      .card {{ background:#1B1B1B !important; color:#ECECEC !important; }}
+      .muted {{ color:#B5B9C0 !important; }}
+      .code  {{ background:#0F2840 !important; color:#E6F0FF !important; }}
+      .btn   {{ background:#2E7CF6 !important; color:#ffffff !important; }}
+    }}
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#F3F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+    Tu código para restablecer el PIN: {code}. Válido por 15 minutos.
+  </div>
+
+  <table role="presentation" width="100%" style="width:100%;background:#F3F5F7;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:560px;">
+          <tr>
+            <td align="center" style="padding:8px 0 16px;">
+              {(
+                f'<img src="{logo_url}" alt="UPLAY" width="120" height="120" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0;outline:0;">'
+                if logo_url else
+                '<div style="font-weight:700;font-size:20px;color:#0F172A;">UPLAY</div>'
+              )}
+            </td>
+          </tr>
+
+          <tr>
+            <td class="card" style="background:#ffffff;border-radius:14px;padding:24px 22px;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
+              <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;color:#0F172A;">Restablecer tu PIN</h1>
+              <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#334155;">
+                Hola <strong>{j.nombre_completo}</strong>, recibimos tu solicitud para restablecer el PIN.
+              </p>
+
+              <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#334155;">
+                Usá este código (expira en <strong>15 minutos</strong>):
+              </p>
+
+              <div role="text" aria-label="Código de verificación"
+                   style="margin:12px 0 18px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
+                {code}
+              </div>
+
+              <table role="presentation" align="center" style="margin:0 auto 16px;">
+                <tr>
+                  <td>
+                    <a class="btn" href="{confirmar_url}"
+                       style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
+                      Restablecer PIN
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p class="muted" style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#64748B;">
+                Si el botón no funciona, copiá y pegá este enlace en tu navegador:
+              </p>
+              <p style="margin:0 0 18px;word-break:break-all;font-size:12px;line-height:1.6;color:#334155;">
+                {confirmar_url}
+              </p>
+
+              <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0 16px;">
+
+              <p class="muted" style="margin:0;font-size:12px;line-height:1.6;color:#64748B;">
+                Si no solicitaste este cambio, podés ignorar este mensaje.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:16px 6px;">
+              <p class="muted" style="margin:0;font-size:12px;color:#94A3B8;">
+                © {datetime.utcnow().year} UPLAY · Este email se generó automáticamente.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
         # Enviar email con el código (usa tu helper de SMTP ya configurado)
         try:
+            subject = f"UPLAY · Código para restablecer tu PIN ({code})"
+            body = (
+                f"Hola {j.nombre_completo},\n\n"
+                f"Usá este código para restablecer tu PIN (vale por 15 minutos):\n\n"
+                f"{code}\n\n"
+                f"Restablecer PIN:\n{confirmar_url}\n\n"
+                "Si no solicitaste esto, ignorá este mensaje.\n"
+            )
             ok = send_mail(
-                subject='UPLAY · Código para restablecer tu PIN',
-                body='Usá este código para restablecer tu PIN (vale por 15 minutos).',  # fallback texto plano
-                html_body=(
-                    f"<p>Hola {j.nombre_completo},</p>"
-                    f"<p>Usá este código para restablecer tu PIN (vale por 15 minutos):</p>"
-                    f"<p style='font-size:18px;letter-spacing:2px;'><strong>{code}</strong></p>"
-                    f"<p>Luego ingresalo aquí: "
-                    f"<a href='{url_for('olvide_pin_confirmar', _external=True)}'>Restablecer PIN</a></p>"
-                    f"<p>Si no solicitaste esto, ignorá este mensaje.</p>"
-                ),
+                subject=subject,
+                body=body,           # fallback texto plano con URL visible
+                html_body=html_body, # HTML con logo + botón
                 to=[email]
             )
-            current_app.logger.info("Resultado send_mail=%s; PIN enviado a %s (jugador_id=%s)", ok, email, j.id)
+            current_app.logger.info("Resultado send_mail=%s; PIN enviado a %s (jugador_id=%s) logo_url=%s", ok, email, j.id, logo_url)
         except Exception:
             # No interrumpir el flujo de seguridad
             current_app.logger.exception("Error enviando PIN a %s", email)
