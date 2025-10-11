@@ -3340,7 +3340,8 @@ def inject_current_jugador():
 
 
 # Endpoints públicos (pueden entrar sin sesión)
-PUBLIC_ENDPOINTS = {'home', 'login', 'alta_publica', 'static', 'ranking', 'categorias_list'}  # si querés sumar 'ranking', agregalo acá
+PUBLIC_ENDPOINTS = {'home', 'login', 'alta_publica', 'static', 'ranking', 'categorias_list', 'olvide_pin',
+    'olvide_pin_confirmar',}  # si querés sumar 'ranking', agregalo acá
 
 @app.before_request
 def require_login_for_app():
