@@ -3,21 +3,30 @@ import logging
 import smtplib, ssl
 import secrets
 import string
+import re  # ← agregado para EMAIL_RE
+
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 
 from functools import wraps
 from zoneinfo import ZoneInfo
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, jsonify
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, session, abort, jsonify, current_app  # ← agregado current_app para logs
+)
+
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 
 
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 AUTOCRON_TOKEN = os.environ.get("AUTOCRON_TOKEN", "cambia-esto")
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
@@ -87,6 +96,23 @@ def db_first_or_404(query):
     if obj is None:
         abort(404)
     return obj
+
+def _extraer_email_desde_request(req):
+    """Devuelve el email desde form/args/json aceptando 'email' o 'mail'."""
+    cands = []
+    # JSON
+    if req.is_json:
+        data = req.get_json(silent=True) or {}
+        cands.extend([data.get('email'), data.get('mail')])
+    # FORM
+    cands.extend([req.form.get('email'), req.form.get('mail')])
+    # QUERYSTRING
+    cands.extend([req.args.get('email'), req.args.get('mail')])
+
+    for v in cands:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
 
 # ----------------------------
 # MODELOS
@@ -2832,26 +2858,43 @@ def _gen_code(n=6) -> str:
 @app.route('/olvide-pin', methods=['GET', 'POST'])
 def olvide_pin():
     if request.method == 'POST':
-        email = (request.form.get('email') or '').strip().lower()
+        # Logs para diagnóstico rápido en Render
+        current_app.logger.info(
+            "POST /olvide-pin -> form_keys=%s args_keys=%s is_json=%s",
+            list(request.form.keys()), list(request.args.keys()), request.is_json
+        )
+
+        email = _extraer_email_desde_request(request).lower()
 
         # Mensaje genérico (para no revelar si existe o no)
         generic_msg = 'Si el correo existe en el sistema, te enviamos un código de verificación.'
 
-        if not email or '@' not in email:
+        # Validación básica de email
+        if not email or not EMAIL_RE.match(email):
+            current_app.logger.warning("Email ausente o inválido recibido: %r", email)
             flash(generic_msg, 'ok')
             return redirect(url_for('olvide_pin'))
 
         j = db.session.query(Jugador).filter(Jugador.email == email).first()
         if not j:
+            # No revelamos existencia -> mismo mensaje
+            current_app.logger.info("Solicitud olvide-pin para email no registrado: %s", email)
             flash(generic_msg, 'ok')
             return redirect(url_for('olvide_pin'))
 
         # invalidar códigos viejos no usados para este jugador
-        db.session.query(PinReset).filter(
-            PinReset.jugador_id == j.id,
-            PinReset.used.is_(False),
-            PinReset.expires_en > datetime.utcnow()
-        ).update({PinReset.expires_en: datetime.utcnow() - timedelta(seconds=1)})
+        try:
+            db.session.query(PinReset).filter(
+                PinReset.jugador_id == j.id,
+                PinReset.used.is_(False),
+                PinReset.expires_en > datetime.utcnow()
+            ).update(
+                {PinReset.expires_en: datetime.utcnow() - timedelta(seconds=1)},
+                synchronize_session=False
+            )
+        except Exception as e:
+            # No queremos romper el flujo, solo log
+            current_app.logger.exception("Error invalidando PINs previos de %s: %s", email, e)
 
         code = _gen_code(6)
         pr = PinReset(
@@ -2873,13 +2916,15 @@ def olvide_pin():
                     f"<p>Hola {j.nombre_completo},</p>"
                     f"<p>Usá este código para restablecer tu PIN (vale por 15 minutos):</p>"
                     f"<p style='font-size:18px;letter-spacing:2px;'><strong>{code}</strong></p>"
-                    f"<p>Luego ingresalo aquí: <a href='{url_for('olvide_pin_confirmar', _external=True)}'>Restablecer PIN</a></p>"
+                    f"<p>Luego ingresalo aquí: "
+                    f"<a href='{url_for('olvide_pin_confirmar', _external=True)}'>Restablecer PIN</a></p>"
                     f"<p>Si no solicitaste esto, ignorá este mensaje.</p>"
                 )
             )
+            current_app.logger.info("PIN enviado a %s (jugador_id=%s)", email, j.id)
         except Exception:
             # No interrumpir el flujo de seguridad
-            pass
+            current_app.logger.exception("Error enviando PIN a %s", email)
 
         flash(generic_msg, 'ok')
         return redirect(url_for('olvide_pin'))
