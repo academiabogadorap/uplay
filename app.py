@@ -1,6 +1,8 @@
 import os
 import logging
 import smtplib, ssl
+import secrets
+import string
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 
@@ -438,6 +440,18 @@ class SolicitudAlta(db.Model):
     resuelto_en = db.Column(db.DateTime)
 
     categoria = db.relationship('Categoria')
+
+class PinReset(db.Model):
+    __tablename__ = 'pin_resets'
+    id = db.Column(db.Integer, primary_key=True)
+    jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=False)
+    code = db.Column(db.String(6), nullable=False)
+    created_en = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_en = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False)
+
+    jugador = db.relationship('Jugador')
+
 
 # Crear DB si no existe
 with app.app_context():
@@ -2811,13 +2825,126 @@ def login():
 
     return render_template('login.html', jugadores=jugadores)
 
+def _gen_code(n=6) -> str:
+    # 6 dígitos (0–9), sin letras para que sea fácil de tipear
+    return ''.join(secrets.choice(string.digits) for _ in range(n))
+
+@app.route('/olvide-pin', methods=['GET', 'POST'])
+def olvide_pin():
+    if request.method == 'POST':
+        email = (request.form.get('email') or '').strip().lower()
+
+        # Mensaje genérico (para no revelar si existe o no)
+        generic_msg = 'Si el correo existe en el sistema, te enviamos un código de verificación.'
+
+        if not email or '@' not in email:
+            flash(generic_msg, 'ok')
+            return redirect(url_for('olvide_pin'))
+
+        j = db.session.query(Jugador).filter(Jugador.email == email).first()
+        if not j:
+            flash(generic_msg, 'ok')
+            return redirect(url_for('olvide_pin'))
+
+        # invalidar códigos viejos no usados para este jugador
+        db.session.query(PinReset).filter(
+            PinReset.jugador_id == j.id,
+            PinReset.used.is_(False),
+            PinReset.expires_en > datetime.utcnow()
+        ).update({PinReset.expires_en: datetime.utcnow() - timedelta(seconds=1)})
+
+        code = _gen_code(6)
+        pr = PinReset(
+            jugador_id=j.id,
+            code=code,
+            created_en=datetime.utcnow(),
+            expires_en=datetime.utcnow() + timedelta(minutes=15),
+            used=False
+        )
+        db.session.add(pr)
+        db.session.commit()
+
+        # Enviar email con el código (usa tu helper de SMTP ya configurado)
+        try:
+            send_email(
+                subject='UPLAY · Código para restablecer tu PIN',
+                to_emails=[email],
+                html_body=(
+                    f"<p>Hola {j.nombre_completo},</p>"
+                    f"<p>Usá este código para restablecer tu PIN (vale por 15 minutos):</p>"
+                    f"<p style='font-size:18px;letter-spacing:2px;'><strong>{code}</strong></p>"
+                    f"<p>Luego ingresalo aquí: <a href='{url_for('olvide_pin_confirmar', _external=True)}'>Restablecer PIN</a></p>"
+                    f"<p>Si no solicitaste esto, ignorá este mensaje.</p>"
+                )
+            )
+        except Exception:
+            # No interrumpir el flujo de seguridad
+            pass
+
+        flash(generic_msg, 'ok')
+        return redirect(url_for('olvide_pin'))
+
+    # GET
+    return render_template('olvide_pin_request.html')
+    
+
+@app.route('/olvide-pin/confirmar', methods=['GET', 'POST'])
+def olvide_pin_confirmar():
+    if request.method == 'POST':
+        email = (request.form.get('email') or '').strip().lower()
+        code = (request.form.get('code') or '').strip()
+        pin1 = (request.form.get('pin1') or '').strip()
+        pin2 = (request.form.get('pin2') or '').strip()
+
+        if not email or not code or not pin1 or not pin2:
+            flash('Completá email, código y el nuevo PIN (dos veces).', 'error')
+            return redirect(url_for('olvide_pin_confirmar'))
+
+        if pin1 != pin2:
+            flash('Los PIN no coinciden.', 'error')
+            return redirect(url_for('olvide_pin_confirmar'))
+
+        if not (pin1.isdigit() and 4 <= len(pin1) <= 6):
+            flash('El PIN debe tener 4–6 dígitos.', 'error')
+            return redirect(url_for('olvide_pin_confirmar'))
+
+        j = db.session.query(Jugador).filter(Jugador.email == email).first()
+        if not j:
+            flash('Código inválido o expirado.', 'error')  # genérico
+            return redirect(url_for('olvide_pin_confirmar'))
+
+        # Buscamos un reset válido (no usado, no vencido) con ese code
+        pr = (db.session.query(PinReset)
+              .filter(
+                  PinReset.jugador_id == j.id,
+                  PinReset.code == code,
+                  PinReset.used.is_(False),
+                  PinReset.expires_en >= datetime.utcnow()
+              )
+              .order_by(PinReset.created_en.desc())
+              .first())
+
+        if not pr:
+            flash('Código inválido o expirado.', 'error')
+            return redirect(url_for('olvide_pin_confirmar'))
+
+        # Ok, actualizar PIN y marcar como usado
+        j.pin = pin1
+        pr.used = True
+        db.session.commit()
+
+        flash('Tu PIN fue actualizado. Ya podés iniciar sesión.', 'ok')
+        return redirect(url_for('login'))
+
+    # GET
+    return render_template('olvide_pin_confirm.html')
+
 
 @app.route('/logout', methods=['POST'])
 def logout():
     session.pop('jugador_id', None)
     flash('Sesión cerrada.', 'ok')
     return redirect(url_for('home'))
-
 
 @app.route('/mi')
 def mi_panel():
