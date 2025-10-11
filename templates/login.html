@@ -8,10 +8,16 @@
   </div>
 
   <div class="card" style="max-width:560px;">
-    <form method="post" style="display:grid; gap:10px;">
+    <form method="post" style="display:grid; gap:10px;" novalidate>
+      <!-- Buscador rápido de jugador -->
+      <div>
+        <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>
+        <input id="buscar" type="text" placeholder="Escribí para filtrar por nombre…" autocomplete="off" style="width:100%;">
+      </div>
+
       <div>
         <label for="jugador_id" class="muted" style="display:block; margin-bottom:4px;">Tu nombre</label>
-        <select id="jugador_id" name="jugador_id" required style="width:100%;">
+        <select id="jugador_id" name="jugador_id" required style="width:100%;" aria-describedby="ayuda-jugador">
           <option value="">-- Elegí tu nombre --</option>
           {% for j in jugadores %}
             <option value="{{ j.id }}">
@@ -19,11 +25,24 @@
             </option>
           {% endfor %}
         </select>
+        <p id="ayuda-jugador" class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+          Si no aparecés, pedí el alta al organizador.
+        </p>
+
+        {% if jugadores|length == 0 %}
+          <p class="muted" style="margin:.35rem 0 0;">
+            No hay jugadores activos cargados. <a href="{{ url_for('alta_publica') }}">Pedí alta</a> o contactá a un admin.
+          </p>
+        {% endif %}
       </div>
 
       <div>
         <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN</label>
-        <input id="pin" name="pin" type="password" required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
+        <div style="display:flex; gap:8px;">
+          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
+                 required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
+          <button type="button" id="togglePin" class="btn btn-ghost btn-slim" aria-pressed="false" aria-controls="pin">👁</button>
+        </div>
         <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
           El PIN lo define el organizador. Podrás cambiarlo luego desde <em>Editar jugador</em>.
         </p>
@@ -32,6 +51,7 @@
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
         <button type="submit" class="btn">Entrar</button>
         <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost">No figuro, pedir alta</a>
+        <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Ver ranking</a>
       </div>
     </form>
   </div>
@@ -41,6 +61,43 @@
       ¿Problemas para ingresar? Verificá que tu nombre esté en la lista y que el PIN sea correcto.
     </p>
   </div>
+
+  <script>
+    // --- Filtro rápido del <select> por texto del usuario
+    const buscar = document.getElementById('buscar');
+    const select = document.getElementById('jugador_id');
+
+    function normalizar(s){ return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+
+    if (buscar && select){
+      const opcionesOriginales = Array.from(select.options);
+      buscar.addEventListener('input', () => {
+        const q = normalizar(buscar.value);
+        // preservar la primera opción "Elegí tu nombre"
+        const primera = opcionesOriginales[0];
+        const resto = opcionesOriginales.slice(1);
+        select.innerHTML = '';
+        select.appendChild(primera.cloneNode(true));
+        resto.forEach(opt => {
+          if (!q || normalizar(opt.text).includes(q)) {
+            select.appendChild(opt.cloneNode(true));
+          }
+        });
+        // si no hay coincidencias, dejamos solo la primera opción
+      });
+    }
+
+    // --- Mostrar/Ocultar PIN
+    const pin = document.getElementById('pin');
+    const toggle = document.getElementById('togglePin');
+    if (pin && toggle){
+      toggle.addEventListener('click', () => {
+        const isPass = pin.type === 'password';
+        pin.type = isPass ? 'text' : 'password';
+        toggle.setAttribute('aria-pressed', String(isPass));
+      });
+    }
+  </script>
 {% endblock %}
 
 {% block help_content %}
@@ -208,7 +265,7 @@
           Tips rápidos
         </h4>
         <ul class="help-ul">
-          <li>¿Error de PIN? Probá de nuevo (revisá mayúsculas minúsculas del nombre si hay homónimos).</li>
+          <li>¿Error de PIN? Probá de nuevo.</li>
           <li>¿No te encontrás? Pedí alta con tu nombre completo.</li>
         </ul>
       </section>
