@@ -3566,7 +3566,7 @@ def mi_cambiar_pin():
                     f"Si no fuiste vos, comunicate con el organizador.\n\n"
                     f"— UPLAY"
                 )
-                send_mail(subject, body, to_addrs=[j.email])
+                send_mail(subject, body, to=[j.email])
             flash('PIN actualizado correctamente.', 'ok')
         except Exception as e:
             # No bloquear el cambio si el correo falla
@@ -3710,7 +3710,7 @@ def admin_solicitudes_aprobar(sid):
 
         # Usa el helper de correo configurado (ya lo probamos)
         try:
-            send_mail(subject, body, to_addrs=[j.email])
+            send_mail(subject, body, to=[j.email])
             flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
         except Exception as e:
             flash(f'Jugador creado, pero falló el envío de email: {e}', 'warning')
