@@ -44,37 +44,93 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-def send_mail(subject: str, body: str, to: list[str]) -> bool:
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER")
-    pwd  = os.getenv("SMTP_PASS")
-    sender = os.getenv("SMTP_FROM", user)
+def send_mail(
+    subject: str,
+    body: str | None,
+    to: list[str],
+    html_body: str | None = None,
+    from_email: str | None = None,
+) -> bool:
+    # logger seguro dentro/fuera de app context
+    try:
+        logger = current_app.logger
+    except Exception:
+        logger = logging.getLogger(__name__)
 
-    if not (host and port and user and pwd and sender and to):
-        log.warning("SMTP: faltan variables. host=%s port=%s user=%s sender=%s to=%s",
-                    host, port, user, sender, to)
+    host = os.getenv("SMTP_HOST", "")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER", "")
+    pwd  = os.getenv("SMTP_PASS", "")
+    use_tls = os.getenv("SMTP_TLS", "1") == "1"   # STARTTLS (587)
+    use_ssl = os.getenv("SMTP_SSL", "0") == "1"   # SSL puro (465)
+
+    sender = from_email or os.getenv("SMTP_FROM") or (user or "")
+    to_clean = [t.strip() for t in (to or []) if t and t.strip()]
+
+    # Validaciones mínimas
+    if not host or not port or not sender or not to_clean:
+        logger.warning(
+            "SMTP: faltan variables o destinatarios. host=%s port=%s sender=%s to=%s",
+            host, port, sender, to_clean
+        )
         return False
 
+    # Construcción del mensaje
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = ", ".join([t.strip() for t in to if t.strip()])
-    msg.set_content(body)
+    msg["To"] = ", ".join(to_clean)
+
+    # Contenido: siempre algo en texto; si hay HTML, se adjunta como alternativa
+    texto_plano = body or " "
+    msg.set_content(texto_plano)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP(host, port, timeout=12) as s:
-            s.ehlo()
-            s.starttls(context=ctx)
-            s.ehlo()
-            s.login(user, pwd)
-            s.send_message(msg)
-        log.info("SMTP: enviado a %s", msg["To"])
+        logger.info(
+            "SMTP intento: host=%s port=%s tls=%s ssl=%s from=%s to=%s",
+            host, port, use_tls, use_ssl, sender, to_clean
+        )
+
+        if use_ssl:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, context=context, timeout=20) as server:
+                if user:
+                    server.login(user, pwd)
+                resp = server.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as server:
+                server.ehlo()
+                if use_tls:
+                    context = ssl.create_default_context()
+                    server.starttls(context=context)
+                    server.ehlo()
+                if user:
+                    server.login(user, pwd)
+                resp = server.send_message(msg)
+
+        # resp: dict de destinatarios que FALLARON; vacío = OK
+        if resp:
+            logger.error("SMTP: fallos por destinatario: %s", resp)
+            return False
+
+        logger.info("SMTP: envío OK a %s", to_clean)
         return True
-    except Exception as e:
-        log.exception("SMTP: fallo el envio: %s", e)
+
+    except smtplib.SMTPAuthenticationError as e:
+        logger.exception("SMTP auth error: %s", e)
         return False
+    except smtplib.SMTPConnectError as e:
+        logger.exception("SMTP connect error: %s", e)
+        return False
+    except smtplib.SMTPException as e:
+        logger.exception("SMTP error: %s", e)
+        return False
+    except Exception as e:
+        logger.exception("SMTP error inesperado: %s", e)
+        return False
+
 
 
 def get_or_404(model, pk):
@@ -814,22 +870,10 @@ def alta_publica():
         db.session.add(s)
         db.session.commit()
 
-        # ==== NUEVO: Aviso por email a administradores ====
+        # ==== Aviso por email a administradores (usando send_mail) ====
         try:
-            host = os.getenv('SMTP_HOST')
-            port = int(os.getenv('SMTP_PORT', '587'))
-            user = os.getenv('SMTP_USER')
-            pwd  = os.getenv('SMTP_PASS')
-            from_addr = os.getenv('SMTP_FROM') or (user or '')
             admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
-
-            if host and user and pwd and admin_emails:
-                msg = EmailMessage()
-                msg['Subject'] = f'Nueva solicitud de alta: {nombre}'
-                msg['From'] = from_addr or user
-                msg['To'] = ', '.join(admin_emails)
-
-                # Info adicional útil
+            if admin_emails:
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
                 body = (
                     "Se recibió una nueva solicitud de ALTA.\n\n"
@@ -841,16 +885,15 @@ def alta_publica():
                     f"Fecha/Hora (AR): {ahora_ar}\n\n"
                     "Revisar en: /admin/solicitudes"
                 )
-                msg.set_content(body)
 
-                context = ssl.create_default_context()
-                with smtplib.SMTP(host, port, timeout=20) as server:
-                    server.ehlo()
-                    server.starttls(context=context)
-                    server.login(user, pwd)
-                    server.send_message(msg)
+                ok = send_mail(
+                    subject=f'Nueva solicitud de alta: {nombre}',
+                    body=body,          # texto plano
+                    to=admin_emails
+                )
+                current_app.logger.info("Aviso de alta a admins send_mail=%s to=%s", ok, admin_emails)
             else:
-                logging.warning('SMTP no configurado o ADMIN_EMAILS vacío; no se envía aviso de alta.')
+                logging.warning('ADMIN_EMAILS vacío; no se envía aviso de alta.')
         except Exception:
             logging.exception('Fallo enviando email de notificación de nueva solicitud de alta.')
 
@@ -859,10 +902,6 @@ def alta_publica():
 
     # GET
     return render_template('alta_form.html', categorias=categorias)
-
-
-from functools import wraps
-from flask import session, flash, redirect, url_for
 
 
 def admin_required(fn):
@@ -2909,9 +2948,9 @@ def olvide_pin():
 
         # Enviar email con el código (usa tu helper de SMTP ya configurado)
         try:
-            send_mail(
+            ok = send_mail(
                 subject='UPLAY · Código para restablecer tu PIN',
-                to_emails=[email],
+                body='Usá este código para restablecer tu PIN (vale por 15 minutos).',  # fallback texto plano
                 html_body=(
                     f"<p>Hola {j.nombre_completo},</p>"
                     f"<p>Usá este código para restablecer tu PIN (vale por 15 minutos):</p>"
@@ -2919,9 +2958,10 @@ def olvide_pin():
                     f"<p>Luego ingresalo aquí: "
                     f"<a href='{url_for('olvide_pin_confirmar', _external=True)}'>Restablecer PIN</a></p>"
                     f"<p>Si no solicitaste esto, ignorá este mensaje.</p>"
-                )
+                ),
+                to=[email]
             )
-            current_app.logger.info("PIN enviado a %s (jugador_id=%s)", email, j.id)
+            current_app.logger.info("Resultado send_mail=%s; PIN enviado a %s (jugador_id=%s)", ok, email, j.id)
         except Exception:
             # No interrumpir el flujo de seguridad
             current_app.logger.exception("Error enviando PIN a %s", email)
