@@ -2866,7 +2866,7 @@ def olvide_pin():
 
         # Enviar email con el código (usa tu helper de SMTP ya configurado)
         try:
-            send_email(
+            send_mail(
                 subject='UPLAY · Código para restablecer tu PIN',
                 to_emails=[email],
                 html_body=(
