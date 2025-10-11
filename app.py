@@ -3090,7 +3090,6 @@ def mi_panel():
     )
 
 
-
 def en_zona_ascenso(j: 'Jugador') -> bool:
     return bool(j and j.categoria and j.puntos is not None and j.puntos <= j.categoria.puntos_min)
 
@@ -3151,6 +3150,61 @@ def infer_rama(nombre: str) -> str | None:
 def get_current_jugador():
     jid = session.get('jugador_id')
     return db.session.get(Jugador, int(jid)) if jid else None
+
+@app.route('/mi/pin', methods=['GET', 'POST'])
+def mi_cambiar_pin():
+    j = get_current_jugador()
+    if not j:
+        flash('Iniciá sesión para cambiar tu PIN.', 'error')
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        pin_actual = (request.form.get('pin_actual') or '').strip()
+        pin_nuevo  = (request.form.get('pin_nuevo')  or '').strip()
+        pin_nuevo2 = (request.form.get('pin_nuevo2') or '').strip()
+
+        # Validaciones
+        if not pin_actual or pin_actual != (j.pin or ''):
+            flash('El PIN actual no es correcto.', 'error')
+            return redirect(url_for('mi_cambiar_pin'))
+
+        if not (pin_nuevo.isdigit() and 4 <= len(pin_nuevo) <= 6):
+            flash('El nuevo PIN debe tener 4–6 dígitos.', 'error')
+            return redirect(url_for('mi_cambiar_pin'))
+
+        if pin_nuevo != pin_nuevo2:
+            flash('La confirmación no coincide.', 'error')
+            return redirect(url_for('mi_cambiar_pin'))
+
+        if pin_nuevo == pin_actual:
+            flash('El PIN nuevo no puede ser igual al actual.', 'warning')
+            return redirect(url_for('mi_cambiar_pin'))
+
+        # Guardar
+        j.pin = pin_nuevo
+        db.session.commit()
+
+        # Aviso por email (si el jugador tiene email)
+        try:
+            if j.email:
+                subject = "UPLAY: tu PIN fue actualizado"
+                body = (
+                    f"Hola {j.nombre_completo},\n\n"
+                    f"Tu PIN fue actualizado correctamente.\n"
+                    f"Si no fuiste vos, comunicate con el organizador.\n\n"
+                    f"— UPLAY"
+                )
+                send_mail(subject, body, to_addrs=[j.email])
+            flash('PIN actualizado correctamente.', 'ok')
+        except Exception as e:
+            # No bloquear el cambio si el correo falla
+            flash(f'PIN actualizado. (Aviso por email no enviado: {e})', 'warning')
+
+        return redirect(url_for('mi_panel'))
+
+    # GET
+    return render_template('mi_cambiar_pin.html', jugador=j)
+
 
 @app.context_processor
 def inject_current_jugador():
@@ -3237,7 +3291,7 @@ def admin_solicitudes_aprobar(sid):
             flash('El PIN debe tener 4–6 dígitos.', 'error')
             return redirect(url_for('admin_solicitudes_aprobar', sid=s.id))
 
-        # 🚫 NUEVO: evitar duplicar email en Jugadores
+        # Evitar duplicar email en Jugadores
         if s.email:
             ya = db.session.query(Jugador).filter(Jugador.email == s.email).first()
             if ya:
@@ -3259,14 +3313,41 @@ def admin_solicitudes_aprobar(sid):
         # Cerrar solicitud
         s.estado = 'APROBADA'
         s.resuelto_en = datetime.utcnow()
-
         db.session.commit()
-        flash(f'Jugador creado: {j.nombre_completo}.', 'ok')
+
+        # === Enviar email automático con el PIN ===
+        try:
+            login_url = url_for('login', _external=True)
+            cambiar_pin_url = url_for('mi_cambiar_pin', _external=True)  # ruta que agregaremos en el paso 2
+        except Exception:
+            login_url = '/login'
+            cambiar_pin_url = '/mi/pin'
+
+        subject = "UPLAY: alta aprobada y PIN de acceso"
+        body = (
+            f"Hola {j.nombre_completo},\n\n"
+            f"¡Bienvenido/a a UPLAY! Tu alta fue aprobada.\n\n"
+            f"Tu PIN de acceso es: {pin}\n\n"
+            f"Podés iniciar sesión aquí: {login_url}\n\n"
+            f"Por seguridad, te recomendamos cambiar el PIN apenas ingreses: {cambiar_pin_url}\n\n"
+            f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
+            f"Puntos iniciales: {j.puntos}\n\n"
+            f"— Equipo UPLAY"
+        )
+
+        # Usa el helper de correo configurado (ya lo probamos)
+        try:
+            send_mail(subject, body, to_addrs=[j.email])
+            flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
+        except Exception as e:
+            flash(f'Jugador creado, pero falló el envío de email: {e}', 'warning')
+
         return redirect(url_for('admin_solicitudes_list'))
 
     # GET -> sugerir puntos = puntos_max
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
+
 
 
 @app.route('/admin/solicitudes/<int:sid>/rechazar', methods=['POST'])

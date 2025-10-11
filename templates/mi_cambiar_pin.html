@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Cambiar PIN{% endblock %}
+
+{% block content %}
+  <h2 style="display:flex; align-items:center; gap:8px; margin:0 0 10px;">
+    Cambiar PIN
+    <a href="{{ url_for('mi_panel') }}" class="btn btn-ghost btn-slim">Volver a Mi panel</a>
+  </h2>
+
+  <div class="card" style="max-width:520px;">
+    <form method="post" style="display:grid; gap:10px;">
+      <div>
+        <label for="pin_actual">PIN actual</label>
+        <input id="pin_actual" name="pin_actual" type="password" required autocomplete="current-password" placeholder="Tu PIN actual">
+      </div>
+
+      <div>
+        <label for="pin_nuevo">PIN nuevo</label>
+        <input id="pin_nuevo" name="pin_nuevo" type="password" required autocomplete="new-password" placeholder="4–6 dígitos">
+      </div>
+
+      <div>
+        <label for="pin_nuevo2">Confirmar PIN nuevo</label>
+        <input id="pin_nuevo2" name="pin_nuevo2" type="password" required autocomplete="new-password" placeholder="Repetí el PIN nuevo">
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button type="submit" class="btn">Guardar cambios</button>
+        <span class="muted" style="font-size:.9rem;">Usá solo números (4–6 dígitos).</span>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+
+{% block help_content %}
+  <div class="help-grid">
+    <section class="help-section">
+      <h4>¿Para qué sirve?</h4>
+      <p>Cambiá tu PIN para mantener tu cuenta segura. Sólo números, 4–6 dígitos.</p>
+    </section>
+    <section class="help-section">
+      <h4>Requisitos</h4>
+      <p>Ingresá tu PIN actual, luego el nuevo PIN y confirmalo.</p>
+    </section>
+  </div>
+{% endblock %}
