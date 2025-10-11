@@ -821,6 +821,88 @@ def categorias_new():
 
     return render_template('categorias_form.html')
 
+# --- Editar categoría ---
+@app.route('/categorias/<int:cat_id>/editar', methods=['GET', 'POST'])
+@admin_required
+def categorias_edit(cat_id):
+    c = get_or_404(Categoria, cat_id)
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        puntos_min = request.form.get('puntos_min')
+        puntos_max = request.form.get('puntos_max')
+
+        if not nombre or puntos_min is None or puntos_max is None:
+            flash('Completá todos los campos.', 'error')
+            return redirect(url_for('categorias_edit', cat_id=c.id))
+
+        try:
+            pmin = int(puntos_min)
+            pmax = int(puntos_max)
+        except ValueError:
+            flash('Los puntos deben ser enteros.', 'error')
+            return redirect(url_for('categorias_edit', cat_id=c.id))
+
+        if pmin < 0 or pmax < 0 or pmin >= pmax:
+            flash('Verificá el rango: puntos_min < puntos_max y ambos ≥ 0.', 'error')
+            return redirect(url_for('categorias_edit', cat_id=c.id))
+
+        # Unicidad por nombre (excluyendo la misma categoría)
+        existe = (db.session.query(Categoria)
+                  .filter(Categoria.nombre == nombre, Categoria.id != c.id)
+                  .first())
+        if existe:
+            flash('Ya existe otra categoría con ese nombre.', 'error')
+            return redirect(url_for('categorias_edit', cat_id=c.id))
+
+        # Seguridad: asegurarnos de no dejar jugadores fuera del rango
+        fuera_de_rango = (
+            db.session.query(Jugador)
+            .filter(Jugador.categoria_id == c.id)
+            .filter(db.or_(Jugador.puntos < pmin, Jugador.puntos > pmax))
+            .count()
+        )
+        if fuera_de_rango:
+            flash('No se puede ajustar el rango: hay jugadores con puntos fuera del nuevo rango.', 'error')
+            return redirect(url_for('categorias_edit', cat_id=c.id))
+
+        # Guardar
+        c.nombre = nombre
+        c.puntos_min = pmin
+        c.puntos_max = pmax
+        db.session.commit()
+        flash('Categoría actualizada.', 'ok')
+        return redirect(url_for('categorias_list'))
+
+    # GET
+    return render_template('categorias_form.html', categoria=c)
+
+
+# --- Eliminar categoría ---
+@app.route('/categorias/<int:cat_id>/eliminar', methods=['POST'])
+@admin_required
+def categorias_delete(cat_id):
+    c = get_or_404(Categoria, cat_id)
+
+    # No permitir borrar si tiene datos asociados
+    jugadores = db.session.query(Jugador).filter_by(categoria_id=c.id).count()
+    parejas   = db.session.query(Pareja).filter_by(categoria_id=c.id).count()
+    partidos  = db.session.query(Partido).filter_by(categoria_id=c.id).count()
+    abiertos  = db.session.query(PartidoAbierto).filter_by(categoria_id=c.id).count()
+    desafios_origen   = db.session.query(Desafio).filter_by(categoria_origen_id=c.id).count()
+    desafios_superior = db.session.query(Desafio).filter_by(categoria_superior_id=c.id).count()
+
+    total_refs = jugadores + parejas + partidos + abiertos + desafios_origen + desafios_superior
+    if total_refs > 0:
+        flash('No se puede eliminar: hay registros que dependen de esta categoría (jugadores/parejas/partidos/abiertos/desafíos).', 'error')
+        return redirect(url_for('categorias_list'))
+
+    db.session.delete(c)
+    db.session.commit()
+    flash('Categoría eliminada.', 'ok')
+    return redirect(url_for('categorias_list'))
+
+
 
 # --- Jugadores ---
 @app.route('/jugadores')

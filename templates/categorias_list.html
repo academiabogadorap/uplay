@@ -2,29 +2,50 @@
 {% block title %}Categorías{% endblock %}
 
 {% block content %}
-  <h2>Categorías</h2>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Categorías</h2>
 
-  {# Botón visible solo para admins #}
-  {% if current_jugador and current_jugador.is_admin %}
-    <p>
-      <a href="{{ url_for('categorias_new') }}">
-        <button>Nueva categoría</button>
-      </a>
-    </p>
-  {% endif %}
+    {# Botón visible solo para admins #}
+    {% if current_jugador and current_jugador.is_admin %}
+      <a href="{{ url_for('categorias_new') }}" class="btn btn-ghost btn-slim">➕ Nueva categoría</a>
+    {% endif %}
+  </div>
 
   {% if categorias %}
     <table>
       <thead>
-        <tr><th>Nombre</th><th>Rango de puntos</th><th>Creada</th></tr>
+        <tr>
+          <th>Nombre</th>
+          <th>Rango de puntos</th>
+          <th>Creada</th>
+          {% if current_jugador and current_jugador.is_admin %}
+            <th style="width:220px;">Acciones</th>
+          {% endif %}
+        </tr>
       </thead>
       <tbody>
         {% for c in categorias %}
           <tr>
             <td>{{ c.nombre }}</td>
             <td>{{ c.puntos_min }} – {{ c.puntos_max }}</td>
-            <td>{{ c.creada_en.strftime('%Y-%m-%d %H:%M') }}</td>
-            {# Alternativa con tu filtro: {{ c.creada_en|localdt('%Y-%m-%d %H:%M') }} #}
+            <td>{{ c.creada_en|localdt('%Y-%m-%d %H:%M') }}</td>
+            {# Alternativa con tu filtro anterior:
+               {{ c.creada_en.strftime('%Y-%m-%d %H:%M') }} #}
+
+            {% if current_jugador and current_jugador.is_admin %}
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <a href="{{ url_for('categorias_edit', cat_id=c.id) }}" class="btn btn-ghost btn-slim">✏️ Editar</a>
+
+                  <form method="post"
+                        action="{{ url_for('categorias_delete', cat_id=c.id) }}"
+                        onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}? Esta acción no se puede deshacer.');"
+                        style="display:inline;">
+                    <button type="submit" class="btn btn-danger btn-slim">🗑 Eliminar</button>
+                  </form>
+                </div>
+              </td>
+            {% endif %}
           </tr>
         {% endfor %}
       </tbody>
