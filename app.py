@@ -1,11 +1,16 @@
 import os
-from datetime import datetime, timedelta, timezone 
+import logging
+import smtplib, ssl
+from email.message import EmailMessage
+from datetime import datetime, timedelta, timezone
+
+from functools import wraps
+from zoneinfo import ZoneInfo
+
 from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-from functools import wraps
-from zoneinfo import ZoneInfo
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -27,6 +32,38 @@ app.config['SQLALCHEMY_DATABASE_URI'] = DB_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+def send_mail(subject: str, body: str, to: list[str]) -> bool:
+    host = os.getenv("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER")
+    pwd  = os.getenv("SMTP_PASS")
+    sender = os.getenv("SMTP_FROM", user)
+
+    if not (host and port and user and pwd and sender and to):
+        log.warning("SMTP: faltan variables. host=%s port=%s user=%s sender=%s to=%s",
+                    host, port, user, sender, to)
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join([t.strip() for t in to if t.strip()])
+    msg.set_content(body)
+
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(host, port, timeout=12) as s:
+            s.ehlo()
+            s.starttls(context=ctx)
+            s.ehlo()
+            s.login(user, pwd)
+            s.send_message(msg)
+        log.info("SMTP: enviado a %s", msg["To"])
+        return True
+    except Exception as e:
+        log.exception("SMTP: fallo el envio: %s", e)
+        return False
 
 
 def get_or_404(model, pk):
@@ -719,7 +756,7 @@ def alta_publica():
             flash('Ya hay una solicitud pendiente con ese email. Te contactaremos pronto.', 'ok')
             return redirect(url_for('alta_publica'))
 
-        # NUEVO: ya existe un jugador con ese email (activo o inactivo)
+        # Ya existe un jugador con ese email (activo o inactivo)
         existe_jugador = db.session.query(Jugador).filter(Jugador.email == email).first()
         if existe_jugador:
             flash('Ese email ya está registrado como jugador. Probá iniciar sesión o contactá al organizador.', 'error')
@@ -736,11 +773,53 @@ def alta_publica():
         )
         db.session.add(s)
         db.session.commit()
+
+        # ==== NUEVO: Aviso por email a administradores ====
+        try:
+            host = os.getenv('SMTP_HOST')
+            port = int(os.getenv('SMTP_PORT', '587'))
+            user = os.getenv('SMTP_USER')
+            pwd  = os.getenv('SMTP_PASS')
+            from_addr = os.getenv('SMTP_FROM') or (user or '')
+            admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
+
+            if host and user and pwd and admin_emails:
+                msg = EmailMessage()
+                msg['Subject'] = f'Nueva solicitud de alta: {nombre}'
+                msg['From'] = from_addr or user
+                msg['To'] = ', '.join(admin_emails)
+
+                # Info adicional útil
+                ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
+                body = (
+                    "Se recibió una nueva solicitud de ALTA.\n\n"
+                    f"Nombre:   {nombre}\n"
+                    f"Email:    {email}\n"
+                    f"Teléfono: {telefono}\n"
+                    f"Categoría solicitada: {cat.nombre} (id {cat.id})\n"
+                    f"Mensaje:  {mensaje or '-'}\n"
+                    f"Fecha/Hora (AR): {ahora_ar}\n\n"
+                    "Revisar en: /admin/solicitudes"
+                )
+                msg.set_content(body)
+
+                context = ssl.create_default_context()
+                with smtplib.SMTP(host, port, timeout=20) as server:
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.login(user, pwd)
+                    server.send_message(msg)
+            else:
+                logging.warning('SMTP no configurado o ADMIN_EMAILS vacío; no se envía aviso de alta.')
+        except Exception:
+            logging.exception('Fallo enviando email de notificación de nueva solicitud de alta.')
+
         flash('Solicitud enviada. Un administrador la revisará.', 'ok')
         return redirect(url_for('home'))
 
     # GET
     return render_template('alta_form.html', categorias=categorias)
+
 
 from functools import wraps
 from flask import session, flash, redirect, url_for
