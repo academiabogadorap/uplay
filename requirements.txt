@@ -1,0 +1,12 @@
+Flask>=3.0
+gunicorn>=21.2
+Jinja2>=3.1
+Werkzeug>=3.0
+itsdangerous>=2.1
+
+# ORM / DB
+SQLAlchemy>=2.0
+Flask-SQLAlchemy>=3.1
+
+# Env vars (recomendado para Render)
+python-dotenv>=1.0

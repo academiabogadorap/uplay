@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}{% endblock %}
+{% block content %}
+  <h2>{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}</h2>
+
+  <form method="post" action="{{ request.path }}" style="max-width:520px;">
+    <label>Nombre completo</label>
+    <input name="nombre_completo" required value="{{ jugador.nombre_completo if jugador else '' }}">
+
+    <label>Email (opcional)</label>
+    <input name="email" type="email" value="{{ jugador.email if jugador else '' }}">
+
+    <label>Teléfono (opcional)</label>
+    <input name="telefono" value="{{ jugador.telefono if jugador else '' }}">
+
+    <label>Puntos</label>
+    <input name="puntos" required type="number" value="{{ jugador.puntos if jugador else '' }}">
+
+    <label>Categoría</label>
+    <select name="categoria_id" required>
+      <option value="">-- Elegí categoría --</option>
+      {% for c in categorias %}
+        <option value="{{ c.id }}" {% if jugador and jugador.categoria_id == c.id %}selected{% endif %}>
+          {{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})
+        </option>
+      {% endfor %}
+    </select>
+
+    <!-- PIN: asignar al crear o cambiar al editar -->
+    <label>PIN (4–6 dígitos)</label>
+    <input name="pin" type="password" placeholder="{{ 'Dejar vacío para mantener' if jugador else 'Ej: 1234' }}">
+
+    {% if current_jugador and current_jugador.is_admin and jugador %}
+      <label style="margin-top:8px;">
+        <input type="checkbox" name="is_admin" value="1" {% if jugador.is_admin %}checked{% endif %}>
+        Administrador
+      </label>
+    {% endif %}
+
+    <div style="margin-top:10px;">
+      <button type="submit">{{ 'Guardar cambios' if jugador else 'Crear jugador' }}</button>
+      <a href="{{ url_for('jugadores_list') }}" style="margin-left:8px;">Cancelar</a>
+    </div>
+  </form>
+
+  {% if jugador %}
+    <p style="margin-top:10px; color:#666;">
+      Tip: si no querés cambiar el PIN, dejá el campo vacío.
+    </p>
+  {% endif %}
+{% endblock %}

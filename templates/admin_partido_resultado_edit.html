@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Editar resultado{% endblock %}
+{% block content %}
+  <h2>Editar resultado — Partido #{{ partido.id }}</h2>
+
+  <p>
+    Categoría: <strong>{{ partido.categoria.nombre if partido.categoria else '-' }}</strong><br>
+    Pareja 1: <strong>{{ p1.jugador1.nombre_completo }} + {{ p1.jugador2.nombre_completo }}</strong><br>
+    Pareja 2: <strong>{{ p2.jugador1.nombre_completo }} + {{ p2.jugador2.nombre_completo }}</strong><br>
+    Estado actual: <strong>{{ partido.estado }}</strong>
+  </p>
+
+  <div style="display:grid; grid-template-columns: 1fr; gap:12px; max-width:560px;">
+    <form method="post" style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 8px;">Actualizar resultado</h3>
+
+      <label>Ganador</label>
+      <select name="ganador_pareja_id" required>
+        <option value="">-- Elegí ganador --</option>
+        <option value="{{ p1.id }}"
+          {% if partido.resultado and partido.resultado.ganador_pareja_id == p1.id %}selected{% endif %}>
+          {{ p1.jugador1.nombre_completo }} + {{ p1.jugador2.nombre_completo }}
+        </option>
+        <option value="{{ p2.id }}"
+          {% if partido.resultado and partido.resultado.ganador_pareja_id == p2.id %}selected{% endif %}>
+          {{ p2.jugador1.nombre_completo }} + {{ p2.jugador2.nombre_completo }}
+        </option>
+      </select>
+
+      <label>Sets (opcional)</label>
+      <input name="sets_text" placeholder="Ej: 6-4 3-6 10-7"
+             value="{{ partido.resultado.sets_text if partido.resultado else '' }}">
+
+      <div style="margin-top:8px;">
+        <button type="submit" name="action" value="update">Guardar cambios</button>
+        <a href="{{ url_for('partidos_list') }}" style="margin-left:8px;">Cancelar</a>
+      </div>
+    </form>
+
+    <form method="post" style="border:1px solid #f3caca; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 8px; color:#a33;">Reabrir partido</h3>
+      <p style="margin:0 0 8px;">Esto borra el resultado (si lo hay) y pasa el partido a <strong>PENDIENTE</strong>.<br>
+      <em>Atención:</em> los puntos NO se recalculan automáticamente.</p>
+      <button type="submit" name="action" value="reopen" onclick="return confirm('¿Reabrir este partido?')">Reabrir</button>
+    </form>
+  </div>
+{% endblock %}

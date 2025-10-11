@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Responder invitación{% endblock %}
+{% block content %}
+
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Responder invitación</h2>
+  </div>
+
+  <!-- Resumen del partido -->
+  <div class="card" style="margin-bottom:10px;">
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+      <div>
+        <div class="muted">Rivales propuestos</div>
+        <strong>
+          {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
+        </strong>
+      </div>
+
+      <div style="flex:1"></div>
+
+      <div>
+        {% if partido.categoria %}
+          <span class="badge" title="Categoría">{{ partido.categoria.nombre }}</span>
+        {% endif %}
+        {% if partido.fecha %}
+          <span class="badge" title="Fecha">{{ partido.fecha.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% endif %}
+        <span class="badge badge-warn" title="Estado">PENDIENTE</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tu lado -->
+  <div class="card" style="max-width:720px;">
+    <div style="margin-bottom:8px;">
+      <div class="muted" style="margin-bottom:4px;">Tu lado</div>
+      {% if mi_compa %}
+        <div><strong>Vos + {{ mi_compa.nombre_completo }}</strong></div>
+      {% else %}
+        <div><strong>Vos</strong> + <span class="muted">(elegí un compañero)</span></div>
+      {% endif %}
+    </div>
+
+    <form method="post">
+      {# --- Selector de compañero --- #}
+      {% if mi_compa %}
+        <div class="card" style="padding:8px; margin:8px 0;">
+          <label style="display:inline-flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="toggle-cambiar"
+                   onclick="document.getElementById('cambiar-box').style.display=this.checked?'block':'none'">
+            Quiero cambiar de compañero
+          </label>
+
+          <div id="cambiar-box" style="display:none; margin-top:8px;">
+            <label for="partner_id" class="muted">Elegí nuevo compañero (misma categoría):</label><br>
+            <select id="partner_id" name="partner_id" style="min-width:260px;">
+              <option value="{{ mi_compa.id }}">Mantener: {{ mi_compa.nombre_completo }}</option>
+              {% for it in opciones_companero %}
+                {% if it.id != mi_compa.id %}
+                  <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+            <p class="muted" style="margin:6px 0 0; font-size:.92em;">
+              Si cambiás, el nuevo compañero deberá aceptar la invitación.
+            </p>
+          </div>
+        </div>
+      {% else %}
+        <div style="margin:6px 0;">
+          <label for="partner_id" class="muted">Elegí compañero (misma categoría):</label><br>
+          <select id="partner_id" name="partner_id" required style="min-width:260px;">
+            <option value="">— Seleccionar —</option>
+            {% for it in opciones_companero %}
+              <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button name="accion" value="aceptar" type="submit" class="btn btn-ok">Aceptar</button>
+        <button name="accion" value="rechazar" type="submit" class="btn btn-danger">Rechazar</button>
+        <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Cancelar</a>
+      </div>
+    </form>
+  </div>
+
+  {% if yo_acepto is true %}
+    <div class="card" style="margin-top:10px; border-color:#a5d8ff; background:#e7f5ff; color:#0b7285;">
+      Ya aceptaste esta invitación. Si cambiaste de compañero, quedará pendiente su aceptación.
+    </div>
+  {% elif yo_acepto is false %}
+    <div class="card" style="margin-top:10px; border-color:#ffe69c; background:#fff3cd; color:#664d03;">
+      Rechazaste esta invitación.
+    </div>
+  {% endif %}
+
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Proponer resultado{% endblock %}
+{% block content %}
+  <h2>Proponer resultado</h2>
+
+  <p><strong>Categoría:</strong> {{ partido.categoria.nombre if partido.categoria else '-' }}</p>
+  <p>
+    <strong>Pareja 1:</strong> {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}<br>
+    <strong>Pareja 2:</strong> {{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}
+  </p>
+
+  <form method="post">
+    <label>Pareja ganadora</label>
+    <div>
+      <label>
+        <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja1.id }}" required>
+        {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
+      </label>
+    </div>
+    <div>
+      <label>
+        <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja2.id }}" required>
+        {{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}
+      </label>
+    </div>
+
+    <label>Marcador (opcional)</label>
+    <input type="text" name="sets_text" placeholder="Ej: 6-4 3-6 10-7">
+
+    <button type="submit">Proponer resultado</button>
+  </form>
+
+  <div style="margin-top:10px; font-size:.95em; color:#444;">
+    <p>
+      <em>* Esto es una propuesta.</em> El partido quedará <strong>PENDIENTE</strong> con
+      <strong>resultado propuesto</strong> hasta que la otra pareja lo <strong>confirme</strong>.
+    </p>
+    <p>
+      Al confirmarse por ambas parejas, se actualizan los <strong>puntos individuales</strong>:
+      ganadores −10, perdedores +5, limitados al rango de la categoría
+      (no bajan de {{ partido.categoria.puntos_min }} ni suben de {{ partido.categoria.puntos_max }}).
+    </p>
+  </div>
+{% endblock %}

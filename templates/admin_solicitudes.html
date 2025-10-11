@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Solicitudes de alta{% endblock %}
+{% block content %}
+  <h2>Solicitudes de alta</h2>
+
+  <h3 style="margin-top:6px;">Pendientes</h3>
+  {% if pendientes %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Contacto</th>
+          <th>Categoría</th>
+          <th>Mensaje</th>
+          <th>Creada</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in pendientes %}
+          <tr>
+            <td>{{ s.nombre_completo }}</td>
+            <td>
+              {% if s.email %}📧 {{ s.email }}{% endif %}
+              {% if s.telefono %}<br>📱 {{ s.telefono }}{% endif %}
+            </td>
+            <td>{{ s.categoria.nombre if s.categoria else '-' }}</td>
+            <td>{{ s.mensaje or '—' }}</td>
+            <td>{{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td class="actions">
+              <a href="{{ url_for('admin_solicitudes_aprobar', sid=s.id) }}">Aprobar</a>
+              <form method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=s.id) }}" style="display:inline;">
+                <button type="submit">Rechazar</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No hay pendientes.</p>
+  {% endif %}
+
+  <h3 style="margin-top:12px;">Historial (últimas 50)</h3>
+  {% if historial %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Categoría</th>
+          <th>Estado</th>
+          <th>Creada</th>
+          <th>Resuelta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in historial %}
+          <tr>
+            <td>{{ s.nombre_completo }}</td>
+            <td>{{ s.categoria.nombre if s.categoria else '-' }}</td>
+            <td>{{ s.estado }}</td>
+            <td>{{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ s.resuelto_en.strftime('%Y-%m-%d %H:%M') if s.resuelto_en else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Sin historial aún.</p>
+  {% endif %}
+{% endblock %}

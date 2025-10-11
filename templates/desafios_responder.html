@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Responder desafío{% endblock %}
+{% block content %}
+  <h2>Responder desafío</h2>
+
+  <div style="border:1px solid #ddd; padding:10px; border-radius:8px; max-width:760px;">
+    <p style="margin:0 0 8px;">
+      Te desafiaron como rival en <strong>{{ desafio.categoria_superior.nombre if desafio.categoria_superior else '-' }}</strong>.
+    </p>
+    <p style="margin:0 0 8px;">
+      Desafían: <strong>{{ desafio.desafiante.nombre_completo }}</strong> + <strong>{{ desafio.companero.nombre_completo }}</strong><br>
+      Rivales propuestos: <strong>{{ desafio.rival1.nombre_completo }}</strong> + <strong>{{ desafio.rival2.nombre_completo }}</strong>
+    </p>
+
+    <h3 style="margin:8px 0;">Tus opciones</h3>
+
+    <!-- Aceptar tal cual -->
+    <form method="post" style="margin-bottom:10px;">
+      <input type="hidden" name="accion" value="aceptar">
+      <button type="submit">Aceptar (con el compañero propuesto)</button>
+    </form>
+
+    <!-- Aceptar eligiendo compañero -->
+    <form method="post" style="margin-bottom:10px;">
+      <input type="hidden" name="accion" value="aceptar">
+      <label>O aceptar eligiendo tu compañero (de {{ cat_superior_nombre }}):</label>
+      <select name="compa_nuevo_id">
+        <option value="">— Elegí tu compañero —</option>
+        {% for j in candidatos_compa %}
+          <option value="{{ j.id }}">{{ j.nombre_completo }} — {{ j.puntos }} pts</option>
+        {% endfor %}
+      </select>
+      <button type="submit" style="margin-left:6px;">Aceptar con mi compañero</button>
+    </form>
+
+    <!-- Rechazar -->
+    <form method="post">
+      <input type="hidden" name="accion" value="rechazar">
+      <button type="submit" onclick="return confirm('¿Seguro que querés rechazar este desafío?')">Rechazar</button>
+    </form>
+  </div>
+
+{% endblock %}

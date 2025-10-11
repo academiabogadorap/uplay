@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block content %}
+
+  <style>
+    /* ===== Marca UPLAY + tagline ===== */
+    .hero-head{
+      display:flex; align-items:flex-end; justify-content:space-between;
+      gap:10px; margin-bottom:8px; flex-wrap:wrap;
+    }
+    .brand{
+      display:flex; flex-direction:column; gap:2px; min-width:220px;
+    }
+    .brand-title{
+      margin:0;
+      font-weight:800;
+      letter-spacing:.3px;
+      font-size:clamp(1.15rem, 3.2vw, 1.6rem);
+      line-height:1.1;
+      display:flex; align-items:center; gap:8px;
+    }
+    .brand-tag{
+      margin:0;
+      text-transform:uppercase;
+      font-weight:800;
+      letter-spacing:.14em;
+      line-height:1;
+      font-size:clamp(.78rem, 1.6vw, .92rem);
+      /* Degradado de acento */
+      background: linear-gradient(90deg, #6EA8FF, #22C55E);
+      -webkit-background-clip:text;
+      background-clip:text;
+      color:transparent;
+      /* Sutil realce para fondos oscuros */
+      filter: drop-shadow(0 0 0.15em rgba(0,0,0,.25));
+      opacity:.95;
+    }
+    @media (max-width:520px){
+      .hero-head{ align-items:flex-start; }
+    }
+  </style>
+
+  <div class="hero-head">
+    {% if current_jugador %}
+      <a href="{{ url_for('mi_panel') }}" class="btn btn-ghost">Ir a Mi panel</a>
+    {% endif %}
+  </div>
+
+  {% if current_jugador %}
+    <div class="card" style="max-width:980px;">
+      <p style="margin:0;">
+        Hola, <strong>{{ current_jugador.nombre_completo }}</strong>.
+        Categoría: <strong>{{ current_jugador.categoria.nombre if current_jugador.categoria else '-' }}</strong>,
+        Puntos: <strong>{{ current_jugador.puntos }}</strong>.
+        {% if en_zona %}
+          <span class="badge badge-ok">En zona de ascenso</span>
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="grid-cards" style="margin-top:10px;">
+      <div class="card">
+        <h3 style="margin:0 0 6px;">Mi panel</h3>
+        <p class="muted">Acciones rápidas y próximos partidos.</p>
+        <a href="{{ url_for('mi_panel') }}" class="btn">Abrir Mi panel</a>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 6px;">Crear partido abierto</h3>
+        <p class="muted">Armá un partido en tu categoría y compartí el link.</p>
+        <form method="post" action="{{ url_for('abiertos_new') }}" style="display:grid; gap:8px;">
+          <input type="hidden" name="categoria_id" value="{{ current_jugador.categoria_id }}">
+          <input type="hidden" name="creador_id" value="{{ current_jugador.id }}">
+          <input name="nota" placeholder="Ej: hoy 20:00 en Club X">
+          <button type="submit" class="btn">Crear</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 6px;">Unirme a un partido</h3>
+        <p class="muted">Ver partidos abiertos en tu categoría.</p>
+        <a href="{{ url_for('abiertos_list') }}" class="btn">Ver abiertos</a>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 6px;">Ranking</h3>
+        <p class="muted">Jugadores ordenados por nivel.</p>
+        <a href="{{ url_for('ranking') }}" class="btn">Ver ranking</a>
+      </div>
+    </div>
+
+  {% else %}
+    <div class="card" style="max-width:980px;">
+      <p style="margin:0;">
+        Podés <strong>iniciar sesión</strong> para crear o unirte a partidos, o ver el <strong>ranking</strong>.
+      </p>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+        <a href="{{ url_for('login') }}" class="btn">Iniciar sesión</a>
+        <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Ver ranking</a>
+        <a href="{{ url_for('categorias_list') }}" class="btn btn-ghost">Categorías</a>
+        <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost">Jugadores</a>
+        <a href="{{ url_for('abiertos_list') }}" class="btn btn-ghost">Partidos abiertos</a>
+      </div>
+    </div>
+
+    <div class="card" style="border-style:dashed; margin-top:10px; max-width:980px;">
+      <h3 style="margin:0 0 6px;">¿Primera vez?</h3>
+      <ol style="margin:0; padding-left:18px;">
+        <li>Pedí al organizador que te dé de alta (o te cree con un PIN).</li>
+        <li>Entrá por <em>Iniciar sesión</em> con tu nombre y PIN.</li>
+        <li>Creá un <strong>partido abierto</strong> en tu categoría o unite a uno existente.</li>
+        <li>Jugá y luego cargá el resultado para sumar al ranking.</li>
+      </ol>
+    </div>
+  {% endif %}
+
+  <div style="margin-top:12px;">
+    <h3 style="margin:0 0 6px;">Atajos útiles</h3>
+    <div style="display:flex; flex-wrap:wrap; gap:10px;">
+      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Partidos</a>
+      <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost">Desafíos</a>
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block help_content %}
+<style>
+  /* ==== Modal de ayuda: contenedor BAJO y único scroll en el contenedor ==== */
+  .help-container{
+    display:flex; justify-content:center; width:100%;
+  }
+  .help-wrap{
+    width: min(800px, 90vw);
+    margin: 0 auto;
+
+    /* << ALTURA MÁS BAJA + SCROLL EN EL CONTENEDOR >> */
+    max-height: 62dvh;   /* bajar si tu modal padre ocupa más: 60dvh/58dvh */
+    max-height: 62vh;    /* fallback */
+    overflow: auto;      /* único scroll */
+    overscroll-behavior: contain;
+
+    position: relative;
+    background: transparent;
+  }
+
+  /* Header sticky (ocupa poco) */
+  .help-head{
+    position: sticky; top: 0; z-index: 2;
+    display:flex; align-items:center; gap:6px;
+    padding:6px 6px; margin-bottom:4px;
+    background: var(--bg, rgba(10,12,20,.96));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .help-title{ margin:0; font-size: clamp(.9rem, 2vw, 1rem); }
+  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.76rem, 1.6vw, .86rem); }
+
+  /* Grid simple y liviano, sin otros scrolls */
+  .help-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+    gap:8px;
+  }
+
+  .help-card{
+    background: rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:6px;
+  }
+  .help-card h4{
+    display:flex; align-items:center; gap:6px;
+    margin:0 0 4px;
+    font-size: clamp(.86rem, 1.8vw, .94rem);
+  }
+  .help-card p, .help-card li{
+    margin:3px 0;
+    font-size: clamp(.76rem, 1.5vw, .84rem);
+    line-height:1.28;
+  }
+  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+
+  .chip{ display:inline-block; padding:2px 6px; border-radius:999px; font-size:.74rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
+  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
+  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
+  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
+
+  .help-visual{
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(255,255,255,.03);
+    border:1px dashed rgba(255,255,255,.12);
+    border-radius:10px; padding:6px;
+  }
+
+  /* Evitar desbordes de SVG/imagenes en layouts angostos */
+  .help-visual svg, .help-card img{
+    max-width:100%; height:auto; display:block;
+  }
+
+  @media (max-width:540px){
+    .help-grid{ grid-template-columns: 1fr; }
+    .help-card h4 svg{ display:none; }
+  }
+</style>
+
+<div class="help-container">
+  <div class="help-wrap">
+    <div class="help-head">
+      <h3 class="help-title">Bienvenido a UPLAY</h3>
+      <p class="help-sub">Guía rápida y visual</p>
+    </div>
+
+    <div class="help-grid">
+      <!-- Qué es UPLAY -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" stroke="currentColor"/>
+            <circle cx="12" cy="12" r="2" fill="currentColor"/>
+          </svg>
+          ¿Qué es UPLAY?
+        </h4>
+        <p>Plataforma para crear <strong>partidos abiertos</strong>, gestionar <strong>desafíos</strong> inter-nivel y llevar <strong>ranking</strong>.</p>
+        <div>
+          <span class="chip info">Partidos</span>
+          <span class="chip ok">Desafíos</span>
+          <span class="chip warn">Ranking</span>
+        </div>
+      </section>
+
+      {% if not current_jugador %}
+        <!-- No logueado -->
+        <section class="help-card">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h8" stroke="currentColor"/></svg>
+            Primeros pasos
+          </h4>
+          <ol class="help-ol">
+            <li>Pedí alta al organizador y tu <strong>PIN</strong>.</li>
+            <li>Ingresá por <em>Iniciar sesión</em> (nombre + PIN).</li>
+            <li>Andá a <strong>Partidos abiertos</strong> para unirte o crear uno.</li>
+            <li>Jugá y <strong>cargá el resultado</strong> para sumar puntos.</li>
+          </ol>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+            <a href="{{ url_for('login') }}" class="btn btn-ghost btn-slim">Iniciar sesión</a>
+            <a href="{{ url_for('abiertos_list') }}" class="btn btn-ghost btn-slim">Partidos abiertos</a>
+          </div>
+        </section>
+      {% endif %}
+
+      {% if current_jugador %}
+        <!-- Logueado -->
+        <section class="help-card">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
+            Acciones rápidas
+          </h4>
+          <ul class="help-ul">
+            <li><strong>Mi panel</strong>: próximos partidos y accesos.</li>
+            <li><strong>Crear abierto</strong>: invitá a tu categoría.</li>
+            <li><strong>Ver abiertos</strong>: unite y elegí compañero.</li>
+            <li><strong>Ranking</strong>: posiciones y puntos.</li>
+          </ul>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <a href="{{ url_for('mi_panel') }}" class="btn btn-ghost btn-slim">🏠 Mi panel</a>
+            <a href="{{ url_for('abiertos_list') }}" class="btn btn-ghost btn-slim">🎾 Ver abiertos</a>
+            <a href="{{ url_for('ranking') }}" class="btn btn-ghost btn-slim">📈 Ranking</a>
+          </div>
+        </section>
+
+        <section class="help-card">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12h6l2-3 2 6 2-3h4" stroke="currentColor"/></svg>
+            Flujo de juego
+          </h4>
+          <ol class="help-ol">
+            <li>Creás o te unís a un <strong>abierto</strong>.</li>
+            <li>Son 4 jugadores → <em>Armar partido</em>.</li>
+            <li>Jugás y se <strong>carga el resultado</strong>.</li>
+            <li>El sistema <strong>actualiza el ranking</strong>.</li>
+          </ol>
+        </section>
+      {% endif %}
+
+      <!-- Visual -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
+          Mapa visual
+        </h4>
+        <div class="help-visual">
+          <svg width="248" height="116" viewBox="0 0 300 140" aria-hidden="true">
+            <rect x="10" y="10" width="120" height="44" rx="8" fill="#0f172a" stroke="rgba(255,255,255,.12)"/>
+            <text x="70" y="36" fill="#fff" font-size="12" text-anchor="middle">Mi panel</text>
+
+            <rect x="160" y="10" width="120" height="44" rx="8" fill="#0f172a" stroke="rgba(255,255,255,.12)"/>
+            <text x="220" y="36" fill="#fff" font-size="12" text-anchor="middle">Abiertos</text>
+
+            <rect x="10" y="76" width="120" height="44" rx="8" fill="#0f172a" stroke="rgba(255,255,255,.12)"/>
+            <text x="70" y="102" fill="#fff" font-size="12" text-anchor="middle">Desafíos</text>
+
+            <rect x="160" y="76" width="120" height="44" rx="8" fill="#0f172a" stroke="rgba(255,255,255,.12)"/>
+            <text x="220" y="102" fill="#fff" font-size="12" text-anchor="middle">Ranking</text>
+
+            <path d="M130 32h18" stroke="#eab308" stroke-width="2"/>
+            <path d="M148 32l-6-4v8l6-4z" fill="#eab308"/>
+
+            <path d="M70 54v14" stroke="#eab308" stroke-width="2"/>
+            <path d="M70 68l4-6h-8l4 6z" fill="#eab308"/>
+
+            <path d="M220 54v14" stroke="#eab308" stroke-width="2"/>
+            <path d="M220 68l4-6h-8l4 6z" fill="#eab308"/>
+          </svg>
+        </div>
+        <p class="muted" style="margin-top:4px;">Navegá entre Mi panel, Abiertos, Desafíos y Ranking.</p>
+      </section>
+
+      {% if current_jugador and current_jugador.is_admin %}
+        <!-- Atajos admin -->
+        <section class="help-card">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12H6z" stroke="currentColor"/></svg>
+            Atajos de administración
+          </h4>
+          <ul class="help-ul">
+            <li><strong>Categorías</strong>: crear/ajustar rangos.</li>
+            <li><strong>Jugadores</strong>: altas/edición de puntos.</li>
+            <li><strong>Partidos/Desafíos</strong>: moderar y cerrar.</li>
+          </ul>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <a href="{{ url_for('categorias_list') }}" class="btn btn-ghost btn-slim">🗂 Categorías</a>
+            <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost btn-slim">👥 Jugadores</a>
+            <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">📋 Partidos</a>
+            <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost btn-slim">⚔️ Desafíos</a>
+          </div>
+        </section>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

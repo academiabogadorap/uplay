@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Panel Admin{% endblock %}
+{% block content %}
+  <h2>Panel de administrador</h2>
+
+  <div style="display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:12px 0;">
+
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Jugadores</h3>
+      <p>Activos: <strong>{{ counts.jugadores_activos }}</strong></p>
+      <p>Inactivos: <strong>{{ counts.jugadores_inactivos }}</strong></p>
+      <a href="{{ url_for('jugadores_list') }}"><button>Gestionar</button></a>
+    </div>
+
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Categorías</h3>
+      <p>Total: <strong>{{ counts.categorias }}</strong></p>
+      <a href="{{ url_for('categorias_list') }}"><button>Ver/Editar</button></a>
+    </div>
+
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Partidos</h3>
+      <p>Pendientes: <strong>{{ counts.partidos_pend }}</strong></p>
+      <p>Jugados: <strong>{{ counts.partidos_jug }}</strong></p>
+      <a href="{{ url_for('partidos_list') }}"><button>Ver todos</button></a>
+    </div>
+
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Partidos abiertos</h3>
+      <p>Abiertos/llenos: <strong>{{ counts.abiertos }}</strong></p>
+      <a href="{{ url_for('abiertos_list') }}"><button>Gestionar</button></a>
+    </div>
+
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Desafíos</h3>
+      <p>Pendientes/Aceptados: <strong>{{ counts.desafios_pend }}</strong></p>
+      <a href="{{ url_for('desafios_list') }}"><button>Ver lista</button></a>
+    </div>
+
+    <!-- NUEVO: Solicitudes de alta -->
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Solicitudes de alta</h3>
+      <p>Pendientes: <strong>{{ counts.solicitudes_pend }}</strong></p>
+      <a href="{{ url_for('admin_solicitudes_list') }}"><button>Revisar</button></a>
+    </div>
+
+  </div>
+
+  <div style="border:1px solid #ddd; padding:10px; border-radius:8px; margin-top:8px;">
+    <h3 style="margin:0 0 6px;">Actividad reciente</h3>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div>
+        <h4 style="margin:0 0 6px;">Últimos partidos</h4>
+        {% if recientes_partidos %}
+          <ul style="margin:0; padding-left:18px;">
+            {% for m in recientes_partidos %}
+              <li>#{{ m.id }} — {{ m.categoria.nombre if m.categoria else '-' }} — {{ m.estado }}
+                {% if m.fecha %} — {{ m.fecha.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>Sin partidos recientes.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px;">Últimos abiertos</h4>
+        {% if recientes_abiertos %}
+          <ul style="margin:0; padding-left:18px;">
+            {% for pa in recientes_abiertos %}
+              <li>#{{ pa.id }} — {{ pa.categoria.nombre if pa.categoria else '-' }} — {{ pa.estado }} — Inscriptos: {{ pa.inscriptos|length }}/4</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>Sin abiertos recientes.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

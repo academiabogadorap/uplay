@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Nueva pareja{% endblock %}
+{% block content %}
+  <h2>Nueva pareja</h2>
+  <form method="post">
+    <label>Categoría</label>
+    <select name="categoria_id" required>
+      <option value="">-- Elegí una categoría --</option>
+      {% for c in categorias %}
+        <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
+      {% endfor %}
+    </select>
+
+    <label>Jugador 1</label>
+    <select name="jugador1_id" required>
+      <option value="">-- Elegí jugador 1 --</option>
+      {% for j in jugadores %}
+        <option value="{{ j.id }}">{{ j.nombre_completo }} — {{ j.categoria.nombre if j.categoria else 'sin cat' }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Jugador 2</label>
+    <select name="jugador2_id" required>
+      <option value="">-- Elegí jugador 2 --</option>
+      {% for j in jugadores %}
+        <option value="{{ j.id }}">{{ j.nombre_completo }} — {{ j.categoria.nombre if j.categoria else 'sin cat' }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit">Crear pareja</button>
+  </form>
+
+  <p style="margin-top:8px;">
+    * Validamos que ambos jugadores pertenezcan a la <strong>misma categoría</strong> elegida.<br>
+    * La pareja inicia con el <strong>tope máximo</strong> del rango de esa categoría.
+  </p>
+{% endblock %}

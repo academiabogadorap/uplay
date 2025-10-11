@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Parejas{% endblock %}
+{% block content %}
+  <h2>Parejas</h2>
+  <p><a href="{{ url_for('parejas_new') }}"><button>Nueva pareja</button></a></p>
+
+  {% if parejas and parejas|length > 0 %}
+    <table>
+      <thead>
+        <tr>
+          <th>Categoría</th>
+          <th>Jugadores</th>
+          <th>Promedio individual</th>
+          <th>Ascensos (vs superior)</th>
+          <th>Descensos (vs inferior)</th>
+          <th>Creada</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in parejas %}
+          <tr>
+            <td>{{ p.categoria.nombre if p.categoria else '-' }}</td>
+            <td>{{ p.jugador1.nombre_completo }} + {{ p.jugador2.nombre_completo }}</td>
+            <td>{{ ((p.jugador1.puntos + p.jugador2.puntos) // 2) if p.jugador1 and p.jugador2 else '-' }}</td>
+            <td>{{ p.victorias_vs_superior }}</td>
+            <td>{{ p.derrotas_vs_inferior }}</td>
+            <td>{{ p.creada_en.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Todavía no hay parejas creadas.</p>
+  {% endif %}
+{% endblock %}

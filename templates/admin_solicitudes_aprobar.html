@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Aprobar solicitud{% endblock %}
+{% block content %}
+  <h2>Aprobar solicitud</h2>
+
+  <div style="border:1px solid #ddd; padding:10px; border-radius:8px; max-width:620px;">
+    <p><strong>{{ sol.nombre_completo }}</strong></p>
+    <p>
+      {% if sol.email %}📧 {{ sol.email }}{% endif %}
+      {% if sol.telefono %}<br>📱 {{ sol.telefono }}{% endif %}
+    </p>
+    <p>Categoría solicitada: <strong>{{ sol.categoria.nombre if sol.categoria else '-' }}</strong></p>
+    {% if sol.mensaje %}<p>Mensaje: <em>{{ sol.mensaje }}</em></p>{% endif %}
+
+    <form method="post">
+      <label>Puntos iniciales</label>
+      <input name="puntos" type="number" required value="{{ puntos_sugeridos }}">
+
+      <label>PIN (4–6 dígitos)</label>
+      <input name="pin" type="password" required placeholder="Ej: 1234">
+
+      <button type="submit">Crear jugador y aprobar</button>
+      <a href="{{ url_for('admin_solicitudes_list') }}" style="margin-left:8px;">Cancelar</a>
+    </form>
+  </div>
+{% endblock %}

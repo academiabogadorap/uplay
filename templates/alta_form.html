@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Solicitud de alta{% endblock %}
+
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Solicitud de alta</h2>
+    <a href="{{ url_for('login') }}" class="btn btn-ghost btn-slim">Volver a Iniciar sesión</a>
+  </div>
+
+  <div class="card" style="max-width:620px;">
+    <p class="muted" style="margin:0 0 8px;">
+      Completá tus datos y un administrador aprobará tu acceso.
+    </p>
+
+    <form method="post" style="display:grid; gap:10px;">
+      <div>
+        <label for="nombre_completo" class="muted" style="display:block; margin-bottom:4px;">Nombre completo</label>
+        <input id="nombre_completo" name="nombre_completo" required placeholder="Ej: Juan Pérez" style="width:100%;">
+      </div>
+
+      <div>
+        <label for="email" class="muted" style="display:block; margin-bottom:4px;">Email</label>
+        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" style="width:100%;" autocomplete="email">
+      </div>
+
+      <div>
+        <label for="telefono" class="muted" style="display:block; margin-bottom:4px;">Teléfono</label>
+        <input id="telefono" name="telefono" required placeholder="+54 9 11 1234-5678" style="width:100%;" inputmode="tel" autocomplete="tel">
+      </div>
+
+      <div>
+        <label for="categoria_id" class="muted" style="display:block; margin-bottom:4px;">Categoría</label>
+        <select id="categoria_id" name="categoria_id" required style="width:100%;">
+          <option value="">-- Elegí categoría --</option>
+          {% for c in categorias %}
+            <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="mensaje" class="muted" style="display:block; margin-bottom:4px;">Mensaje (opcional)</label>
+        <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." style="width:100%;">
+      </div>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+        <button type="submit" class="btn">Enviar solicitud</button>
+        <a href="{{ url_for('login') }}" class="btn btn-ghost">Cancelar</a>
+      </div>
+
+      <p class="muted" style="margin:6px 0 0; font-size:.92rem;">
+        Al enviar, aceptás que un administrador vea tus datos para validar el alta.
+      </p>
+    </form>
+  </div>
+{% endblock %}
+
+{% block help_content %}
+<style>
+  /* ==== Modal de ayuda compacto con scroll propio (alineado con otras páginas) ==== */
+  .help-container{ display:flex; justify-content:center; width:100%; }
+  .help-wrap{
+    width: min(800px, 90vw);
+    margin: 0 auto;
+
+    /* Altura reducida + scroll en el contenedor */
+    max-height: 62dvh;
+    max-height: 62vh;   /* fallback */
+    overflow: auto;
+    overscroll-behavior: contain;
+
+    position: relative;
+    background: transparent;
+  }
+
+  /* Header sticky y compacto */
+  .help-head{
+    position: sticky; top: 0; z-index: 2;
+    display:flex; align-items:center; gap:6px;
+    padding:6px 6px; margin-bottom:4px;
+    background: var(--bg, rgba(10,12,20,.96));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .help-title{ margin:0; font-size: clamp(.9rem, 2vw, 1rem); }
+  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.76rem, 1.6vw, .86rem); }
+
+  /* Grid */
+  .help-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+    gap:8px;
+  }
+
+  /* Cards */
+  .help-card{
+    background: rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:6px;
+  }
+  .help-card h4{
+    display:flex; align-items:center; gap:6px;
+    margin:0 0 4px;
+    font-size: clamp(.86rem, 1.8vw, .94rem);
+  }
+  .help-card p, .help-card li{
+    margin:3px 0;
+    font-size: clamp(.76rem, 1.5vw, .84rem);
+    line-height:1.28;
+  }
+  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+
+  .chip{ display:inline-block; padding:2px 6px; border-radius:999px; font-size:.74rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
+  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
+  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
+  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
+
+  .help-visual{
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(255,255,255,.03);
+    border:1px dashed rgba(255,255,255,.12);
+    border-radius:10px; padding:6px;
+  }
+
+  @media (max-width:540px){
+    .help-grid{ grid-template-columns: 1fr; }
+    .help-card h4 svg{ display:none; }
+  }
+</style>
+
+<div class="help-container">
+  <div class="help-wrap">
+    <div class="help-head">
+      <h3 class="help-title">Solicitud de alta — ayuda rápida</h3>
+      <p class="help-sub">Qué completar, qué pasa después y tips</p>
+    </div>
+
+    <div class="help-grid">
+      <!-- Qué estás solicitando -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"/>
+          </svg>
+          ¿Qué es esta solicitud?
+        </h4>
+        <p>Pedís acceso a UPLAY. Un admin revisará tus datos y te dará ingreso con un <strong>PIN</strong>.</p>
+        <div>
+          <span class="chip info">Datos personales</span>
+          <span class="chip ok">Validación</span>
+          <span class="chip warn">Aprobación</span>
+        </div>
+      </section>
+
+      <!-- Campos y cómo completarlos -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2v20M2 12h20" stroke="currentColor"/>
+          </svg>
+          Cómo completarlo
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Nombre completo</strong>: tal como querés figurar en ranking.</li>
+          <li><strong>Email</strong>: para contacto y avisos.</li>
+          <li><strong>Teléfono</strong>: con código de país (ej.: +54 9 …).</li>
+          <li><strong>Categoría</strong>: elegí la que te corresponde por nivel.</li>
+          <li><strong>Mensaje</strong>: datos útiles (días/horarios, club, nivel).</li>
+        </ul>
+      </section>
+
+      <!-- Qué pasa después -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M6 6h12v12H6z" stroke="currentColor"/>
+          </svg>
+          ¿Qué pasa luego?
+        </h4>
+        <ol class="help-ol">
+          <li>Un admin revisa tu solicitud.</li>
+          <li>Si todo está OK, te asignan un <strong>PIN</strong>.</li>
+          <li>Entrás por <em>Iniciar sesión</em> (nombre + PIN) y vas a <strong>Mi panel</strong>.</li>
+        </ol>
+      </section>
+
+      <!-- Privacidad -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor"/>
+          </svg>
+          Privacidad y cambios
+        </h4>
+        <ul class="help-ul">
+          <li>Solo admins ven tu solicitud.</li>
+          <li>Podés <strong>actualizar tu PIN</strong> luego desde <em>Editar jugador</em>.</li>
+          <li>Si te equivocaste de categoría, un admin puede corregirla.</li>
+        </ul>
+      </section>
+
+      <!-- Tips -->
+      <section class="help-card">
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5 20l2-7L1 9h7l4-7z" stroke="currentColor"/>
+          </svg>
+          Tips rápidos
+        </h4>
+        <ul class="help-ul">
+          <li>Si no sabés tu categoría, indicá tu nivel aproximado en el mensaje.</li>
+          <li>Dejá un teléfono que uses en WhatsApp para coordinar partidos.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+<svg width="36" height="36" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- Fondo sutil -->
+  <rect x="2" y="2" width="28" height="28" rx="8" fill="#0F172A"/>
+  <!-- U con flecha (curvas, sin texto) -->
+  <path d="M10 9v8a6 6 0 0 0 12 0v-2" stroke="#7DD97F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18 9h6v6" stroke="#6EA8FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17.5 13.5 24 9" stroke="#6EA8FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

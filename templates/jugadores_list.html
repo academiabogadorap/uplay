@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block title %}Jugadores{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Jugadores</h2>
+    {% if current_jugador and current_jugador.is_admin %}
+      <a href="{{ url_for('jugadores_new') }}" class="btn">Nuevo jugador</a>
+    {% endif %}
+  </div>
+
+  <!-- Filtros -->
+  <form method="get" class="card" style="max-width:900px;">
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; align-items:end;">
+      <!-- Mostrar inactivos -->
+      <label style="display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" name="inactivos" value="1" {% if mostrar_inactivos == 1 %}checked{% endif %}>
+        Mostrar inactivos
+      </label>
+
+      <!-- Solo mi categoría (si estoy logueado y tengo categoría) -->
+      {% if current_jugador and current_jugador.categoria_id %}
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" name="solo_mi_cat" value="1" {% if solo_mi_cat == 1 %}checked{% endif %}>
+          Solo mi categoría ({{ current_jugador.categoria.nombre }})
+        </label>
+      {% endif %}
+
+      <!-- Filtro por categoría -->
+      <div>
+        <label for="categoria_id" style="display:block; font-weight:600; margin-bottom:4px;">Categoría</label>
+        <select id="categoria_id" name="categoria_id" style="width:100%;">
+          <option value="">Todas</option>
+          {% for c in categorias %}
+            <option value="{{ c.id }}" {% if categoria_id and categoria_id == c.id %}selected{% endif %}>
+              {{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Buscar por nombre -->
+      <div>
+        <label for="q" style="display:block; font-weight:600; margin-bottom:4px;">Buscar por nombre</label>
+        <input id="q" name="q" placeholder="Ej: Juan Pérez" value="{{ q or '' }}" style="width:100%;">
+      </div>
+
+      <!-- Acciones -->
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="submit" class="btn">Aplicar</button>
+        <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost">Limpiar</a>
+      </div>
+    </div>
+
+    <p class="muted" style="margin:8px 0 0;">
+      Tip: si marcás “Solo mi categoría”, se ignora el selector de categoría.
+    </p>
+  </form>
+
+  {% if jugadores %}
+    <div class="card" style="padding:0;">
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Pts</th>
+            <th>Categoría</th>
+            <th>Estado</th>
+            <th>Zona ascenso</th>
+            <th>Asc./Desc.</th>
+            <th>Contacto</th>
+            <th>Creado</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in jugadores %}
+            <tr>
+              <td>{{ j.nombre_completo }}</td>
+              <td>{{ j.puntos }}</td>
+              <td>{{ j.categoria.nombre if j.categoria else '-' }}</td>
+              <td>
+                {% if j.activo %}
+                  <span class="badge badge-ok">Activo</span>
+                {% else %}
+                  <span class="badge badge-warn">Inactivo</span>
+                {% endif %}
+              </td>
+              <td>{{ 'Sí' if zona_ascenso.get(j.id) else 'No' }}</td>
+              <td>
+                {% set est = j.estado %}
+                {% if est %}
+                  {{ est.victorias_vs_superior }} / {{ est.derrotas_vs_inferior }}
+                {% else %}
+                  0 / 0
+                {% endif %}
+              </td>
+              <td>
+                {% if j.email %}📧 {{ j.email }}{% endif %}
+                {% if j.telefono %}<br>📱 {{ j.telefono }}{% endif %}
+              </td>
+              <td>{{ j.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                  {# visible para cualquier usuario: DESAFIAR si corresponde #}
+                  {% if j.activo and zona_ascenso.get(j.id) %}
+                    <a href="{{ url_for('desafios_new', desafiante_id=j.id) }}" class="btn">Desafiar</a>
+                  {% endif %}
+
+                  {# sólo administradores: editar / activar-desactivar / eliminar #}
+                  {% if current_jugador and current_jugador.is_admin %}
+                    <a href="{{ url_for('jugadores_edit', jugador_id=j.id) }}" class="btn btn-ghost">Editar</a>
+
+                    {% if j.activo %}
+                      <form method="post"
+                            action="{{ url_for('jugadores_deactivate', jugador_id=j.id) }}"
+                            onsubmit="return confirm('¿Desactivar a {{ j.nombre_completo }}? Podrás reactivarlo después.');">
+                        <button type="submit" class="btn btn-ghost">Desactivar</button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="{{ url_for('jugadores_activate', jugador_id=j.id) }}">
+                        <button type="submit" class="btn">Reactivar</button>
+                      </form>
+                    {% endif %}
+
+                    <form method="post"
+                          action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
+                          onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE a {{ j.nombre_completo }}? Esta acción no se puede deshacer.');">
+                      <button type="submit" class="btn btn-ghost">Eliminar</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>Sin jugadores aún.</p>
+  {% endif %}
+{% endblock %}
+
+{% block help_content %}
+<style>
+  /* ==== Modal de ayuda: contenedor BAJO y scroll en el contenedor (alineado con index/categorías) ==== */
+  .help-container{ display:flex; justify-content:center; width:100%; }
+  .help-wrap{
+    width: min(800px, 90vw);
+    margin: 0 auto;
+
+    /* Altura reducida + scroll único */
+    max-height: 62dvh;   /* bajar a 60dvh/58dvh si tu modal padre ocupa más */
+    max-height: 62vh;    /* fallback */
+    overflow: auto;
+    overscroll-behavior: contain;
+
+    position: relative;
+    background: transparent;
+  }
+
+  /* Encabezado compacto y sticky */
+  .help-head{
+    position: sticky; top: 0; z-index: 2;
+    display:flex; align-items:center; gap:6px;
+    padding:6px 6px; margin-bottom:4px;
+    background: var(--bg, rgba(10,12,20,.96));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .help-title{ margin:0; font-size: clamp(.92rem, 2vw, 1.02rem); }
+  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.78rem, 1.7vw, .88rem); }
+
+  /* Grid sin desbordes */
+  .help-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
+    gap:8px;
+  }
+
+  /* Tarjetas y texto compactos */
+  .help-card{
+    background: rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:6px;
+  }
+  .help-card h4{
+    display:flex; align-items:center; gap:6px;
+    margin:0 0 4px;
+    font-size: clamp(.88rem, 1.9vw, .96rem);
+  }
+  .help-card p, .help-card li{
+    margin:3px 0;
+    font-size: clamp(.78rem, 1.6vw, .86rem);
+    line-height:1.3;
+  }
+  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+
+  .chip{ display:inline-block; padding:2px 7px; border-radius:999px; font-size:.76rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
+  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
+  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
+  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
+
+  .help-visual{
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(255,255,255,.03);
+    border:1px dashed rgba(255,255,255,.12);
+    border-radius:10px; padding:6px;
+  }
+  .help-visual svg, .help-card img{ max-width:100%; height:auto; display:block; }
+
+  @media (max-width:540px){
+    .help-grid{ grid-template-columns: 1fr; }
+    .help-card h4 svg{ display:none; }
+  }
+</style>
+
+<div class="help-container">
+  <div class="help-wrap">
+    <div class="help-head">
+      <h3 class="help-title">¿Cómo leer y usar la lista de jugadores?</h3>
+      <p class="help-sub">Guía rápida y visual</p>
+    </div>
+
+    <div class="help-grid">
+      <!-- ¿Qué estás viendo? -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 7h18v10H3z" stroke="currentColor"/>
+            <path d="M8 7V5a4 4 0 118 0v2" stroke="currentColor"/>
+          </svg>
+          ¿Qué estás viendo?
+        </h4>
+        <p>Un listado de <strong>jugadores</strong> con su <strong>categoría</strong>, <strong>puntos</strong> y estado (<em>Activo</em>/<em>Inactivo</em>).</p>
+        <div>
+          <span class="chip info">Nombre</span>
+          <span class="chip ok">Puntos</span>
+          <span class="chip warn">Categoría</span>
+        </div>
+      </section>
+
+      <!-- Filtros -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h8" stroke="currentColor"/></svg>
+          Filtros rápidos
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Mostrar inactivos</strong>: incluye jugadores dados de baja temporal.</li>
+          {% if current_jugador and current_jugador.categoria_id %}
+          <li><strong>Solo mi categoría</strong>: prioriza tu nivel y desactiva el selector.</li>
+          {% endif %}
+          <li><strong>Categoría</strong>: filtra por nivel concreto.</li>
+          <li><strong>Buscar por nombre</strong>: escribí parte del nombre o apellido.</li>
+        </ul>
+        <p class="muted" style="margin-top:2px;">Tip: combiná “Solo mi categoría” con una búsqueda por nombre para encontrar rápido a tus posibles compañeros.</p>
+      </section>
+
+      <!-- Columnas -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12H6z" stroke="currentColor"/></svg>
+          Columnas de la tabla
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Pts</strong>: puntaje actual del jugador.</li>
+          <li><strong>Estado</strong>: activo/inactivo.</li>
+          <li><strong>Zona ascenso</strong>: <em>Sí</em> si sus puntos ≤ mínimo de su categoría.</li>
+          <li><strong>Asc./Desc.</strong>: resumen (victorias vs superior / derrotas vs inferior).</li>
+          <li><strong>Contacto</strong>: email y/o teléfono si están cargados.</li>
+        </ul>
+      </section>
+
+      <!-- Zona de ascenso (visual) -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
+          ¿Qué es “zona de ascenso”?
+        </h4>
+        <p>Es la franja de puntaje que permite <strong>desafiar a la categoría superior</strong>.</p>
+        <div class="help-visual">
+          <svg width="260" height="110" viewBox="0 0 280 120" aria-hidden="true">
+            <rect x="20" y="58" width="240" height="6" rx="3" fill="#475569"/>
+            <rect x="20" y="50" width="80" height="22" rx="6" fill="#1b3b2a" stroke="#1a704d"/>
+            <text x="60" y="64" fill="#fff" font-size="11" text-anchor="middle">≤ mín</text>
+            <text x="20" y="45" fill="#9aa3b2" font-size="10">0</text>
+            <text x="160" y="45" fill="#9aa3b2" font-size="10">mín</text>
+            <text x="240" y="45" fill="#9aa3b2" font-size="10">máx</text>
+          </svg>
+        </div>
+        <p class="muted" style="margin-top:4px;">Si el jugador está en esta zona, verá acciones como <em>Desafiar</em> cuando corresponda.</p>
+      </section>
+
+      <!-- Acciones según rol -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
+          Acciones disponibles
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Usuario</strong>: si estás en zona de ascenso, podés <em>Desafiar</em> a la categoría superior.</li>
+          {% if current_jugador and current_jugador.is_admin %}
+          <li><strong>Admin</strong>: además, <em>Editar</em>, <em>Desactivar/Reactivar</em> y <em>Eliminar</em> jugadores.</li>
+          {% else %}
+          <li class="muted">Acciones de administración visibles solo para administradores.</li>
+          {% endif %}
+        </ul>
+      </section>
+
+      <!-- Buenas prácticas para admins -->
+      {% if current_jugador and current_jugador.is_admin %}
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h8" stroke="currentColor"/></svg>
+          Buenas prácticas (admin)
+        </h4>
+        <ul class="help-ul">
+          <li>Revisá que la categoría asignada coincida con los <em>puntos</em> del jugador.</li>
+          <li>Mantené actualizados <strong>email</strong> y <strong>teléfono</strong> para facilitar el contacto.</li>
+          <li>Al desactivar, evaluá el impacto en <em>abiertos</em> y <em>desafíos</em> en curso.</li>
+        </ul>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

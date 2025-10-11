@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+{% block title %}Partidos{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Partidos</h2>
+    <a href="{{ url_for('partidos_new') }}" class="btn">Nuevo partido</a>
+  </div>
+
+  {# --- Tooltip CSS mínimo, solo para esta página --- #}
+  <style>
+    .hint-chip{position:relative; display:inline-block;}
+    .hint-chip .badge{cursor:help;}
+    .hint-chip::after{
+      content: attr(data-hint);
+      position:absolute; left:0; top:calc(100% + 6px);
+      background:#111; color:#fff; border-radius:8px; padding:8px 10px;
+      box-shadow:0 6px 18px rgba(0,0,0,.35);
+      font-size:.9em; white-space:pre-wrap; max-width:380px; line-height:1.25;
+      opacity:0; transform:translateY(-4px); pointer-events:none; transition:.15s ease;
+      z-index:20;
+    }
+    .hint-chip:hover::after,
+    .hint-chip:focus-within::after{ opacity:1; transform:translateY(0); }
+  </style>
+
+  {% if partidos and partidos|length > 0 %}
+    <div class="card" style="padding:0;">
+      <div style="padding:10px 10px 0;">
+        <p class="muted" style="margin:0 0 8px;">
+          Tip: pasá el mouse por el chip <em>falta aceptación</em> para ver quiénes faltan.
+        </p>
+      </div>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Pareja 1</th>
+              <th>Pareja 2</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Resultado</th>
+              <th>Creado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in partidos %}
+              {# Normalización #}
+              {% set r1_ok = (m.rival1_acepto in [True, 1, '1']) %}
+              {% set r2_ok = (m.rival2_acepto in [True, 1, '1']) %}
+              {% set ambos_aceptaron = r1_ok and r2_ok %}
+              {% set hay_propuesta = (m.resultado_propuesto_ganador_pareja_id is not none) %}
+
+              {% set soy_participante = current_jugador and (current_jugador.id in [
+                  m.pareja1.jugador1_id, m.pareja1.jugador2_id, m.pareja2.jugador1_id, m.pareja2.jugador2_id
+              ]) %}
+              {% set soy_pareja1 = current_jugador and (current_jugador.id in [m.pareja1.jugador1_id, m.pareja1.jugador2_id]) %}
+              {% set soy_pareja2 = current_jugador and (current_jugador.id in [m.pareja2.jugador1_id, m.pareja2.jugador2_id]) %}
+              {% set debo_confirmar = (hay_propuesta and soy_participante and ((soy_pareja1 and not m.confirmo_pareja1) or (soy_pareja2 and not m.confirmo_pareja2))) %}
+
+              {# Invitación vs no invitación #}
+              {% set requiere_inv = (m.rival1_id is not none and m.rival2_id is not none) %}
+              {% set aceptacion_ok = (ambos_aceptaron if requiere_inv else True) %}
+              {% set estado_ok = (m.estado in ['PENDIENTE','ACEPTADO','POR_CONFIRMAR','PARTIDO_CREADO']) %}
+
+              {# Tooltips #}
+              {% set faltan_aceptar = [] %}
+              {% if m.estado == 'PENDIENTE' and requiere_inv and not ambos_aceptaron %}
+                {% if (m.rival1_acepto is none or m.rival1_acepto in [False, 0, '0']) and m.rival1 %}{% set _ = faltan_aceptar.append(m.rival1.nombre_completo) %}{% endif %}
+                {% if (m.rival2_acepto is none or m.rival2_acepto in [False, 0, '0']) and m.rival2 %}{% set _ = faltan_aceptar.append(m.rival2.nombre_completo) %}{% endif %}
+              {% endif %}
+              {% set faltan_aceptar_str = faltan_aceptar|join(', ') %}
+
+              {% set faltan_confirmar = [] %}
+              {% if hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
+                {% if not m.confirmo_pareja1 %}{% set _ = faltan_confirmar.append('Pareja 1 (' ~ m.pareja1.jugador1.nombre_completo ~ ' + ' ~ m.pareja1.jugador2.nombre_completo ~ ')') %}{% endif %}
+                {% if not m.confirmo_pareja2 %}{% set _ = faltan_confirmar.append('Pareja 2 (' ~ m.pareja2.jugador1.nombre_completo ~ ' + ' ~ m.pareja2.jugador2.nombre_completo ~ ')') %}{% endif %}
+              {% endif %}
+
+              {# mostrar “propuesta rechazada” si corresponde #}
+              {% set hubo_rechazo = (not hay_propuesta) and (m.rechazo_ultimo_por_id is not none) and (m.estado == 'PENDIENTE') %}
+
+              <tr>
+                <td>{{ m.categoria.nombre if m.categoria else '-' }}</td>
+                <td>{{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}</td>
+                <td>{{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}</td>
+
+                {# hora local con el filtro #}
+                <td>{% if m.fecha %}{{ m.fecha|localdt('%Y-%m-%d %H:%M') }}{% else %}-{% endif %}</td>
+
+                <td>
+                  <span class="badge
+                    {% if m.estado == 'JUGADO' %}badge-ok
+                    {% elif m.estado in ['PENDIENTE','PROPUESTO','POR_CONFIRMAR'] %}badge-warn
+                    {% elif m.estado in ['CANCELADO','EN_REVISION'] %}badge-danger
+                    {% endif %}">
+                    {{ m.estado }}
+                  </span>
+
+                  {% if m.estado == 'PENDIENTE' and requiere_inv and not ambos_aceptaron %}
+                    <span class="hint-chip badge badge-warn" data-hint="{{ 'Faltan: ' ~ faltan_aceptar_str }}">
+                      falta aceptación
+                    </span>
+                  {% endif %}
+
+                  {% if m.estado == 'PENDIENTE' and hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
+                    <span class="hint-chip badge" data-hint="{{ 'Falta: ' ~ (faltan_confirmar|join(', ')) }}">
+                      resultado propuesto — falta confirmación
+                    </span>
+                  {% endif %}
+
+                  {% if m.estado == 'PROPUESTO' and hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
+                    <span class="hint-chip badge" data-hint="{{ 'Falta: ' ~ (faltan_confirmar|join(', ')) }}">
+                      falta confirmación
+                    </span>
+                  {% endif %}
+
+                  {% if hubo_rechazo %}
+                    <span
+                      class="hint-chip badge badge-danger"
+                      data-hint="Propuesta rechazada por {{ m.rechazo_ultimo_por.nombre_completo if m.rechazo_ultimo_por else 'alguien' }} el {{ m.rechazo_ultimo_en|localdt('%Y-%m-%d %H:%M') if m.rechazo_ultimo_en else '-' }}.">
+                      propuesta rechazada
+                    </span>
+                  {% endif %}
+
+                  {# chip de AUTOCIERRE (12h) cuando hay propuesta — contador en JS con epoch ms #}
+                  {% if m.estado in ['PENDIENTE','PROPUESTO'] and hay_propuesta and m.resultado_propuesto_en %}
+                    <span
+                      class="hint-chip badge autocierre-chip"
+                      data-propuesto-ms="{{ m.resultado_propuesto_en|utcms }}"
+                      data-hint="">
+                      auto-cierra en …
+                    </span>
+                  {% endif %}
+
+                  {% if hay_propuesta and (m.estado == 'PENDIENTE' or m.estado == 'PROPUESTO') %}
+                    <div class="muted" style="font-size:.9em; margin-top:4px;">
+                      Propuesto:
+                      {% if m.resultado_propuesto_ganador_pareja_id == m.pareja1_id %}
+                        {{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}
+                      {% elif m.resultado_propuesto_ganador_pareja_id == m.pareja2_id %}
+                        {{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}
+                      {% else %}
+                        (pareja desconocida)
+                      {% endif %}
+                      {% if m.resultado_propuesto_sets_text %} — {{ m.resultado_propuesto_sets_text }}{% endif %}
+                    </div>
+                  {% endif %}
+                </td>
+
+                <td>
+                  {% if m.estado == 'JUGADO' and m.resultado %}
+                    {% set g = m.resultado.ganador_pareja_id %}
+                    {% if g == m.pareja1_id %}
+                      Ganó: {{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}
+                    {% elif g == m.pareja2_id %}
+                      Ganó: {{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}
+                    {% else %}
+                      Ganador no identificado
+                    {% endif %}
+                    {% if m.resultado.sets_text %} — {{ m.resultado.sets_text }}{% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                {# hora local con el filtro #}
+                <td>{{ m.creado_en|localdt('%Y-%m-%d %H:%M') }}</td>
+
+                <td>
+                  {# 1) Responder invitación (si soy rival y no acepté aún) #}
+                  {% if current_jugador and m.estado == 'PENDIENTE' and requiere_inv and not ambos_aceptaron %}
+                    {% set soy_rival1 = (current_jugador.id == m.rival1_id) %}
+                    {% set soy_rival2 = (current_jugador.id == m.rival2_id) %}
+                    {% if (soy_rival1 and not r1_ok) or (soy_rival2 and not r2_ok) %}
+                      <a href="{{ url_for('partidos_responder', partido_id=m.id) }}" class="btn btn-slim">Responder invitación</a>
+                    {% endif %}
+                  {% endif %}
+
+                  {# 2) Proponer resultado (participante o admin). También aparece si hubo rechazo. #}
+                  {% if aceptacion_ok and not hay_propuesta and estado_ok %}
+                    {% if soy_participante or (current_jugador and current_jugador.is_admin) %}
+                      <a href="{{ url_for('partidos_resultado', partido_id=m.id) }}" class="btn btn-slim" style="margin-left:6px;">
+                        {% if hubo_rechazo %}Re-proponer resultado{% else %}Proponer resultado{% endif %}
+                      </a>
+                    {% endif %}
+                  {% endif %}
+
+                  {# 3) Confirmar / Ver propuesta #}
+                  {% if (m.estado in ['PENDIENTE','PROPUESTO','POR_CONFIRMAR']) and hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
+                    {% if debo_confirmar %}
+                      <a href="{{ url_for('partidos_confirmar_resultado', partido_id=m.id) }}" class="btn btn-ok btn-slim" style="margin-left:6px;">Confirmar resultado</a>
+                    {% elif soy_participante or (current_jugador and current_jugador.is_admin) %}
+                      <a href="{{ url_for('partidos_confirmar_resultado', partido_id=m.id) }}" class="btn btn-ghost btn-slim" style="margin-left:6px;">Ver propuesta</a>
+                    {% endif %}
+                  {% endif %}
+
+                  {# 4) SOLO ADMIN: editar resultado (si ya jugado) y eliminar #}
+                  {% if current_jugador and current_jugador.is_admin %}
+                    {% if m.estado == 'JUGADO' %}
+                      <a href="{{ url_for('admin_partido_resultado_editar', partido_id=m.id) }}" class="btn btn-ghost btn-slim" style="margin-left:6px;">Editar resultado</a>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('admin_partidos_eliminar', partido_id=m.id) }}" style="display:inline; margin-left:6px;">
+                      <button type="submit" class="btn btn-danger btn-slim" onclick="return confirm('¿Eliminar este partido?')">Eliminar</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="card">
+      <p class="muted" style="margin:0;">Esta página está funcionando. Todavía no hay partidos para mostrar.</p>
+    </div>
+  {% endif %}
+
+  {# ===== JS: contadores de auto-cierre para todas las filas ===== #}
+  <script>
+    (function(){
+      const chips = Array.from(document.querySelectorAll('.autocierre-chip'));
+      if(!chips.length) return;
+
+      function fmt(ms){
+        if(ms <= 0) return 'vencido';
+        const s = Math.floor(ms/1000);
+        const h = Math.floor(s/3600);
+        const m = Math.floor((s%3600)/60);
+        if(h > 0) return `${h}h ${m.toString().padStart(2,'0')}m`;
+        if(m > 0) return `${m}m`;
+        return `${s}s`;
+      }
+
+      function tick(){
+        const now = Date.now();
+        for(const el of chips){
+          const proposedMs = Number(el.getAttribute('data-propuesto-ms')) || 0;
+          if(!proposedMs) continue;
+          const deadline = proposedMs + 12*60*60*1000;
+          const remaining = deadline - now;
+
+          if(remaining <= 0){
+            el.textContent = 'autocierre pendiente';
+            el.classList.add('badge-warn');
+            el.setAttribute('data-hint', 'La propuesta ya superó las 12h. Se cerrará automáticamente al refrescar o cuando corra la tarea.');
+          } else {
+            el.textContent = 'auto-cierra en ' + fmt(remaining);
+            const when = new Date(deadline).toLocaleString();
+            el.setAttribute('data-hint', 'Auto-cierra el ' + when + ' si nadie rechaza ni confirma.');
+            el.classList.remove('badge-warn');
+          }
+        }
+      }
+
+      tick();
+      setInterval(tick, 1000);
+    })();
+  </script>
+{% endblock %}
+
+{% block help_content %}
+<style>
+  /* ==== Modal de ayuda: contenedor BAJO y scroll único (alineado con index/categorías) ==== */
+  .help-container{ display:flex; justify-content:center; width:100%; }
+  .help-wrap{
+    width: min(800px, 90vw);
+    margin: 0 auto;
+
+    /* Altura reducida + scroll único */
+    max-height: 62dvh;   /* bajar a 60dvh/58dvh si el modal padre ocupa más */
+    max-height: 62vh;    /* fallback */
+    overflow: auto;
+    overscroll-behavior: contain;
+
+    position: relative;
+    background: transparent;
+  }
+
+  /* Encabezado compacto y sticky */
+  .help-head{
+    position: sticky; top: 0; z-index: 2;
+    display:flex; align-items:center; gap:6px;
+    padding:6px 6px; margin-bottom:4px;
+    background: var(--bg, rgba(10,12,20,.96));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .help-title{ margin:0; font-size: clamp(.92rem, 2vw, 1.02rem); }
+  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.78rem, 1.7vw, .88rem); }
+
+  /* Grid sin desbordes */
+  .help-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
+    gap:8px;
+  }
+
+  /* Tarjetas y texto compactos */
+  .help-card{
+    background: rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:6px;
+  }
+  .help-card h4{
+    display:flex; align-items:center; gap:6px;
+    margin:0 0 4px;
+    font-size: clamp(.88rem, 1.9vw, .96rem);
+  }
+  .help-card p, .help-card li{
+    margin:3px 0;
+    font-size: clamp(.78rem, 1.6vw, .86rem);
+    line-height:1.3;
+  }
+  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+  .chip{ display:inline-block; padding:2px 7px; border-radius:999px; font-size:.76rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
+  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
+  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
+  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
+
+  @media (max-width:540px){
+    .help-grid{ grid-template-columns: 1fr; }
+    .help-card h4 svg{ display:none; }
+  }
+</style>
+
+<div class="help-container">
+  <div class="help-wrap">
+    <div class="help-head">
+      <h3 class="help-title">¿Cómo leer y gestionar los partidos?</h3>
+      <p class="help-sub">Guía rápida y visual</p>
+    </div>
+
+    <div class="help-grid">
+      <!-- Qué estás viendo -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12H6z" stroke="currentColor"/></svg>
+          ¿Qué estás viendo?
+        </h4>
+        <p>Un listado de <strong>partidos</strong> con sus parejas, fecha, estado, resultado y acciones según tu rol.</p>
+        <div>
+          <span class="chip info">Categoría</span>
+          <span class="chip ok">Parejas</span>
+          <span class="chip warn">Estado</span>
+        </div>
+      </section>
+
+      <!-- Estados y chips -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h8" stroke="currentColor"/></svg>
+          Estados y avisos
+        </h4>
+        <ul class="help-ul">
+          <li><strong>PENDIENTE</strong>: esperando aceptaciones o propuesta de resultado.</li>
+          <li><strong>PROPUESTO</strong>/<strong>POR_CONFIRMAR</strong>: hay <em>resultado propuesto</em>; falta confirmar.</li>
+          <li><strong>JUGADO</strong>: resultado confirmado (se muestra ganador y sets).</li>
+          <li><strong>EN_REVISION/CANCELADO</strong>: casos especiales moderados por admin.</li>
+        </ul>
+        <p class="muted">Chips útiles: <em>falta aceptación</em>, <em>falta confirmación</em>, <em>propuesta rechazada</em>, <em>auto-cierra en…</em>.</p>
+      </section>
+
+      <!-- Resultado y confirmaciones -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
+          Propuesta y confirmación
+        </h4>
+        <ul class="help-ul">
+          <li>Una pareja <strong>propone</strong> ganador y sets.</li>
+          <li>La otra pareja debe <strong>confirmar</strong> o <strong>rechazar</strong>.</li>
+          <li>Si hay rechazo, podés <em>re-proponer</em> desde acciones.</li>
+        </ul>
+        <p class="muted">El sistema muestra en la fila quiénes faltan confirmar.</p>
+      </section>
+
+      <!-- Autocierre -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
+          Autocierre (12h)
+        </h4>
+        <p>Si nadie confirma ni rechaza en 12h desde la propuesta, el sistema lo marca para <strong>autocierre</strong>. El chip muestra un contador en vivo.</p>
+      </section>
+
+      <!-- Invitaciones -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12H6z" stroke="currentColor"/></svg>
+          Invitaciones a rivales
+        </h4>
+        <p>Si el partido requiere invitación, verás <em>falta aceptación</em> con los nombres pendientes (tooltip).</p>
+      </section>
+
+      <!-- Acciones según rol -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
+          Acciones disponibles
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Participante</strong>: responder invitación, proponer resultado, confirmar/consultar propuesta.</li>
+          {% if current_jugador and current_jugador.is_admin %}
+          <li><strong>Admin</strong>: además, editar resultado de jugados y eliminar partidos conflictivos.</li>
+          {% else %}
+          <li class="muted">Las acciones de administración solo las ven los administradores.</li>
+          {% endif %}
+        </ul>
+      </section>
+
+      <!-- FAQ -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor"/></svg>
+          Preguntas frecuentes
+        </h4>
+        <ul class="help-ul">
+          <li><strong>No puedo confirmar:</strong> asegurate de ser parte de la pareja pendiente.</li>
+          <li><strong>No veo “Proponer resultado”:</strong> primero deben aceptar los rivales (cuando aplique).</li>
+          <li><strong>Se venció el contador:</strong> el sistema marca para autocierre; re-proponé si corresponde.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

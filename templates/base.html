@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>{% block title %}UPLAY · Torneo de Pádel{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- (Opcional) tipografía más vistosa para el tagline -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&display=swap" rel="stylesheet">
+
+  <!-- 🎨 UI minimalista (sin dependencias) -->
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#141a2e;
+      --card:#1b2340;
+      --muted:#8fa3c7;
+      --text:#e8eeff;
+      --accent:#6ea8ff;
+      --accent-2:#00d1b2;
+      --danger:#ff6b6b;
+      --warning:#ffd166;
+      --ok:#7dd97f;
+      --radius:12px;
+    }
+    html,body{
+      background:var(--bg);
+      color:var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      line-height:1.5; margin:0;
+    }
+    .container{max-width:1080px; margin:18px auto; padding:0 12px;}
+
+    /* Nav */
+    nav{
+      display:flex; flex-wrap:wrap; gap:12px; align-items:center;
+      padding:10px 12px; margin-bottom:8px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.0));
+    }
+    nav a{color:var(--text); text-decoration:none; opacity:.9;}
+    nav a:hover{opacity:1; color:var(--accent);}
+    nav form{display:inline;}
+    .spacer{flex:1;}
+
+    /* Marca (logo + tagline) */
+    .brand{
+      display:flex; align-items:center; gap:10px; text-decoration:none;
+      padding:2px 4px; border-radius:10px;
+    }
+    .brand:hover{background:rgba(255,255,255,.04);}
+    .brand img{height:36px; display:block;}
+    .brand-text{display:flex; flex-direction:column; line-height:1.05;}
+    .brand-text strong{font-size:1.05rem; letter-spacing:.02em; color:#eaf2ff;}
+    .brand-text small{
+      margin-top:1px; font-size:.78rem; letter-spacing:.06em; opacity:.88;
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    /* Cards */
+    .card{background:var(--card); border:1px solid rgba(255,255,255,.06);
+      border-radius:var(--radius); padding:14px;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);}
+    .card + .card{margin-top:12px;}
+    .card h3{margin:0 0 8px; font-size:1.1rem;}
+
+    /* Botones */
+    button, .btn{
+      background:linear-gradient(180deg, var(--accent), #4e87ff);
+      color:#fff; border:0; padding:8px 12px; border-radius:10px; cursor:pointer;
+      font-weight:600; transition:.15s transform ease, .15s filter ease;
+    }
+    button:hover, .btn:hover{transform:translateY(-1px); filter:brightness(1.05);}
+    button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed;}
+    .btn-ghost{background:rgba(255,255,255,.06);}
+    .btn-ok{background:linear-gradient(180deg, var(--accent-2), #00b894);}
+    .btn-danger{background:linear-gradient(180deg, var(--danger), #e85050);}
+    .btn-warning{background:linear-gradient(180deg, var(--warning), #f1b800);}
+    .btn-slim{padding:6px 10px; font-size:.9rem; border-radius:8px;}
+
+    /* Inputs & selects */
+    input, select, textarea{
+      background:#0e1430; color:var(--text); border:1px solid rgba(255,255,255,.12);
+      padding:8px 10px; border-radius:10px; outline:none; width:100%; max-width:420px;
+    }
+    label{display:block; font-size:.9rem; color:var(--muted); margin:6px 0 4px;}
+
+    /* Tablas */
+    table{width:100%; border-collapse:separate; border-spacing:0; overflow:hidden;
+      border-radius:14px; background:var(--panel); max-width:100%;}
+    thead th{font-size:.85rem; letter-spacing:.02em; text-transform:uppercase; color:var(--muted);
+      background:rgba(255,255,255,.03);}
+    th, td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top;}
+    tbody tr:hover{background:rgba(255,255,255,.035);}
+    tbody tr:last-child td{border-bottom:0;}
+
+    /* Flash messages */
+    .flash-ok{background:rgba(125,217,127,.15); border:1px solid rgba(125,217,127,.5);
+      color:#eaffea; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-error{background:rgba(255,107,107,.15); border:1px solid rgba(255,107,107,.5);
+      color:#ffdede; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-warning{background:rgba(255,209,102,.15); border:1px solid rgba(255,209,102,.5);
+      color:#fff7db; padding:10px; border-radius:12px; margin:8px 0;}
+
+    /* Badges */
+    .badge{display:inline-block; font-size:.78rem; padding:2px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06); color:#fff;}
+    .badge-ok{background:linear-gradient(180deg, rgba(125,217,127,.25), rgba(125,217,127,.18)); border-color:rgba(125,217,127,.5);}
+    .badge-warn{background:linear-gradient(180deg, rgba(255,209,102,.25), rgba(255,209,102,.18)); border-color:rgba(255,209,102,.5);}
+    .badge-danger{background:linear-gradient(180deg, rgba(255,107,107,.25), rgba(255,107,107,.18)); border-color:rgba(255,107,107,.5);}
+
+    /* Helpers */
+    .muted{color:var(--muted);}
+
+    /* ===== Ayuda: botón flotante + modal ===== */
+    .help-fab{
+      position:fixed; right:20px; bottom:20px; z-index:999;
+      width:52px; height:52px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, var(--accent), #4e87ff);
+      color:#fff; font-size:22px; border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 12px 30px rgba(0,0,0,.35);
+    }
+    .help-fab:hover{transform:translateY(-1px); filter:brightness(1.05);}
+
+    .help-backdrop{
+      position:fixed; inset:0; display:none; z-index:1000;
+      background:rgba(0,0,0,.6);
+    }
+    .help-dialog{
+      background:var(--card); color:var(--text);
+      width:min(820px, 92vw); margin:6vh auto; border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow:0 24px 60px rgba(0,0,0,.45);
+      overflow:hidden;
+    }
+    .help-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; background:rgba(255,255,255,.04);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .help-title{margin:0; font-size:1.05rem;}
+    .help-close{
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
+      border-radius:8px; padding:6px 10px; cursor:pointer; color:#fff;
+    }
+    .help-body{padding:14px;}
+    .help-grid{
+      display:grid; gap:12px;
+      grid-template-columns: repeat(auto-fit, minmax(240px,1fr));
+    }
+    .help-section{
+      background:var(--panel); border:1px solid rgba(255,255,255,.06);
+      border-radius:var(--radius); padding:12px;
+    }
+    .help-section h4{margin:0 0 8px; font-size:1rem; color:#dfe8ff;}
+    .help-section p{margin:0; color:var(--muted);}
+    .help-links a{display:inline-block; margin:6px 8px 0 0; color:var(--accent); text-decoration:none;}
+    .help-links a:hover{text-decoration:underline;}
+    .help-footer{
+      padding:12px 14px; border-top:1px solid rgba(255,255,255,.06);
+      display:flex; gap:8px; justify-content:flex-end;
+      background:rgba(255,255,255,.03);
+    }
+
+    @media (prefers-reduced-motion: no-preference){
+      .help-dialog{animation:pop .16s ease-out;}
+      @keyframes pop{from{transform:scale(.98); opacity:.7;} to{transform:scale(1); opacity:1;}}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <!-- Marca con logo + tagline -->
+      <a href="{{ url_for('home') }}" class="brand" aria-label="UPLAY inicio">
+        <img src="{{ url_for('static', filename='logo/uplay-logo.svg') }}" alt="UPLAY">
+        <span class="brand-text">
+          <strong>UPLAY</strong>
+          <small>Vos jugás, Vos ascendés!</small>
+        </span>
+      </a>
+
+      <!-- (Conservamos tus enlaces tal cual) -->
+      <a href="{{ url_for('home') }}">Inicio</a>
+
+      {% if current_jugador %}
+        <a href="{{ url_for('categorias_list') }}">Categorías</a>
+        <a href="{{ url_for('jugadores_list') }}">Jugadores</a>
+        <a href="{{ url_for('partidos_list') }}">Partidos</a>
+        <a href="{{ url_for('desafios_list') }}">Desafíos</a>
+        <a href="{{ url_for('abiertos_list') }}">Partidos abiertos</a>
+        <a href="{{ url_for('ranking') }}">Ranking</a>
+        {% if current_jugador.is_admin %}
+          <a href="{{ url_for('admin_home') }}">Admin</a>
+        {% endif %}
+      {% endif %}
+
+      <span class="spacer"></span>
+
+      {% if current_jugador %}
+        <a href="{{ url_for('mi_panel') }}">Mi panel ({{ current_jugador.nombre_completo }})</a>
+        <form method="post" action="{{ url_for('logout') }}" style="display:inline;">
+          <button type="submit" class="btn btn-ghost btn-slim">Salir</button>
+        </form>
+      {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-ghost btn-slim">Iniciar sesión</a>
+      {% endif %}
+    </nav>
+
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% if msgs %}
+        {% for cat, msg in msgs %}
+          <div class="flash-{{ 'ok' if cat=='ok' else ('warning' if cat=='warning' else 'error') }}">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <!-- ===== FAB de Ayuda ===== -->
+  <button class="help-fab" id="helpFab" aria-label="Ayuda" title="Ayuda">❔</button>
+
+  <!-- ===== Modal de Ayuda ===== -->
+  <div class="help-backdrop" id="helpBackdrop" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-header">
+        <h3 class="help-title" id="helpTitle">¿Cómo usar UPLAY?</h3>
+        <button class="help-close" id="helpClose" aria-label="Cerrar">Cerrar</button>
+      </div>
+
+      <div class="help-body">
+        {% block help_content %}
+          <!-- Fallback por defecto si la página no define ayuda contextual -->
+          <div class="help-grid">
+            <section class="help-section">
+              <h4>Menú principal</h4>
+              <p>
+                <strong>Ranking:</strong> tu posición y categoría.<br>
+                <strong>Desafíos:</strong> crear/aceptar partidos inter-nivel.<br>
+                <strong>Partidos abiertos:</strong> anotate cuando haya cupos.<br>
+                <strong>Mi Panel:</strong> tus partidos, propuestas y estado.
+              </p>
+            </section>
+            <section class="help-section">
+              <h4>Resultados y confirmaciones</h4>
+              <p>Una pareja propone el resultado, la otra confirma. Si pasan 12h sin respuesta, se cierra automático.</p>
+            </section>
+            <section class="help-section">
+              <h4>Estados de partido</h4>
+              <p>
+                <span class="badge">PENDIENTE</span> invitación/confirmación ·
+                <span class="badge badge-warn">PROPUESTO</span> esperando confirmación ·
+                <span class="badge badge-ok">JUGADO</span> cerrado.
+              </p>
+            </section>
+          </div>
+        {% endblock %}
+        <div class="help-links" style="margin-top:10px;">
+          <a href="{{ url_for('ranking') }}">Ir al Ranking</a>
+          <a href="{{ url_for('desafios_list') }}">Ver Desafíos</a>
+          <a href="{{ url_for('abiertos_list') }}">Partidos Abiertos</a>
+          {% if current_jugador %}
+            <a href="{{ url_for('mi_panel') }}">Mi Panel</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="help-footer">
+        <a class="btn btn-ghost" href="mailto:academiabogado@gmail.com">Soporte</a>
+        <button class="btn" id="helpOk">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const fab = document.getElementById('helpFab');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const okBtn = document.getElementById('helpOk');
+
+      function openHelp(){
+        backdrop.style.display = 'block';
+        backdrop.setAttribute('aria-hidden','false');
+        setTimeout(()=> closeBtn.focus(), 10);
+      }
+      function closeHelp(){
+        backdrop.style.display = 'none';
+        backdrop.setAttribute('aria-hidden','true');
+        fab.focus();
+      }
+
+      fab.addEventListener('click', openHelp);
+      closeBtn.addEventListener('click', closeHelp);
+      okBtn.addEventListener('click', closeHelp);
+      backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeHelp(); });
+      window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeHelp(); });
+    })();
+  </script>
+</body>
+</html>

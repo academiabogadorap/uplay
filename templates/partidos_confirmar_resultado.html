@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block title %}Confirmar resultado{% endblock %}
+{% block content %}
+
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Confirmar resultado</h2>
+  </div>
+
+  <!-- Resumen del partido -->
+  <div class="card" style="margin-bottom:10px;">
+    <div style="display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center;">
+      <div>
+        <div class="muted">Categoría</div>
+        <strong>{{ partido.categoria.nombre if partido.categoria else '-' }}</strong>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+        {% if partido.fecha %}
+          <span class="badge" title="Fecha">
+            {{ partido.fecha|localdt('%Y-%m-%d %H:%M') if partido.fecha else '-' }}
+          </span>
+        {% endif %}
+        <span class="badge badge-warn" title="Estado actual">{{ partido.estado }}</span>
+      </div>
+    </div>
+
+    <div style="margin-top:10px; display:grid; gap:6px;">
+      <div>
+        <div class="muted">Pareja 1</div>
+        <strong>{{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}</strong>
+      </div>
+      <div>
+        <div class="muted">Pareja 2</div>
+        <strong>{{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}</strong>
+      </div>
+    </div>
+  </div>
+
+  {# ===== Derivar datos de la propuesta (tabla PRP o legacy de Partido) ===== #}
+  {% set ganador_id = (propuesta.ganador_pareja_id if propuesta else partido.resultado_propuesto_ganador_pareja_id) %}
+  {% set sets_text  = (propuesta.sets_text if propuesta else partido.resultado_propuesto_sets_text) %}
+  {% set propuesto_por_pareja_id = (propuesta.propuesto_por_pareja_id if propuesta else None) %}
+
+  {% if not ganador_id %}
+    <div class="card" style="border-color:#f5c2c7; background:#f8d7da; color:#842029;">
+      No hay un resultado propuesto aún para este partido.
+    </div>
+    <div style="margin-top:10px;">
+      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Volver</a>
+    </div>
+  {% else %}
+
+    <!-- Propuesta -->
+    <div class="card" style="max-width:760px;">
+      <div style="display:grid; gap:6px;">
+        <div>
+          <span class="muted">Propuesto por</span><br>
+          <strong>
+            {% if propuesto_por_pareja_id %}
+              {% if propuesto_por_pareja_id == partido.pareja1_id %}Pareja 1
+              {% elif propuesto_por_pareja_id == partido.pareja2_id %}Pareja 2
+              {% else %}(no identificado){% endif %}
+            {% elif partido.resultado_propuesto_por %}
+              {{ partido.resultado_propuesto_por.nombre_completo }}
+            {% else %}
+              (no indicado)
+            {% endif %}
+          </strong>
+        </div>
+
+        <div>
+          <span class="muted">Ganador propuesto</span><br>
+          <strong>
+            {% if ganador_id == partido.pareja1_id %}
+              {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
+            {% elif ganador_id == partido.pareja2_id %}
+              {{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}
+            {% else %}
+              (Desconocido)
+            {% endif %}
+          </strong>
+        </div>
+
+        <div>
+          <span class="muted">Marcador</span><br>
+          <strong>{{ sets_text or '(sin marcador)' }}</strong>
+        </div>
+
+        {# --- Aviso de auto-cierre en 12h --- #}
+        {% if partido.resultado_propuesto_en %}
+          <div style="margin-top:4px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <span class="badge" id="autocierre-badge"
+                  data-propuesto-en="{{ partido.resultado_propuesto_en.isoformat() }}">
+              Se confirmará automáticamente en ~12 h
+            </span>
+            <span class="muted" id="autocierre-restante" style="font-size:.95em;"></span>
+          </div>
+        {% endif %}
+
+        {# --- Último rechazo visible para contexto --- #}
+        {% if partido.rechazo_ultimo_por and partido.rechazo_ultimo_en %}
+          <div class="card" style="border-color:#ffe69c; background:#fff9db; color:#5f3e02; margin-top:6px;">
+            <strong>Hubo un rechazo reciente:</strong>
+            {{ partido.rechazo_ultimo_por.nombre_completo }} —
+            {{ partido.rechazo_ultimo_en|localdt('%Y-%m-%d %H:%M') }}.
+            <div class="muted" style="margin-top:2px;">
+              Pueden proponer nuevamente si corresponde.
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ===== Estado de confirmaciones (se leen del Partido) ===== #}
+    {% set conf_p1 = (partido.confirmo_pareja1 == 1) %}
+    {% set conf_p2 = (partido.confirmo_pareja2 == 1) %}
+    {% set ya_confirme = (soy_p1 and conf_p1) or ((not soy_p1) and conf_p2) %}
+    {% set confirmo_otro = (soy_p1 and conf_p2) or ((not soy_p1) and conf_p1) %}
+
+    {% if ya_confirme and not confirmo_otro %}
+      <div class="card" style="margin-top:10px; border-color:#ffe69c; background:#fff3cd; color:#664d03;">
+        Ya confirmaste tu parte. <strong>Estamos esperando la confirmación de la otra pareja.</strong>
+      </div>
+    {% elif conf_p1 and conf_p2 %}
+      <div class="card" style="margin-top:10px; border-color:#a5d8ff; background:#e7f5ff; color:#0b7285;">
+        Ambas parejas ya confirmaron este resultado. Podés volver a la lista de partidos.
+      </div>
+    {% endif %}
+
+    <!-- Formulario de confirmación -->
+    <form method="post" action="{{ url_for('partidos_confirmar_resultado', partido_id=partido.id) }}" class="card" style="max-width:760px; margin-top:10px;">
+      <label for="comentario" class="muted" style="margin-bottom:4px;">Comentario (opcional)</label>
+      <textarea id="comentario" name="comentario" rows="3" style="width:100%;"></textarea>
+
+      {% if not ya_confirme %}
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="submit" name="accion" value="aceptar" class="btn btn-ok">Confirmar resultado</button>
+          <button type="submit" name="accion" value="rechazar" class="btn btn-danger">Rechazar</button>
+          <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Cancelar</a>
+        </div>
+        <p class="muted" style="margin:8px 0 0;">
+          Al confirmar por ambas partes, se cierra el partido y se aplican los puntos.
+          {% if partido.resultado_propuesto_en %}<br>
+            Si no hay respuesta en 12 h desde la propuesta, el sistema lo dará por confirmado automáticamente.
+          {% endif %}
+        </p>
+      {% else %}
+        <div style="margin-top:10px;">
+          <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Volver a partidos</a>
+        </div>
+      {% endif %}
+    </form>
+
+  {% endif %}
+
+  {# ===== JS: contador de auto-cierre ===== #}
+  {% if partido.resultado_propuesto_en %}
+    <script>
+      (function(){
+        const badge = document.getElementById('autocierre-badge');
+        const lbl   = document.getElementById('autocierre-restante');
+        if(!badge || !lbl) return;
+        const iso = badge.getAttribute('data-propuesto-en');
+        const proposed = new Date(iso);
+        function fmt(ms){
+          if(ms <= 0) return 'vencido';
+          const s = Math.floor(ms/1000);
+          const h = Math.floor(s/3600);
+          const m = Math.floor((s%3600)/60);
+          const sec = s%60;
+          if(h > 0) return `${h} h ${m.toString().padStart(2,'0')} min`;
+          if(m > 0) return `${m} min ${sec.toString().padStart(2,'0')} s`;
+          return `${sec} s`;
+        }
+        function tick(){
+          const deadline = new Date(proposed.getTime() + 12*60*60*1000);
+          const remaining = deadline.getTime() - Date.now();
+          lbl.textContent = 'Tiempo restante: ' + fmt(remaining);
+          if(remaining <= 0){
+            lbl.textContent = 'Tiempo restante: vencido';
+            clearInterval(iv);
+          }
+        }
+        tick();
+        const iv = setInterval(tick, 1000);
+      })();
+    </script>
+  {% endif %}
+
+{% endblock %}
+
+{% block help_content %}
+<style>
+  /* ==== Modal de ayuda compacto con scroll propio (alineado con el resto) ==== */
+  .help-container{ display:flex; justify-content:center; width:100%; }
+  .help-wrap{
+    width: min(800px, 90vw);
+    margin: 0 auto;
+
+    /* Altura reducida + scroll en el contenedor (para que SIEMPRE entre) */
+    max-height: 56dvh;
+    max-height: 56vh; /* fallback */
+    overflow: auto;
+    overscroll-behavior: contain;
+
+    position: relative;
+    background: transparent;
+  }
+
+  /* Header compacto y sticky */
+  .help-head{
+    position: sticky; top: 0; z-index: 2;
+    display:flex; align-items:center; gap:6px;
+    padding:6px 6px; margin-bottom:4px;
+    background: var(--bg, rgba(10,12,20,.96));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .help-title{ margin:0; font-size: clamp(.9rem, 1.9vw, 1rem); }
+  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.78rem, 1.6vw, .88rem); }
+
+  /* Grid */
+  .help-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
+    gap:8px;
+  }
+
+  /* Cards */
+  .help-card{
+    background: rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:6px;
+  }
+  .help-card h4{
+    display:flex; align-items:center; gap:6px;
+    margin:0 0 4px;
+    font-size: clamp(.86rem, 1.8vw, .96rem);
+  }
+  .help-card p, .help-card li{
+    margin:3px 0;
+    font-size: clamp(.76rem, 1.5vw, .86rem);
+    line-height:1.28;
+  }
+  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+
+  .chip{ display:inline-block; padding:2px 7px; border-radius:999px; font-size:.74rem; border:1px solid #2a2f45; background:#1b2138;}
+  .chip.ok{ background:#1b3b2a; border-color:#1a704d; }
+  .chip.warn{ background:#3b2f1b; border-color:#704d1a; }
+  .chip.info{ background:#1b2f3b; border-color:#1a4d70; }
+</style>
+
+<div class="help-container">
+  <div class="help-wrap">
+    <div class="help-head">
+      <h3 class="help-title">Confirmar resultado — guía rápida</h3>
+      <p class="help-sub">Revisá el ganador y los sets. Confirmá o rechazá.</p>
+    </div>
+
+    <div class="help-grid">
+      <!-- Qué estás viendo -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h14M4 18h10" stroke="currentColor"/></svg>
+          ¿Qué estás viendo?
+        </h4>
+        <p>La <strong>propuesta de resultado</strong> de un partido: quién ganó y el <em>marcador</em> (sets).</p>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+          <span class="chip info">Propuesto</span>
+          <span class="chip.ok">Confirmado</span>
+          <span class="chip warn">Pendiente</span>
+        </div>
+      </section>
+
+      <!-- Tus opciones -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
+          ¿Qué puedo hacer?
+        </h4>
+        <ul class="help-ul">
+          <li><strong>Confirmar</strong> si el resultado es correcto.</li>
+          <li><strong>Rechazar</strong> si hay error (podrán re-proponer).</li>
+          <li>Agregar un <em>comentario</em> (opcional) para dar contexto.</li>
+        </ul>
+      </section>
+
+      <!-- Autocierre -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
+          Autocierre (12 h)
+        </h4>
+        <ul class="help-ul">
+          <li>Si nadie confirma ni rechaza en <strong>12 horas</strong>, el sistema lo <strong>confirma automáticamente</strong>.</li>
+          <li>El contador en pantalla te muestra el tiempo restante.</li>
+        </ul>
+      </section>
+
+      <!-- Qué pasa luego -->
+      <section class="help-card">
+        <h4>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12h6l2-3 2 6 2-3h4" stroke="currentColor"/></svg>
+          Después de confirmar
+        </h4>
+        <ul class="help-ul">
+          <li>El partido pasa a <strong>JUGADO</strong> y se <strong>asignan puntos</strong> al ranking.</li>
+          <li>Si rechazás, quedará pendiente hasta una nueva propuesta.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}
