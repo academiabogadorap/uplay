@@ -14,11 +14,20 @@ AUTOCRON_TOKEN = os.environ.get("AUTOCRON_TOKEN", "cambia-esto")
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'dev-key-cambiala-mas-tarde'  # para mensajes flash
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(BASE_DIR, 'torneo.db')
+
+# SECRET_KEY desde entorno; fallback para desarrollo local
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-cambiala-mas-tarde')
+
+# DB: usa DATABASE_URL si existe (Postgres en el futuro), si no SQLite local
+DB_URL = os.getenv('DATABASE_URL', 'sqlite:///' + os.path.join(BASE_DIR, 'torneo.db'))
+if DB_URL.startswith('postgres://'):
+    DB_URL = DB_URL.replace('postgres://', 'postgresql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DB_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
 
 def get_or_404(model, pk):
     """
@@ -396,6 +405,50 @@ class SolicitudAlta(db.Model):
 # Crear DB si no existe
 with app.app_context():
     db.create_all()
+
+with app.app_context():
+    # --- Seed mínimo de datos para que la app funcione ---
+    # 1) Asegurar una categoría básica (la usa el index y el admin)
+    cat = Categoria.query.filter_by(nombre="7ma").first()
+    if not cat:
+        cat = Categoria(nombre="7ma", puntos_min=0, puntos_max=199)
+        db.session.add(cat)
+        db.session.commit()
+
+    # 2) Crear/asegurar un admin inicial desde variables de entorno
+    admin_nombre = os.getenv("ADMIN_NOMBRE")
+    admin_pin = os.getenv("ADMIN_PIN")
+    if admin_nombre and admin_pin:
+        admin = Jugador.query.filter_by(nombre_completo=admin_nombre).first()
+        if not admin:
+            admin = Jugador(
+                nombre_completo=admin_nombre,
+                email=None,
+                telefono=None,
+                puntos=150,          # puntos de arranque razonables
+                categoria_id=cat.id, # asignado a la categoría básica
+                activo=True,
+                is_admin=True,
+                pin=admin_pin        # tu modelo guarda PIN en texto (MVP)
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print(f"[SEED] Admin creado: {admin_nombre}")
+        else:
+            # Aseguramos que siga siendo admin y tenga categoría si hiciera falta
+            changed = False
+            if not admin.is_admin:
+                admin.is_admin = True
+                changed = True
+            if not admin.categoria_id:
+                admin.categoria_id = cat.id
+                changed = True
+            if changed:
+                db.session.commit()
+            print(f"[SEED] Admin ya existía: {admin_nombre}")
+    else:
+        print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
+
 
 # --- Migraciones/ALTERs idempotentes para SQLite ---
 with app.app_context():
