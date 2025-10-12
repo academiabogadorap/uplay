@@ -166,8 +166,6 @@ def send_mail(
         return False
 
 
-
-
 def get_or_404(model, pk):
     """
     Reemplazo 2.x-friendly de Model.query.get_or_404().
@@ -204,6 +202,19 @@ def _extraer_email_desde_request(req):
         if isinstance(v, str) and v.strip():
             return v.strip()
     return ""
+
+
+def _inactivar_parejas_de(jugador_id: int):
+    """Inactiva (o elimina si no existe flag) todas las parejas donde participa el jugador."""
+    parejas = db.session.query(Pareja).filter(
+        or_(Pareja.jugador1_id == jugador_id, Pareja.jugador2_id == jugador_id)
+    ).all()
+    for p in parejas:
+        if hasattr(Pareja, 'activa'):
+            p.activa = False
+        else:
+            db.session.delete(p)  # fallback si tu modelo Pareja no tiene 'activa'
+
 
 # ----------------------------
 # MODELOS
@@ -1264,70 +1275,99 @@ def jugadores_edit(jugador_id):
     # GET
     return render_template('jugadores_form.html', categorias=categorias, jugador=j)
 
-# --- Eliminar jugador (con chequeos de uso) ---
+# --- Eliminar (soft-delete) jugador + inactivar parejas ---
 @app.route('/jugadores/<int:jugador_id>/eliminar', methods=['POST'])
+@admin_required
 def jugadores_delete(jugador_id):
     j = get_or_404(Jugador, jugador_id)
 
-    # Chequeos: si está referenciado, no lo borramos (para evitar romper datos)
-    # 1) Parejas
-    parejas_usando = db.session.query(Pareja).filter(
-        db.or_(Pareja.jugador1_id == j.id, Pareja.jugador2_id == j.id)
-    ).count()
+    try:
+        # 1) Inactivar/romper sus parejas
+        _inactivar_parejas_de(j.id)
 
-    # 2) Desafíos (en cualquier rol)
-    desafios_usando = db.session.query(Desafio).filter(
-        db.or_(
-            Desafio.desafiante_id == j.id,
-            Desafio.companero_id == j.id,
-            Desafio.rival1_id == j.id,
-            Desafio.rival2_id == j.id
-        )
-    ).count()
+        # 2) Sacar inscripciones a abiertos (opcional pero recomendado para no dejar “fantasmas”)
+        db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete()
 
-    # 3) Partidos abiertos (inscripto)
-    abiertos_usando = db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).count()
+        # 3) Borrar estado/contadores si existe (lo mantenías)
+        JugadorEstado.query.filter_by(jugador_id=j.id).delete()
 
-    if parejas_usando or desafios_usando or abiertos_usando:
-        detalles = []
-        if parejas_usando: detalles.append(f'parejas: {parejas_usando}')
-        if desafios_usando: detalles.append(f'desafíos: {desafios_usando}')
-        if abiertos_usando: detalles.append(f'abiertos: {abiertos_usando}')
-        flash('No se puede eliminar: el jugador está en ' + ', '.join(detalles) + '.', 'error')
-        return redirect(url_for('jugadores_list'))
+        # 4) Soft-delete del jugador (no se elimina la fila)
+        if hasattr(Jugador, 'activo'):
+            j.activo = False
+        else:
+            # Si tu modelo no tiene 'activo', último recurso: borrar
+            db.session.delete(j)
 
-    # Borrar estado (contadores) si existe
-    JugadorEstado.query.filter_by(jugador_id=j.id).delete()
+        db.session.commit()
+        flash(f'Se desactivó a "{j.nombre_completo}" y se inactivaron sus parejas.', 'ok')
 
-    # Finalmente borrar al jugador
-    db.session.delete(j)
-    db.session.commit()
-    flash('Jugador eliminado.', 'ok')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error soft-delete jugador %s: %s", j.id, e)
+        flash(f'No se pudo desactivar al jugador: {e}', 'error')
+
     return redirect(url_for('jugadores_list'))
 
+
 @app.route('/jugadores/<int:jugador_id>/desactivar', methods=['POST'])
+@admin_required
 def jugadores_deactivate(jugador_id):
     j = get_or_404(Jugador, jugador_id)
-    if not j.activo:
+
+    if hasattr(Jugador, 'activo') and not j.activo:
         flash('El jugador ya estaba inactivo.', 'error')
         return redirect(url_for('jugadores_list'))
-    j.activo = False
-    db.session.commit()
-    flash(f'Se desactivó a {j.nombre_completo}. Ya no aparecerá para nuevos partidos/desafíos.', 'ok')
+
+    try:
+        # Inactivar/romper sus parejas (o borrar si tu modelo no tiene .activa)
+        _inactivar_parejas_de(j.id)
+
+        # Quitar inscripciones a “partidos abiertos” para no dejar pendientes
+        db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete()
+
+        # Dejar en falso el flag activo (soft-delete)
+        if hasattr(Jugador, 'activo'):
+            j.activo = False
+        else:
+            # Si tu modelo no tiene 'activo', no lo borro aquí (la ruta eliminar ya contempla ese caso)
+            pass
+
+        db.session.commit()
+        flash(f'Se desactivó a {j.nombre_completo}. Ya no aparecerá para nuevos partidos/desafíos.', 'ok')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error desactivando jugador %s: %s", j.id, e)
+        flash(f'No se pudo desactivar al jugador: {e}', 'error')
+
     return redirect(url_for('jugadores_list'))
 
 
 @app.route('/jugadores/<int:jugador_id>/reactivar', methods=['POST'])
+@admin_required
 def jugadores_activate(jugador_id):
     j = get_or_404(Jugador, jugador_id)
-    if j.activo:
+
+    if hasattr(Jugador, 'activo') and j.activo:
         flash('El jugador ya estaba activo.', 'error')
         return redirect(url_for('jugadores_list'))
-    j.activo = True
-    db.session.commit()
-    flash(f'{j.nombre_completo} reactivado.', 'ok')
-    return redirect(url_for('jugadores_list'))
 
+    try:
+        # Reactivar jugador (soft-undelete)
+        if hasattr(Jugador, 'activo'):
+            j.activo = True
+
+        # NOTA: No reactivamos parejas antiguas automáticamente.
+        #       Si hace falta, se crearán nuevas al volver a jugar.
+        db.session.commit()
+        flash(f'{j.nombre_completo} reactivado.', 'ok')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error reactivando jugador %s: %s", j.id, e)
+        flash(f'No se pudo reactivar al jugador: {e}', 'error')
+
+    return redirect(url_for('jugadores_list'))
 
 
 # --- Parejas (solo vista vacía por ahora) ---
@@ -3566,7 +3606,7 @@ def mi_cambiar_pin():
                     f"Si no fuiste vos, comunicate con el organizador.\n\n"
                     f"— UPLAY"
                 )
-                send_mail(subject, body, to=[j.email])
+                send_mail(subject, body, to_addrs=[j.email])
             flash('PIN actualizado correctamente.', 'ok')
         except Exception as e:
             # No bloquear el cambio si el correo falla
@@ -3648,7 +3688,8 @@ def admin_solicitudes_aprobar(sid):
 
     if request.method == 'POST':
         puntos = request.form.get('puntos', type=int)
-        pin = (request.form.get('pin') or '').strip()
+        # pin enviado por el form ya no se usa (opción 1)
+        _pin_ignorado = (request.form.get('pin') or '').strip()
 
         # Validaciones básicas
         cat = s.categoria
@@ -3660,10 +3701,6 @@ def admin_solicitudes_aprobar(sid):
             flash(f'Los puntos deben estar entre {cat.puntos_min} y {cat.puntos_max}.', 'error')
             return redirect(url_for('admin_solicitudes_aprobar', sid=s.id))
 
-        if not (pin.isdigit() and 4 <= len(pin) <= 6):
-            flash('El PIN debe tener 4–6 dígitos.', 'error')
-            return redirect(url_for('admin_solicitudes_aprobar', sid=s.id))
-
         # Evitar duplicar email en Jugadores
         if s.email:
             ya = db.session.query(Jugador).filter(Jugador.email == s.email).first()
@@ -3671,46 +3708,130 @@ def admin_solicitudes_aprobar(sid):
                 flash(f'Ya existe un jugador con el email {s.email}. No se puede duplicar.', 'error')
                 return redirect(url_for('admin_solicitudes_list'))
 
-        # Crear jugador activo
+        # Crear jugador activo (sin PIN inicial; lo creará con el código)
         j = Jugador(
             nombre_completo=s.nombre_completo,
             email=s.email,
             telefono=s.telefono,
             puntos=puntos,
             categoria_id=s.categoria_id,
-            activo=True,
-            pin=pin
+            activo=True
+            # no seteamos 'pin' aquí (opción 1)
         )
         db.session.add(j)
+        db.session.flush()  # obtener j.id antes del commit para el PinReset
+
+        # Generar código de activación (PinReset) - vence en 24 h
+        code = _gen_code(6)
+        pr = PinReset(
+            jugador_id=j.id,
+            code=code,
+            created_en=datetime.utcnow(),
+            expires_en=datetime.utcnow() + timedelta(hours=24),
+            used=False
+        )
+        db.session.add(pr)
 
         # Cerrar solicitud
         s.estado = 'APROBADA'
         s.resuelto_en = datetime.utcnow()
         db.session.commit()
 
-        # === Enviar email automático con el PIN ===
+        # URLs para el email
         try:
+            confirmar_url = url_for('olvide_pin_confirmar', _external=True)
             login_url = url_for('login', _external=True)
-            cambiar_pin_url = url_for('mi_cambiar_pin', _external=True)  # ruta que agregaremos en el paso 2
         except Exception:
-            login_url = '/login'
-            cambiar_pin_url = '/mi/pin'
+            confirmar_url = request.url_root.rstrip('/') + '/olvide-pin-confirmar'
+            login_url = request.url_root.rstrip('/') + '/login'
 
-        subject = "UPLAY: alta aprobada y PIN de acceso"
+        subject = "¡Bienvenido a UPLAY! Activá tu cuenta creando tu PIN"
+        # Fallback texto plano (si no renderiza HTML)
         body = (
             f"Hola {j.nombre_completo},\n\n"
-            f"¡Bienvenido/a a UPLAY! Tu alta fue aprobada.\n\n"
-            f"Tu PIN de acceso es: {pin}\n\n"
-            f"Podés iniciar sesión aquí: {login_url}\n\n"
-            f"Por seguridad, te recomendamos cambiar el PIN apenas ingreses: {cambiar_pin_url}\n\n"
+            "¡Tu alta fue aprobada! Para empezar, creá tu PIN.\n\n"
+            f"Código: {code} (vence en 24 horas)\n"
+            f"Crear PIN: {confirmar_url}\n\n"
+            f"También podés iniciar sesión luego aquí: {login_url}\n\n"
             f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
             f"Puntos iniciales: {j.puntos}\n\n"
-            f"— Equipo UPLAY"
+            "— Equipo UPLAY"
         )
 
-        # Usa el helper de correo configurado (ya lo probamos)
+        # HTML con logo inline (CID) + botón
+        html_body = f"""\
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bienvenido a UPLAY</title>
+  <style>
+    @media (prefers-color-scheme: dark) {{
+      body {{ background:#111111 !important; color:#ECECEC !important; }}
+      .card {{ background:#1B1B1B !important; color:#ECECEC !important; }}
+      .muted {{ color:#B5B9C0 !important; }}
+    }}
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#F3F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0F172A;">
+  <table role="presentation" width="100%" style="width:100%;background:#F3F5F7;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:560px;">
+          <tr>
+            <td align="center" style="padding:8px 0 16px;">
+              <img src="cid:uplay-logo" alt="UPLAY" width="120" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0;outline:0;">
+            </td>
+          </tr>
+          <tr>
+            <td class="card" style="background:#ffffff;border-radius:14px;padding:24px 22px;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
+              <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;">¡Bienvenido/a a UPLAY!</h1>
+              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, para empezar creá tu PIN.</p>
+              <p style="margin:0 0 8px;color:#334155;">Usá este código (vence en <strong>24 horas</strong>):</p>
+              <div style="margin:8px 0 16px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
+                {code}
+              </div>
+              <div style="text-align:center;margin-bottom:16px;">
+                <a href="{confirmar_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
+                  Crear mi PIN
+                </a>
+              </div>
+              <p class="muted" style="margin:0 0 8px;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace:</p>
+              <p style="margin:0 0 16px;word-break:break-all;font-size:12px;color:#334155;">{confirmar_url}</p>
+
+              <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0 16px;">
+
+              <p style="margin:0 0 6px;color:#334155;">Datos iniciales</p>
+              <ul style="margin:0 0 10px 18px;padding:0;color:#334155;">
+                <li>Categoría: {j.categoria.nombre if j.categoria else '-'}</li>
+                <li>Puntos: {j.puntos}</li>
+              </ul>
+              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Luego podrás iniciar sesión aquí: {login_url}</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:16px 6px;">
+              <p class="muted" style="margin:0;font-size:12px;color:#94A3B8;">© {datetime.utcnow().year} UPLAY</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+        # Enviar email (logo inline via CID)
         try:
-            send_mail(subject, body, to=[j.email])
+            send_mail(
+                subject=subject,
+                body=body,                 # fallback texto plano
+                html_body=html_body,       # HTML con botón + código + logo
+                to=[j.email],
+                inline_images={"uplay-logo": "static/logo/uplay.png"}  # usa el PNG que subiste
+            )
             flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
         except Exception as e:
             flash(f'Jugador creado, pero falló el envío de email: {e}', 'warning')
@@ -3720,7 +3841,6 @@ def admin_solicitudes_aprobar(sid):
     # GET -> sugerir puntos = puntos_max
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
-
 
 
 @app.route('/admin/solicitudes/<int:sid>/rechazar', methods=['POST'])
