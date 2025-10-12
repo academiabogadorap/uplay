@@ -13,11 +13,20 @@
     {% if sol.mensaje %}<p>Mensaje: <em>{{ sol.mensaje }}</em></p>{% endif %}
 
     <form method="post">
-      <label>Puntos iniciales</label>
-      <input name="puntos" type="number" required value="{{ puntos_sugeridos }}">
+      <label for="puntos">Puntos iniciales</label>
+      <input id="puntos" name="puntos" type="number" required value="{{ puntos_sugeridos }}">
 
-      <label>PIN (4–6 dígitos)</label>
-      <input name="pin" type="password" required placeholder="Ej: 1234">
+      <!-- Opción 1: PIN automático por email -->
+      <div style="margin:12px 0; padding:10px; background:#F8FAFC; border:1px solid #E5E7EB; border-radius:8px;">
+        <strong>PIN inicial</strong>
+        <p style="margin:6px 0 0; color:#334155; font-size:14px;">
+          No hace falta ingresarlo: generamos un <em>código de activación</em> y se lo enviamos por email.
+          Con ese código (válido por <strong>24 h</strong>) el jugador creará su propio PIN en el primer ingreso.
+        </p>
+      </div>
+
+      <!-- Mantengo el parámetro 'pin' por compatibilidad, pero oculto y vacío -->
+      <input name="pin" type="hidden" value="">
 
       <button type="submit">Crear jugador y aprobar</button>
       <a href="{{ url_for('admin_solicitudes_list') }}" style="margin-left:8px;">Cancelar</a>
