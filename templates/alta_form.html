@@ -15,7 +15,8 @@
     <form method="post" style="display:grid; gap:10px;">
       <div>
         <label for="nombre_completo" class="muted" style="display:block; margin-bottom:4px;">Nombre completo</label>
-        <input id="nombre_completo" name="nombre_completo" required placeholder="Ej: Juan Pérez" style="width:100%;">
+        <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" style="width:100%;">
+        <small class="muted">Se guardará en mayúsculas.</small>
       </div>
 
       <div>
@@ -23,9 +24,26 @@
         <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" style="width:100%;" autocomplete="email">
       </div>
 
+      <!-- Teléfono dividido: código de país + número local -->
       <div>
-        <label for="telefono" class="muted" style="display:block; margin-bottom:4px;">Teléfono</label>
-        <input id="telefono" name="telefono" required placeholder="+54 9 11 1234-5678" style="width:100%;" inputmode="tel" autocomplete="tel">
+        <label class="muted" style="display:block; margin-bottom:4px;">Teléfono</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <div style="min-width:110px;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="muted">País</span>
+              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="\d{1,4}"
+                     value="54" maxlength="4" style="width:80px;" aria-label="Código de país">
+            </div>
+          </div>
+          <div style="flex:1;">
+            <input id="tel_local" name="tel_local" type="text" inputmode="numeric" maxlength="18"
+                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)" style="width:100%;">
+          </div>
+        </div>
+        <small class="muted">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>11 12345678</strong> → se guarda como <code>+541112345678</code>.</small>
+
+        <!-- Compat con backend anterior: lo dejamos vacío -->
+        <input type="hidden" name="telefono" id="telefono_compat" value="">
       </div>
 
       <div>
@@ -53,6 +71,36 @@
       </p>
     </form>
   </div>
+
+  <!-- JS: mayúsculas en nombre + sanitizar teléfono -->
+  <script>
+    // Nombre en MAYÚSCULAS (mantiene acentos)
+    const $nombre = document.getElementById('nombre_completo');
+    if ($nombre){
+      $nombre.addEventListener('input', () => {
+        const pos = $nombre.selectionStart;
+        $nombre.value = ($nombre.value || '').toUpperCase();
+        try { $nombre.setSelectionRange(pos, pos); } catch(_){}
+      }, { passive: true });
+    }
+
+    // Teléfono: permitir solo dígitos en tel_cc y tel_local
+    const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
+    function sanitizeNumericInput(el, maxLen){
+      if (!el) return;
+      el.addEventListener('input', () => {
+        const raw = el.value;
+        const digits = onlyDigits(raw).slice(0, maxLen || 32);
+        if (raw !== digits) el.value = digits;
+      }, { passive: true });
+    }
+    sanitizeNumericInput(document.getElementById('tel_cc'), 4);
+    sanitizeNumericInput(document.getElementById('tel_local'), 18);
+
+    // Compat: mantener hidden "telefono" vacío
+    const $compat = document.getElementById('telefono_compat');
+    if ($compat) $compat.value = '';
+  </script>
 {% endblock %}
 
 {% block help_content %}

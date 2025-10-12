@@ -4,6 +4,7 @@ import smtplib, ssl
 import secrets
 import string
 import re  # ← agregado para EMAIL_RE
+import unicodedata
 
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
@@ -214,6 +215,49 @@ def _inactivar_parejas_de(jugador_id: int):
             p.activa = False
         else:
             db.session.delete(p)  # fallback si tu modelo Pareja no tiene 'activa'
+
+def _normalize_spaces(s: str) -> str:
+    """Colapsa espacios múltiples y recorta extremos."""
+    return " ".join((s or "").split())
+
+def normalize_name_upper(s: str) -> str:
+    """
+    Devuelve el nombre en MAYÚSCULAS, con espacios normalizados.
+    Si querés remover acentos visualmente, descomentá el bloque NFD.
+    """
+    s = _normalize_spaces(s)
+    # --- opcional: remover tildes/acentos visualmente ---
+    # s = unicodedata.normalize("NFD", s)
+    # s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    # s = unicodedata.normalize("NFC", s)
+    return s.upper()
+
+def normalize_phone_e164(cc: str, local: str) -> str:
+    """
+    Devuelve teléfono en formato E.164: +<código_pais><número_local_sin_separadores>
+    Reglas útiles para Argentina (+54):
+      - Si local empieza con '0', eliminarlo.
+      - Si (tras quitar 0) empieza con '15', eliminar '15' (móviles).
+      - (Opcional) forzar '9' en móviles -> comentado abajo.
+    """
+    cc_digits = _DIGITS_RE.sub("", f"{cc or ''}")
+    local_digits = _DIGITS_RE.sub("", f"{local or ''}")
+
+    if not cc_digits:
+        raise ValueError("Código de país vacío")
+    if not local_digits:
+        raise ValueError("Número local vacío")
+
+    if cc_digits == "54":
+        if local_digits.startswith("0"):
+            local_digits = local_digits[1:]
+        if local_digits.startswith("15"):
+            local_digits = local_digits[2:]
+        # --- Opcional: forzar +549 para móviles ---
+        # if not local_digits.startswith("9") and 9 <= len(local_digits) <= 11:
+        #     local_digits = "9" + local_digits
+
+    return f"+{cc_digits}{local_digits}"
 
 
 # ----------------------------
@@ -858,9 +902,13 @@ def alta_publica():
     if request.method == 'POST':
         nombre = (request.form.get('nombre_completo') or '').strip()
         email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        telefono = (request.form.get('telefono') or '').strip()  # compatibilidad
         categoria_id = request.form.get('categoria_id', type=int)
         mensaje = (request.form.get('mensaje') or '').strip()
+
+        # NUEVO: campos opcionales de teléfono separados
+        tel_cc = (request.form.get('tel_cc') or '').strip() or '54'   # AR por defecto
+        tel_local = (request.form.get('tel_local') or '').strip()
 
         # --- Validaciones obligatorias ---
         if not nombre:
@@ -875,14 +923,37 @@ def alta_publica():
         if '@' not in email or len(email) < 6:
             flash('Ingresá un email válido.', 'error')
             return redirect(url_for('alta_publica'))
-        if not telefono:
-            flash('El teléfono es obligatorio.', 'error')
-            return redirect(url_for('alta_publica'))
-        # validación simple de teléfono (permite +, espacios, paréntesis y dígitos)
-        tel_digits = ''.join(ch for ch in telefono if ch.isdigit())
-        if len(tel_digits) < 7:
-            flash('Ingresá un teléfono válido (al menos 7 dígitos).', 'error')
-            return redirect(url_for('alta_publica'))
+
+        # Armar teléfono final (prioriza tel_cc + tel_local; si no, usa "telefono")
+        def only_digits(s: str) -> str:
+            return ''.join(ch for ch in s if ch.isdigit())
+
+        telefono_final = ''
+        if tel_local:
+            cc_digits = only_digits(tel_cc)
+            local_digits = only_digits(tel_local)
+            if len(local_digits) < 7:
+                flash('Ingresá un teléfono válido (al menos 7 dígitos en el número local).', 'error')
+                return redirect(url_for('alta_publica'))
+            if not cc_digits:
+                flash('Ingresá un código de país válido.', 'error')
+                return redirect(url_for('alta_publica'))
+            telefono_final = f'+{cc_digits}{local_digits}'
+        else:
+            # Compatibilidad: usar el campo "telefono" tal como estaba
+            if not telefono:
+                flash('El teléfono es obligatorio.', 'error')
+                return redirect(url_for('alta_publica'))
+            tel_digits = only_digits(telefono)
+            if len(tel_digits) < 7:
+                flash('Ingresá un teléfono válido (al menos 7 dígitos).', 'error')
+                return redirect(url_for('alta_publica'))
+            # Normalizar: si ya viene con +, preservamos + y dígitos; si no, asumimos CC por defecto
+            if telefono.strip().startswith('+'):
+                telefono_final = '+' + tel_digits
+            else:
+                # Construimos con el CC por defecto (AR 54) si no vino tel_cc/tel_local
+                telefono_final = f'+54{tel_digits}'
 
         cat = db.session.get(Categoria, int(categoria_id)) if categoria_id is not None else None
         if not cat:
@@ -904,11 +975,14 @@ def alta_publica():
             flash('Ese email ya está registrado como jugador. Probá iniciar sesión o contactá al organizador.', 'error')
             return redirect(url_for('alta_publica'))
 
+        # --- Normalizar nombre a MAYÚSCULAS (mantiene acentos) ---
+        nombre_upper = nombre.upper()
+
         # Crear solicitud
         s = SolicitudAlta(
-            nombre_completo=nombre,
+            nombre_completo=nombre_upper,
             email=email,
-            telefono=telefono,
+            telefono=telefono_final,
             categoria_id=cat.id,
             mensaje=mensaje or None,
             estado='PENDIENTE'
@@ -923,9 +997,9 @@ def alta_publica():
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
                 body = (
                     "Se recibió una nueva solicitud de ALTA.\n\n"
-                    f"Nombre:   {nombre}\n"
+                    f"Nombre:   {nombre_upper}\n"
                     f"Email:    {email}\n"
-                    f"Teléfono: {telefono}\n"
+                    f"Teléfono: {telefono_final}\n"
                     f"Categoría solicitada: {cat.nombre} (id {cat.id})\n"
                     f"Mensaje:  {mensaje or '-'}\n"
                     f"Fecha/Hora (AR): {ahora_ar}\n\n"
@@ -933,8 +1007,8 @@ def alta_publica():
                 )
 
                 ok = send_mail(
-                    subject=f'Nueva solicitud de alta: {nombre}',
-                    body=body,          # texto plano
+                    subject=f'Nueva solicitud de alta: {nombre_upper}',
+                    body=body,
                     to=admin_emails
                 )
                 current_app.logger.info("Aviso de alta a admins send_mail=%s to=%s", ok, admin_emails)
@@ -948,6 +1022,7 @@ def alta_publica():
 
     # GET
     return render_template('alta_form.html', categorias=categorias)
+
 
 
 def admin_required(fn):
