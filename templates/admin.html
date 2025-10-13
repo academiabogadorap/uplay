@@ -44,6 +44,21 @@
       <a href="{{ url_for('admin_solicitudes_list') }}"><button>Revisar</button></a>
     </div>
 
+    <!-- NUEVO: Torneos -->
+    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
+      <h3 style="margin:0 0 6px;">Torneos</h3>
+      <p>Total: 
+        <strong>
+          {% if counts is defined and counts.torneos is defined %}
+            {{ counts.torneos }}
+          {% else %}
+            -
+          {% endif %}
+        </strong>
+      </p>
+      <a href="{{ url_for('admin_torneos_list') }}"><button>Gestionar</button></a>
+    </div>
+
   </div>
 
   <div style="border:1px solid #ddd; padding:10px; border-radius:8px; margin-top:8px;">

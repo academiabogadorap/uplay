@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Torneos (admin){% endblock %}
+
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">Torneos</h2>
+    <a href="{{ url_for('admin_torneos_new') }}" class="btn">Nuevo torneo</a>
+  </div>
+
+  {% if torneos|length == 0 %}
+    <div class="card"><p style="margin:0;">No hay torneos creados.</p></div>
+  {% else %}
+    <div class="card" style="padding:0;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Modalidad</th>
+            <th>Formato</th>
+            <th>Categoría</th>
+            <th>Estado</th>
+            <th>Inicio</th>
+            <th style="width:220px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in torneos %}
+            {% set puede_borrar = t.estado in ['BORRADOR','INSCRIPCION'] %}
+            <tr>
+              <td>{{ t.nombre }}</td>
+              <td>{{ t.modalidad }}</td>
+              <td>{{ t.formato }}</td>
+              <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
+              <td><span class="badge">{{ t.estado }}</span></td>
+              <td>{{ t.fecha_inicio or '-' }}</td>
+              <td style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <a class="btn btn-ghost btn-slim" href="{{ url_for('admin_torneos_view', tid=t.id) }}">Ver</a>
+
+                <form action="{{ url_for('admin_torneos_delete', tid=t.id) }}"
+                      method="post"
+                      style="display:inline;"
+                      {% if puede_borrar %}
+                        onsubmit="return confirm('¿Eliminar el torneo ' + {{ t.nombre|tojson }} + '?\nEsta acción no se puede deshacer.');"
+                      {% endif %}>
+                  <button type="submit"
+                          class="btn btn-ghost btn-slim"
+                          style="color:#b91c1c;"
+                          {% if not puede_borrar %}disabled title="Solo se elimina en BORRADOR o INSCRIPCION"{% endif %}>
+                    Eliminar
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

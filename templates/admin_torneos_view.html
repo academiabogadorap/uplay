@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Torneo: {{ t.nombre }}{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">{{ t.nombre }}</h2>
+    <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
+    <!-- NUEVO: ir a la página pública del torneo -->
+    <a href="{{ url_for('torneos_public_view', tid=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
+  </div>
+
+  <div class="card" style="max-width:820px;">
+    <p style="margin:0;">
+      <strong>Modalidad:</strong> {{ t.formato }} |
+      <strong>Formato:</strong> {{ t.tipo }} |
+      <strong>Categoría:</strong> {{ t.categoria.nombre if t.categoria else '-' }} |
+      <strong>Estado:</strong> <span class="badge">{{ t.estado }}</span>
+    </p>
+    <p style="margin:.35rem 0 0;">
+      <strong>Inicio:</strong> {{ t.fecha_inicio or '-' }} |
+      <strong>Sede:</strong> {{ t.sede or '-' }}
+    </p>
+    {% if t.es_dobles() %}
+      <p style="margin:.35rem 0 0;"><strong>Límite parejas:</strong> {{ t.cupo_max or 'Sin límite' }}</p>
+    {% else %}
+      <p style="margin:.35rem 0 0;"><strong>Límite jugadores:</strong> {{ t.cupo_max or 'Sin límite' }}</p>
+    {% endif %}
+    {% if t.notas %}
+      <p class="muted" style="margin:.35rem 0 0;"><em>{{ t.notas }}</em></p>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% if t.estado in ('BORRADOR','CANCELADO') %}
+      <!-- Abrir inscripción -->
+      <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
+        <button type="submit" class="btn">Abrir inscripción</button>
+      </form>
+      <!-- Generar fixture aún bloqueado -->
+      <span class="btn btn-ghost btn-slim" aria-disabled="true" title="Disponible cuando cierre la inscripción">
+        Generar fixture
+      </span>
+
+    {% elif t.estado == 'INSCRIPCION' %}
+      <!-- Cerrar inscripción (volver a BORRADOR) -->
+      <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
+        <button type="submit" class="btn btn-ghost">Cerrar inscripción</button>
+      </form>
+      <!-- Generar fixture aún bloqueado -->
+      <span class="btn btn-ghost btn-slim" aria-disabled="true" title="Primero cerrá inscripción">
+        Generar fixture
+      </span>
+
+    {% elif t.estado == 'EN_JUEGO' %}
+      <span class="btn btn-ghost btn-slim" aria-disabled="true">Inscripción cerrada</span>
+      <span class="btn btn-ghost btn-slim" aria-disabled="true">Fixture en juego</span>
+
+    {% else %}
+      <span class="btn btn-ghost btn-slim" aria-disabled="true">Acciones no disponibles</span>
+    {% endif %}
+  </div>
+{% endblock %}

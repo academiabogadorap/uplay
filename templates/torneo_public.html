@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ t.nombre }} — Torneo{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">{{ t.nombre }}</h2>
+    <a href="{{ url_for('torneos_public_list') }}" class="btn btn-ghost btn-slim">Volver a torneos</a>
+  </div>
+
+  <div class="card" style="max-width:860px;">
+    <p style="margin:0;">
+      <strong>Modalidad:</strong> {{ t.formato }} |
+      <strong>Formato:</strong> {{ t.tipo }} |
+      <strong>Categoría:</strong> {{ t.categoria.nombre if t.categoria else '-' }} |
+      <strong>Estado:</strong> <span class="badge">{{ t.estado }}</span>
+    </p>
+    <p style="margin:.35rem 0 0;">
+      <strong>Inicio:</strong> {{ t.fecha_inicio or '-' }} |
+      <strong>Sede:</strong> {{ t.sede or '-' }} |
+      <strong>Inscriptos:</strong> {{ insc_count }}{% if t.cupo_max %}/{{ t.cupo_max }}{% endif %}
+    </p>
+    {% if t.notas %}
+      <p class="muted" style="margin:.35rem 0 0;"><em>{{ t.notas }}</em></p>
+    {% endif %}
+  </div>
+
+  <!-- Bloque de inscripción (público) -->
+  <div class="card" style="max-width:860px; margin-top:10px;">
+    <h3 style="margin:0 0 6px;">Inscripción</h3>
+
+    {% if t.estado != 'INSCRIPCION' %}
+      <p class="muted" style="margin:0;">La inscripción no está abierta.</p>
+
+    {% elif not current_jugador %}
+      <p style="margin:0 0 8px;">Necesitás iniciar sesión para inscribirte.</p>
+      <a href="{{ url_for('login') }}" class="btn">Iniciar sesión</a>
+
+    {% elif not current_jugador.activo %}
+      <p class="muted" style="margin:0;">Tu jugador está inactivo. Contactá a un administrador.</p>
+
+    {% else %}
+      <form method="post" action="{{ url_for('torneo_inscribirme', tid=t.id) }}" style="display:grid; gap:8px; max-width:560px;">
+        {% if t.es_dobles() %}
+          {% set cant_comp = companeros|length %}
+          <div>
+            <label class="muted" for="companero_id" style="display:block; margin-bottom:4px;">Compañero (dobles)</label>
+
+            {% if cant_comp == 0 %}
+              <select id="companero_id" name="companero_id" disabled style="width:100%;">
+                <option value="">— No hay compañeros elegibles —</option>
+              </select>
+              <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+                No hay jugadores activos{% if t.categoria %} en {{ t.categoria.nombre }}{% endif %} disponibles.
+                Pedile a un admin que active/cree otro jugador o probá con un torneo de <strong>SINGLES</strong>.
+              </p>
+            {% else %}
+              <select id="companero_id" name="companero_id" required style="width:100%;">
+                <option value="">— Elegí compañero —</option>
+                {% for c in companeros %}
+                  <option value="{{ c.id }}">{{ c.nombre_completo }}</option>
+                {% endfor %}
+              </select>
+              <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+                Solo se listan jugadores activos{% if t.categoria %} de la categoría {{ t.categoria.nombre }}{% endif %}.
+              </p>
+            {% endif %}
+          </div>
+        {% else %}
+          <p style="margin:0;">Te vas a inscribir como <strong>{{ current_jugador.nombre_completo }}</strong>.</p>
+        {% endif %}
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button type="submit" class="btn" {% if t.es_dobles() and cant_comp == 0 %}disabled{% endif %}>Inscribirme</button>
+          <a href="{{ url_for('torneos_public_list') }}" class="btn btn-ghost">Volver</a>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+
+{% endblock %}
