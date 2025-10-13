@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Torneos{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+    <h2 style="margin:0;">Torneos</h2>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list') }}">Todos</a>
+      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}">Inscripción</a>
+      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='EN_JUEGO') }}">En juego</a>
+      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='FINALIZADO') }}">Finalizados</a>
+    </div>
+  </div>
+
+  {% if torneos|length == 0 %}
+    <div class="card"><p style="margin:0;">No hay torneos{{ ' en estado ' + estado if estado else '' }}.</p></div>
+  {% else %}
+    <div class="card" style="padding:0;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Modalidad</th>
+            <th>Formato</th>
+            <th>Categoría</th>
+            <th>Estado</th>
+            <th>Inicio</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in torneos %}
+            <tr>
+              <td>{{ t.nombre }}</td>
+              <td>{{ t.formato }}</td>
+              <td>{{ t.tipo }}</td>
+              <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
+              <td><span class="badge">{{ t.estado }}</span></td>
+              <td>{{ t.fecha_inicio or '-' }}</td>
+              <td><a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_view', tid=t.id) }}">Ver</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

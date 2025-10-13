@@ -1,3 +1,5 @@
+
+from __future__ import annotations
 import os
 import logging
 import smtplib, ssl
@@ -20,7 +22,8 @@ from flask import (
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-
+from flask_migrate import Migrate  # ← NUEVO
+from sqlalchemy import func
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -44,6 +47,69 @@ app.config['SQLALCHEMY_DATABASE_URI'] = DB_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+# ← NUEVO: conectar Flask-Migrate (una sola línea)
+migrate = Migrate(app, db)
+
+# ---- SQLite: auto-migración mínima para 'torneos' ----
+def ensure_torneos_schema():
+    """
+    Agrega a la tabla 'torneos' las columnas que exige el modelo si faltan.
+    Idempotente: corre en cada arranque sin romper nada.
+    """
+    from sqlalchemy import text
+    with app.app_context():
+        insp = db.inspect(db.engine)
+        if 'torneos' not in insp.get_table_names():
+            return  # aún no existe; create_all la creará
+
+        cols = {c['name'] for c in insp.get_columns('torneos')}
+        stmts = []
+
+        if 'tipo' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN tipo VARCHAR(20) DEFAULT 'AMERICANO'")
+        if 'inscripcion_libre' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN inscripcion_libre BOOLEAN DEFAULT 1")
+        if 'cupo_max' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN cupo_max INTEGER")
+        if 'permite_playoff_desde' not in cols:
+            # default alineado con tu modelo ('ZONAS')
+            stmts.append("ALTER TABLE torneos ADD COLUMN permite_playoff_desde VARCHAR(20) DEFAULT 'ZONAS'")
+        if 'reglas_json' not in cols:
+            # en SQLite lo guardamos como TEXT (JSON lo maneja SQLAlchemy)
+            stmts.append("ALTER TABLE torneos ADD COLUMN reglas_json TEXT")
+        if 'fecha_inicio' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN fecha_inicio DATE")
+        if 'sede' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN sede VARCHAR(120)")
+        if 'notas' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN notas TEXT")
+        if 'updated_at' not in cols:
+            stmts.append("ALTER TABLE torneos ADD COLUMN updated_at DATETIME")
+
+        for sql in stmts:
+            db.session.execute(text(sql))
+        if stmts:
+            db.session.commit()
+
+def build_pareja_key(torneo: Torneo, j1_id: int, j2_id: int | None) -> str:
+    """
+    Clave única por torneo para evitar inscripciones duplicadas.
+    S: singles -> S:<j1>
+    D: dobles  -> D:<min>-<max> (ordenada)
+    """
+    if torneo.es_dobles():
+        if not j2_id:
+            raise ValueError("Este torneo es de dobles: faltó jugador2_id")
+        a, b = sorted([int(j1_id), int(j2_id)])
+        return f"D:{a}-{b}"
+    else:
+        return f"S:{int(j1_id)}"
+
+def conteo_inscriptos(torneo_id: int) -> int:
+    return db.session.query(func.count(TorneoInscripcion.id))\
+        .filter(TorneoInscripcion.torneo_id == torneo_id)\
+        .scalar() or 0
 
 def send_mail(
     subject: str,
@@ -259,6 +325,88 @@ def normalize_phone_e164(cc: str, local: str) -> str:
 
     return f"+{cc_digits}{local_digits}"
 
+# ===== Servicios: generación de fixtures (stubs MVP) =====
+
+def _crear_participantes_desde_inscripciones(torneo: Torneo) -> list[TorneoParticipante]:
+    # Crea participantes (1 por inscripción) si no existen
+    existentes = {p.inscripcion_id for p in torneo.participantes}
+    nuevos = []
+    for ins in torneo.inscripciones:
+        if ins.confirmado and ins.id not in existentes:
+            p = TorneoParticipante(torneo_id=torneo.id, inscripcion_id=ins.id)
+            db.session.add(p)
+            nuevos.append(p)
+    if nuevos:
+        db.session.commit()
+    return list(torneo.participantes)  # refrescado
+
+
+def generar_fixture_americano(torneo_id: int, por_zonas: bool = False, tamanio_zona: int | None = None):
+    t: Torneo = db.session.get(Torneo, torneo_id)
+    if not t:
+        raise ValueError("Torneo no encontrado")
+    participantes = _crear_participantes_desde_inscripciones(t)
+
+    # Crear fase
+    fase = TorneoFase(torneo_id=t.id, tipo='LIGA' if not por_zonas else 'ZONAS', orden=1,
+                      nombre='Americano', config_json={'por_zonas': por_zonas, 'tamanio_zona': tamanio_zona})
+    db.session.add(fase)
+    db.session.flush()
+
+    # TODO: implementar round-robin real ("circle method"), grupos si por_zonas=True
+    # Por ahora: stub mínimo que no rompe.
+    if len(participantes) >= 2:
+        for i in range(0, len(participantes)-1, 2):
+            a = participantes[i]
+            b = participantes[i+1]
+            m = TorneoPartido(
+                torneo_id=t.id, fase_id=fase.id,
+                participante_a_id=a.id, participante_b_id=b.id,
+                estado='PENDIENTE', ronda='R1'
+            )
+            db.session.add(m)
+
+    t.estado = 'EN_JUEGO'
+    db.session.commit()
+    return True
+
+
+def generar_playoff_directo(torneo_id: int, size: int | None = None, usar_seeds: bool = True):
+    t: Torneo = db.session.get(Torneo, torneo_id)
+    if not t:
+        raise ValueError("Torneo no encontrado")
+    participantes = _crear_participantes_desde_inscripciones(t)
+
+    # Orden por seed si hay, o por id como fallback
+    if usar_seeds:
+        participantes.sort(key=lambda p: (p.inscripcion.seed if p.inscripcion and p.inscripcion.seed is not None else 9999, p.id))
+    else:
+        participantes.sort(key=lambda p: p.id)
+
+    n = size or len(participantes)
+    n = max(2, n)
+    participantes = participantes[:n]
+
+    # Crear fase playoff
+    fase = TorneoFase(torneo_id=t.id, tipo='PLAYOFF', orden=1, nombre='Playoff', config_json={'size': n})
+    db.session.add(fase)
+    db.session.flush()
+
+    # TODO: armar llaves reales (1-8, 4-5, etc.), crear nodos y partidos; stub mínimo:
+    # emparejar de a dos en QF/SF/Final según n
+    ronda = 'R1' if n > 4 else ('SF' if n == 4 else 'Final')
+    for i in range(0, len(participantes)-1, 2):
+        a = participantes[i]
+        b = participantes[i+1]
+        m = TorneoPartido(
+            torneo_id=t.id, fase_id=fase.id, ronda=ronda,
+            participante_a_id=a.id, participante_b_id=b.id, estado='PENDIENTE'
+        )
+        db.session.add(m)
+
+    t.estado = 'EN_JUEGO'
+    db.session.commit()
+    return True
 
 # ----------------------------
 # MODELOS
@@ -624,10 +772,220 @@ class PinReset(db.Model):
 
     jugador = db.relationship('Jugador')
 
+# ===== Torneos: modelos base (MVP) =====
+
+class Torneo(db.Model):
+    __tablename__ = 'torneos'
+    id = db.Column(db.Integer, primary_key=True)
+
+    nombre = db.Column(db.String(120), nullable=False)
+    categoria_id = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=True)
+
+    # Nuevo (ya lo tenías)
+    formato = db.Column(db.String(10), nullable=False, default='SINGLES')  # 'SINGLES' | 'DOBLES'
+    # Legacy (compat con DB existente)
+    modalidad = db.Column(db.String(10), nullable=False, default='SINGLES')  # mantener hasta migrar
+
+    tipo = db.Column(db.String(20), nullable=False, default='AMERICANO')  # 'AMERICANO' | 'ZONAS+PLAYOFF' | 'PLAYOFF'
+    estado = db.Column(db.String(15), nullable=False, default='BORRADOR')
+
+    inscripcion_libre = db.Column(db.Boolean, nullable=False, default=True)
+    cupo_max = db.Column(db.Integer, nullable=True)
+    permite_playoff_desde = db.Column(db.String(20), nullable=False, default='ZONAS')
+    reglas_json = db.Column(db.JSON, nullable=True)
+
+    fecha_inicio = db.Column(db.Date, nullable=True)
+    sede = db.Column(db.String(120), nullable=True)
+    notas = db.Column(db.Text, nullable=True)
+
+    # NUEVO (visibilidad + control de inscripciones públicas)
+    es_publico = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    inscripciones_abiertas = db.Column(db.Boolean, nullable=False, default=True, index=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
+
+    categoria = db.relationship('Categoria', backref='torneos', lazy='joined')
+    created_by = db.relationship('Jugador', foreign_keys=[created_by_id], lazy='joined')
+
+    __table_args__ = (
+        db.Index('ix_torneos_publicos_cat', 'es_publico', 'categoria_id'),
+    )
+
+    def es_dobles(self) -> bool:
+        return (self.formato or '').upper() == 'DOBLES'
+
+    # (Opcional, azucar para vistas)
+    def inscripcion_habilitada(self) -> bool:
+        return bool(self.es_publico and self.inscripciones_abiertas)
+
+
+from datetime import datetime
+
+class TorneoInscripcion(db.Model):
+    __tablename__ = 'torneos_inscripciones'
+    id = db.Column(db.Integer, primary_key=True)
+
+    torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
+
+    jugador1_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=False)
+    jugador2_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)  # requerido si formato=DOBLES
+
+    # Semillas / estado
+    seed = db.Column(db.Integer, nullable=True)
+    confirmado = db.Column(db.Boolean, nullable=False, default=True)
+
+    # NUEVO: estado (PENDIENTE/ACTIVA/BAJA) y baja_motivo opcional
+    estado = db.Column(db.String(15), nullable=False, default='ACTIVA')
+    baja_motivo = db.Column(db.String(120), nullable=True)
+
+    # NUEVO: timestamps
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # NUEVO: clave normalizada de dupla para evitar duplicados (j1-j2 == j2-j1)
+    pareja_key = db.Column(db.String(50), nullable=True, index=True)
+
+    # Datos opcionales que ya tenías
+    alias = db.Column(db.String(80), nullable=True)
+    club = db.Column(db.String(80), nullable=True)
+    disponibilidad = db.Column(db.String(120), nullable=True)
+
+    # Relaciones
+    torneo = db.relationship('Torneo', backref='inscripciones', lazy='joined')
+    jugador1 = db.relationship('Jugador', foreign_keys=[jugador1_id], lazy='joined')
+    jugador2 = db.relationship('Jugador', foreign_keys=[jugador2_id], lazy='joined')
+
+    __table_args__ = (
+        # Evita inscribir dos veces a la misma persona/pareja en el mismo torneo (soporta singles y dobles)
+        db.UniqueConstraint('torneo_id', 'pareja_key', name='uq_torneo_pareja_key'),
+        # Índices útiles de consulta
+        db.Index('ix_insc_torneo', 'torneo_id'),
+        db.Index('ix_insc_j1', 'jugador1_id'),
+        db.Index('ix_insc_j2', 'jugador2_id'),
+    )
+
+    # -------- Helpers de conveniencia --------
+    def calcular_pareja_key(self):
+        """
+        Normaliza la 'pareja' para evitar duplicados (j1-j2 == j2-j1).
+        En singles, se usa solo jugador1_id.
+        """
+        if self.jugador2_id:
+            a, b = sorted([int(self.jugador1_id), int(self.jugador2_id)])
+            return f"{a}-{b}"
+        return f"{int(self.jugador1_id)}"
+
+    def es_dobles(self) -> bool:
+        # Usa el formato del torneo cuando esté cargado
+        if self.torneo:
+            return self.torneo.es_dobles()
+        # fallback: si hay jugador2 cargado
+        return bool(self.jugador2_id)
+
+    def integrantes_ids(self):
+        return [x for x in [self.jugador1_id, self.jugador2_id] if x]
+
+    def pertenece_a(self, jugador_id: int) -> bool:
+        return jugador_id in self.integrantes_ids()
+
+
+
+class TorneoFase(db.Model):
+    __tablename__ = 'torneos_fases'
+    id = db.Column(db.Integer, primary_key=True)
+    torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
+
+    # 'ZONAS','LIGA','PLAYOFF'
+    tipo = db.Column(db.String(12), nullable=False)
+
+    orden = db.Column(db.Integer, nullable=False, default=1)
+    nombre = db.Column(db.String(80), nullable=False, default='Fase')
+    config_json = db.Column(db.JSON, nullable=True)
+
+    torneo = db.relationship('Torneo', backref='fases', lazy='joined')
+
+
+class TorneoGrupo(db.Model):
+    __tablename__ = 'torneos_grupos'
+    id = db.Column(db.Integer, primary_key=True)
+    fase_id = db.Column(db.Integer, db.ForeignKey('torneos_fases.id'), nullable=False)
+
+    nombre = db.Column(db.String(40), nullable=False, default='Grupo')
+    orden = db.Column(db.Integer, nullable=False, default=1)
+    metadata_json = db.Column(db.JSON, nullable=True)
+
+    fase = db.relationship('TorneoFase', backref='grupos', lazy='joined')
+
+
+class TorneoParticipante(db.Model):
+    __tablename__ = 'torneos_participantes'
+    id = db.Column(db.Integer, primary_key=True)
+    torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
+    inscripcion_id = db.Column(db.Integer, db.ForeignKey('torneos_inscripciones.id'), nullable=False)
+
+    torneo = db.relationship('Torneo', backref='participantes', lazy='joined')
+    inscripcion = db.relationship('TorneoInscripcion', backref='participante', lazy='joined')
+
+
+class TorneoPartido(db.Model):
+    __tablename__ = 'torneos_partidos'
+    id = db.Column(db.Integer, primary_key=True)
+    torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
+    fase_id = db.Column(db.Integer, db.ForeignKey('torneos_fases.id'), nullable=True)
+    grupo_id = db.Column(db.Integer, db.ForeignKey('torneos_grupos.id'), nullable=True)
+
+    ronda = db.Column(db.String(30), nullable=True)   # ej. "R1", "QF", "SF", "Final"
+    orden = db.Column(db.Integer, nullable=True)
+
+    participante_a_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=False)
+    participante_b_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=False)
+
+    # 'PENDIENTE','PROGRAMADO','JUGADO','WO','SUSPENDIDO'
+    estado = db.Column(db.String(12), nullable=False, default='PENDIENTE')
+
+    resultado_json = db.Column(db.JSON, nullable=True)  # sets/games
+    ganador_participante_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=True)
+
+    programado_en = db.Column(db.DateTime, nullable=True)
+    cancha = db.Column(db.String(80), nullable=True)
+
+    torneo = db.relationship('Torneo', backref='partidos', lazy='joined')
+    fase = db.relationship('TorneoFase', backref='partidos', lazy='joined')
+    grupo = db.relationship('TorneoGrupo', backref='partidos', lazy='joined')
+
+    participante_a = db.relationship('TorneoParticipante', foreign_keys=[participante_a_id], lazy='joined')
+    participante_b = db.relationship('TorneoParticipante', foreign_keys=[participante_b_id], lazy='joined')
+    ganador_participante = db.relationship('TorneoParticipante', foreign_keys=[ganador_participante_id], lazy='joined')
+
+
+class TorneoLlaveNodo(db.Model):
+    __tablename__ = 'torneos_llave_nodos'
+    id = db.Column(db.Integer, primary_key=True)
+    torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
+    fase_id = db.Column(db.Integer, db.ForeignKey('torneos_fases.id'), nullable=False)
+
+    ronda = db.Column(db.String(20), nullable=True)     # "QF","SF","Final"
+    posicion = db.Column(db.Integer, nullable=False, default=1)
+
+    from_nodo_left_id = db.Column(db.Integer, db.ForeignKey('torneos_llave_nodos.id'), nullable=True)
+    from_nodo_right_id = db.Column(db.Integer, db.ForeignKey('torneos_llave_nodos.id'), nullable=True)
+
+    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id'), nullable=True)
+    seed_slot = db.Column(db.Integer, nullable=True)
+
+    torneo = db.relationship('Torneo', backref='llave_nodos', lazy='joined')
+    fase = db.relationship('TorneoFase', backref='llave_nodos', lazy='joined')
+    partido = db.relationship('TorneoPartido', lazy='joined')
+
+
+
 
 # Crear DB si no existe
 with app.app_context():
     db.create_all()
+    ensure_torneos_schema()  # ensure_torneos_schema()  # ← desactivado mientras usamos Alembic
 
 with app.app_context():
     # --- Seed mínimo de datos para que la app funcione ---
@@ -855,7 +1213,8 @@ DELTA_WIN_BONUS = -3   # extra por compañero repetido (desde la 3ª victoria co
 BONUS_APLICA_DESDE = 3 # a partir de cuántas victorias juntos empieza a aplicar
 
 # === Hora local para templates (con filtros Jinja) ===
-APP_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+APP_TZ = ZoneInfo("America/Argentina/Salta")  # o "America/Argentina/Buenos_Aires"
+
 
 def _assume_utc(dt):
     """Trata datetimes naive como UTC (guardamos en UTC)."""
@@ -4064,6 +4423,489 @@ def admin_partido_resultado_editar(partido_id):
 
     # GET -> mostrar formulario con datos actuales
     return render_template('admin_partido_resultado_edit.html', partido=partido, p1=p1, p2=p2)
+
+# ===== Torneos: rutas MVP =====
+
+@app.route('/admin/torneos', methods=['GET'])
+@admin_required
+def admin_torneos_list():
+    torneos = (db.session.query(Torneo)
+               .order_by(Torneo.created_at.desc())
+               .all())
+    return render_template('admin_torneos_list.html', torneos=torneos)
+
+
+@app.route('/admin/torneos/new', methods=['GET', 'POST'])
+@admin_required
+def admin_torneos_new():
+    categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        modalidad = (request.form.get('modalidad') or 'SINGLES').strip().upper()   # viene del form
+        formato = modalidad  # en modelo se llama 'formato'
+        tipo = (request.form.get('formato') or 'AMERICANO').strip().upper()       # AMERICANO | ZONAS+PLAYOFF | PLAYOFF
+
+        categoria_id = request.form.get('categoria_id', type=int)
+        fecha_inicio = request.form.get('fecha_inicio') or None
+        sede = (request.form.get('sede') or '').strip() or None
+        notas = (request.form.get('notas') or '').strip() or None
+
+        # límites opcionales
+        lim_jug = request.form.get('limite_jugadores', type=int)
+        lim_par = request.form.get('limite_parejas', type=int)
+
+        if not nombre:
+            flash('El nombre es obligatorio.', 'error')
+            return redirect(url_for('admin_torneos_new'))
+
+        # cupo_max: guardamos lo que venga según modalidad
+        cupo_max = None
+        if formato == 'SINGLES':
+            cupo_max = lim_jug if (lim_jug and lim_jug >= 2) else None
+        else:  # DOBLES
+            cupo_max = lim_par if (lim_par and lim_par >= 2) else None
+
+        # Parse de fecha (si vino)
+        fecha_dt = None
+        if fecha_inicio:
+            try:
+                fecha_dt = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Fecha de inicio inválida.', 'error')
+                return redirect(url_for('admin_torneos_new'))
+
+        # Crear torneo (seteamos también modalidad legacy para compatibilidad con la DB)
+        t = Torneo(
+            nombre=nombre,
+            categoria_id=categoria_id or None,
+            formato=formato,        # 'SINGLES' | 'DOBLES' (campo nuevo)
+            modalidad=formato,      # <-- COMPAT: llenar columna legacy NOT NULL
+            tipo=tipo,              # 'AMERICANO' | 'ZONAS+PLAYOFF' | 'PLAYOFF'
+            estado='BORRADOR',
+            inscripcion_libre=True, # MVP
+            cupo_max=cupo_max,
+            fecha_inicio=fecha_dt,
+            sede=sede,
+            notas=notas,
+            created_by_id=get_current_jugador().id if get_current_jugador() else None,
+        )
+        db.session.add(t)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            current_app.logger.exception("Error creando torneo")
+            flash('No se pudo crear el torneo (datos inválidos o duplicados).', 'error')
+            return redirect(url_for('admin_torneos_new'))
+
+        flash('Torneo creado.', 'ok')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # GET -> usar tu template existente
+    return render_template('admin_torneos_form.html', categorias=categorias)
+
+
+@app.route('/admin/torneos/<int:tid>', methods=['GET'])
+@admin_required
+def admin_torneos_view(tid):
+    t = get_or_404(Torneo, tid)
+    insc = (db.session.query(TorneoInscripcion)
+            .filter(TorneoInscripcion.torneo_id == t.id)
+            .order_by(TorneoInscripcion.seed.asc().nulls_last(), TorneoInscripcion.id.asc())
+            .all())
+    return render_template('admin_torneos_view.html', t=t, inscripciones=insc)
+
+
+@app.route('/admin/torneos/<int:tid>/estado', methods=['POST'])
+@admin_required
+def admin_torneos_cambiar_estado(tid):
+    t = get_or_404(Torneo, tid)
+    nuevo_estado = (request.form.get('estado') or '').upper()
+    validos = {'BORRADOR','INSCRIPCION','EN_JUEGO','FINALIZADO','CANCELADO'}
+    if nuevo_estado not in validos:
+        flash('Estado inválido.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # Reglas simples MVP
+    if t.estado == 'BORRADOR' and nuevo_estado == 'INSCRIPCION':
+        t.estado = 'INSCRIPCION'
+    elif t.estado in {'BORRADOR','INSCRIPCION'} and nuevo_estado == 'EN_JUEGO':
+        t.estado = 'EN_JUEGO'
+    elif nuevo_estado in {'FINALIZADO','CANCELADO'}:
+        t.estado = nuevo_estado
+    else:
+        flash('Transición no permitida en MVP.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    db.session.commit()
+    flash(f'Estado actualizado a {t.estado}.', 'ok')
+    return redirect(url_for('admin_torneos_view', tid=t.id))
+
+
+@app.route('/torneos/<int:tid>', methods=['GET'])
+def torneos_public_view(tid):
+    t = get_or_404(Torneo, tid)
+    insc_count = db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id).count()
+
+    companeros = []
+    if t.es_dobles():
+        j = get_current_jugador()
+        if j:
+            # jugadores ya inscriptos (no se pueden volver a elegir)
+            ids_inscriptos = set()
+            for ins in db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id):
+                ids_inscriptos.add(ins.jugador1_id)
+                if ins.jugador2_id:
+                    ids_inscriptos.add(ins.jugador2_id)
+
+            if t.categoria_id:
+                cat_id = t.categoria_id
+            else:
+                cat_id = j.categoria_id  # fallback si el torneo no tiene categoría fija
+
+            companeros = (db.session.query(Jugador)
+                          .filter(Jugador.activo == True,
+                                  Jugador.id != j.id,
+                                  Jugador.categoria_id == cat_id,
+                                  ~Jugador.id.in_(ids_inscriptos))
+                          .order_by(Jugador.nombre_completo.asc())
+                          .all())
+
+    return render_template('torneo_public.html',
+                           t=t,
+                           insc_count=insc_count,
+                           companeros=companeros,
+                           companeros_count=len(companeros))
+
+
+@app.route('/torneos/<int:tid>/inscribirme', methods=['GET', 'POST'])
+def torneo_inscribirme(tid):
+    # Requiere jugador logueado y activo
+    j = get_current_jugador()
+    if not j or not j.activo:
+        flash('Necesitás iniciar sesión con un jugador activo.', 'error')
+        return redirect(url_for('login'))
+
+    t = get_or_404(Torneo, tid)
+
+    # Helper local idempotente (si ya lo definiste global, se usa ese)
+    try:
+        build_pareja_key  # noqa: F821
+    except NameError:
+        def build_pareja_key(torneo: Torneo, j1_id: int, j2_id: int | None) -> str:
+            if torneo.es_dobles():
+                if not j2_id:
+                    raise ValueError("Este torneo es de dobles: falta jugador2_id.")
+                a, b = sorted([int(j1_id), int(j2_id)])
+                return f"D:{a}-{b}"
+            return f"S:{int(j1_id)}"
+
+    # Solo si el torneo está visible y en inscripción
+    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
+        flash('El torneo no es público.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    if t.estado != 'INSCRIPCION' or not getattr(t, 'inscripciones_abiertas', False):
+        flash('La inscripción no está abierta para este torneo.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # ¿permite auto-inscripción?
+    if not getattr(t, 'inscripcion_libre', False):
+        flash('Este torneo no permite auto-inscripción.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # Control de cupo
+    total = db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id).count()
+    if t.cupo_max is not None and total >= int(t.cupo_max):
+        flash('Cupo completo.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # Evitar duplicado del propio jugador ya inscripto en cualquier rol
+    ya = (db.session.query(TorneoInscripcion)
+          .filter(TorneoInscripcion.torneo_id == t.id,
+                  or_(TorneoInscripcion.jugador1_id == j.id,
+                      TorneoInscripcion.jugador2_id == j.id))
+          .first())
+    if ya:
+        flash('Ya estás inscripto en este torneo.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    if request.method == 'POST':
+        # Datos opcionales del form
+        alias = request.form.get('alias') or None
+        club = request.form.get('club') or None
+        disponibilidad = request.form.get('disponibilidad') or None
+
+        if t.es_dobles():
+            # Necesita compañero
+            companero_id = request.form.get('companero_id', type=int)
+            if not companero_id:
+                flash('Elegí un compañero para dobles.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+            if companero_id == j.id:
+                flash('El compañero debe ser otra persona.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+            comp = db.session.get(Jugador, companero_id)
+            if not comp or not comp.activo:
+                flash('Compañero inválido o inactivo.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+            # El compañero ya está inscripto?
+            ya_comp = (db.session.query(TorneoInscripcion)
+                       .filter(TorneoInscripcion.torneo_id == t.id,
+                               or_(TorneoInscripcion.jugador1_id == comp.id,
+                                   TorneoInscripcion.jugador2_id == comp.id))
+                       .first())
+            if ya_comp:
+                flash('Ese compañero ya está inscripto en este torneo.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+            pareja_key = build_pareja_key(t, j.id, comp.id)
+            # Evitar duplicado por pareja_key
+            dup = TorneoInscripcion.query.filter_by(torneo_id=t.id, pareja_key=pareja_key).first()
+            if dup:
+                flash('Esa pareja ya está inscripta en este torneo.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+            ins = TorneoInscripcion(
+                torneo_id=t.id,
+                jugador1_id=j.id,
+                jugador2_id=comp.id,
+                alias=alias,
+                club=club,
+                disponibilidad=disponibilidad,
+                estado='ACTIVA',
+                pareja_key=pareja_key,
+                confirmado=True
+            )
+        else:
+            # Singles
+            pareja_key = build_pareja_key(t, j.id, None)
+            dup = TorneoInscripcion.query.filter_by(torneo_id=t.id, pareja_key=pareja_key).first()
+            if dup:
+                flash('Ya estás inscripto en este torneo.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+            ins = TorneoInscripcion(
+                torneo_id=t.id,
+                jugador1_id=j.id,
+                alias=alias,
+                club=club,
+                disponibilidad=disponibilidad,
+                estado='ACTIVA',
+                pareja_key=pareja_key,
+                confirmado=True
+            )
+
+        # Timestamps defensivos (por si la DB no auto-setea)
+        now = datetime.utcnow()
+        if hasattr(ins, "created_at") and getattr(ins, "created_at") is None:
+            ins.created_at = now
+        if hasattr(ins, "updated_at") and getattr(ins, "updated_at") is None:
+            ins.updated_at = now
+
+        db.session.add(ins)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('Inscripción duplicada (pareja o jugador ya inscripto).', 'error')
+            return redirect(url_for('torneo_inscribirme', tid=t.id))
+
+        flash('Inscripción registrada.', 'ok')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # GET: mostrar form (solo si dobles necesita selector)
+    jugadores_activos = (db.session.query(Jugador)
+                         .filter(Jugador.activo == True, Jugador.id != j.id)
+                         .order_by(Jugador.nombre_completo.asc())
+                         .all())
+    return render_template(
+        'torneo_inscribirme.html',
+        t=t,
+        es_dobles=t.es_dobles(),
+        jugadores_activos=jugadores_activos
+    )
+
+
+
+@app.route('/admin/torneos/<int:tid>/generar_fixture', methods=['POST'])
+@admin_required
+def admin_torneos_generar_fixture(tid):
+    t = get_or_404(Torneo, tid)
+    modo = (request.form.get('modo') or '').upper()  # 'AMERICANO'|'PLAYOFF'
+    try:
+        if modo == 'AMERICANO':
+            generar_fixture_americano(t.id, por_zonas=False)
+            flash('Fixture AMERICANO generado (stub).', 'ok')
+        elif modo == 'PLAYOFF':
+            generar_playoff_directo(t.id)
+            flash('Playoff generado (stub).', 'ok')
+        else:
+            flash('Modo de fixture inválido.', 'error')
+    except Exception as e:
+        logging.exception('Error generando fixture')
+        flash(f'Error generando fixture: {e}', 'error')
+    return redirect(url_for('admin_torneos_view', tid=t.id))
+
+
+@app.route('/admin/torneos/partidos/<int:pid>/resultado', methods=['POST'])
+@admin_required
+def admin_torneo_partido_resultado(pid):
+    m = get_or_404(TorneoPartido, pid)
+    # MVP: almacenar resultado como texto libre o sets JSON
+    resultado_txt = (request.form.get('resultado') or '').strip()
+    ganador_id = request.form.get('ganador_participante_id', type=int)
+
+    if not resultado_txt or not ganador_id:
+        flash('Falta resultado o ganador.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
+    m.resultado_json = {'resumen': resultado_txt}
+    m.ganador_participante_id = ganador_id
+    m.estado = 'JUGADO'
+    db.session.commit()
+    flash('Resultado cargado.', 'ok')
+    return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
+
+@app.route('/admin/torneos/<int:tid>/eliminar', methods=['POST'])
+@admin_required
+def admin_torneos_delete(tid):
+    t = get_or_404(Torneo, tid)
+    # Borrado ordenado (FKs blandas)
+    TorneoLlaveNodo.query.filter_by(torneo_id=t.id).delete()
+    TorneoPartido.query.filter_by(torneo_id=t.id).delete()
+    TorneoParticipante.query.filter_by(torneo_id=t.id).delete()
+    TorneoGrupo.query.filter(TorneoGrupo.fase_id.in_(
+        db.session.query(TorneoFase.id).filter_by(torneo_id=t.id)
+    )).delete(synchronize_session=False)
+    TorneoFase.query.filter_by(torneo_id=t.id).delete()
+    TorneoInscripcion.query.filter_by(torneo_id=t.id).delete()
+    db.session.delete(t)
+    db.session.commit()
+    flash('Torneo eliminado.', 'ok')
+    return redirect(url_for('admin_torneos_list'))
+
+@app.route('/admin/torneos/<int:tid>/abrir_inscripcion', methods=['POST'])
+@admin_required
+def admin_torneo_abrir_inscripcion(tid):
+    t = get_or_404(Torneo, tid)
+
+    if t.estado not in ('BORRADOR', 'CANCELADO'):
+        flash('Solo se puede abrir inscripción desde BORRADOR o CANCELADO.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    t.estado = 'INSCRIPCION'
+    db.session.commit()
+    flash('Inscripción abierta.', 'ok')
+    return redirect(url_for('admin_torneos_view', tid=t.id))
+
+
+@app.route('/admin/torneos/<int:tid>/cerrar_inscripcion', methods=['POST'])
+@admin_required
+def admin_torneo_cerrar_inscripcion(tid):
+    t = get_or_404(Torneo, tid)
+
+    if t.estado != 'INSCRIPCION':
+        flash('El torneo no está en inscripción.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=t.id))
+
+    # Volvemos a BORRADOR. Más adelante, cuando generemos fixture, pasará a EN_JUEGO.
+    t.estado = 'BORRADOR'
+    db.session.commit()
+    flash('Inscripción cerrada (vuelto a BORRADOR).', 'ok')
+    return redirect(url_for('admin_torneos_view', tid=t.id))
+
+@app.route('/torneos', methods=['GET'])
+def torneos_public_list():
+    # Filtros de querystring
+    estado = (request.args.get('estado') or '').upper().strip()
+    categoria_id = request.args.get('categoria', type=int)
+
+    # Solo torneos públicos (visibles para todos)
+    q = db.session.query(Torneo).filter(Torneo.es_publico.is_(True))
+
+    # Filtro por estado (se mantiene tu lógica)
+    if estado in {'BORRADOR','INSCRIPCION','EN_JUEGO','FINALIZADO','CANCELADO'}:
+        q = q.filter(Torneo.estado == estado)
+
+    # Filtro por categoría (opcional)
+    if categoria_id:
+        q = q.filter(Torneo.categoria_id == categoria_id)
+
+    # Orden: primero por fecha (si existe), luego por creación (como tenías)
+    # Si preferís solo por created_at, podés dejar la línea original.
+    torneos = q.order_by(Torneo.fecha_inicio.is_(None), Torneo.fecha_inicio.asc(), Torneo.created_at.desc()).all()
+
+    return render_template(
+        'torneos_list.html',
+        torneos=torneos,
+        estado=estado,
+        categoria=categoria_id
+    )
+
+@app.route('/torneos/<int:torneo_id>', methods=['GET'])
+def torneo_public_detail(torneo_id: int):
+    # Obtener torneo o 404
+    t = Torneo.query.get_or_404(torneo_id)
+
+    # Si NO es público, solo dejar ver al admin; para el resto, 404
+    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
+        abort(404)
+
+    # Traer inscripciones (si existe la tabla/modelo)
+    inscriptos = (TorneoInscripcion.query
+                  .filter_by(torneo_id=t.id)
+                  .order_by(TorneoInscripcion.created_at.asc()
+                            if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc())
+                  .all())
+
+    # Conteos y flags de UI
+    total_inscriptos = len(inscriptos)
+    cupo_disponible = None if t.cupo_max is None else max(0, int(t.cupo_max) - total_inscriptos)
+
+    puede_inscribirse = (
+        getattr(t, 'es_publico', False) and
+        getattr(t, 'inscripciones_abiertas', False) and
+        getattr(t, 'inscripcion_libre', False) and
+        (t.cupo_max is None or total_inscriptos < int(t.cupo_max))
+    )
+
+    # Si querés también exponer JSON cuando el cliente lo pide:
+    if request.is_json or request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return jsonify({
+            "id": t.id,
+            "nombre": t.nombre,
+            "categoria_id": t.categoria_id,
+            "categoria": getattr(t.categoria, "nombre", None),
+            "formato": t.formato,
+            "tipo": t.tipo,
+            "estado": t.estado,
+            "fecha_inicio": t.fecha_inicio.isoformat() if t.fecha_inicio else None,
+            "sede": t.sede,
+            "es_publico": getattr(t, 'es_publico', False),
+            "inscripciones_abiertas": getattr(t, 'inscripciones_abiertas', False),
+            "inscripcion_libre": t.inscripcion_libre,
+            "cupo_max": t.cupo_max,
+            "inscriptos": total_inscriptos,
+            "cupo_disponible": cupo_disponible,
+            "notas": t.notas,
+            "puede_inscribirse": puede_inscribirse,
+        })
+
+    # Render por defecto (HTML)
+    return render_template(
+        'torneo_detalle.html',   # si tu template se llama distinto, ajustá acá
+        torneo=t,
+        inscriptos=inscriptos,
+        total_inscriptos=total_inscriptos,
+        cupo_disponible=cupo_disponible,
+        puede_inscribirse=puede_inscribirse
+    )
+
 
 
 

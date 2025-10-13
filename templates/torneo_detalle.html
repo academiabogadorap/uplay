@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ torneo.nombre }} — Detalle{% endblock %}
+
+{% block content %}
+
+<div class="container my-4">
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <h1 class="h3 mb-0">{{ torneo.nombre }}</h1>
+    {% if torneo.categoria %}<span class="badge text-bg-secondary">{{ torneo.categoria.nombre }}</span>{% endif %}
+    {% if torneo.formato %}<span class="badge text-bg-info">{{ torneo.formato }}</span>{% endif %}
+    {% if torneo.tipo %}<span class="badge text-bg-light border">{{ torneo.tipo }}</span>{% endif %}
+    {% if torneo.es_publico %}<span class="badge text-bg-success">Público</span>{% else %}<span class="badge text-bg-dark">Privado</span>{% endif %}
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Estado</dt>
+            <dd class="col-sm-8">
+              {{ torneo.estado }}
+              {% if torneo.inscripciones_abiertas %}
+                <span class="badge rounded-pill text-bg-success ms-2">Inscripciones abiertas</span>
+              {% else %}
+                <span class="badge rounded-pill text-bg-secondary ms-2">Inscripciones cerradas</span>
+              {% endif %}
+              {% if torneo.inscripcion_libre %}
+                <span class="badge rounded-pill text-bg-primary ms-1">Auto-inscripción</span>
+              {% else %}
+                <span class="badge rounded-pill text-bg-warning ms-1">Con aprobación</span>
+              {% endif %}
+            </dd>
+
+            <dt class="col-sm-4">Fecha de inicio</dt>
+            <dd class="col-sm-8">{{ torneo.fecha_inicio or 'A confirmar' }}</dd>
+
+            <dt class="col-sm-4">Sede</dt>
+            <dd class="col-sm-8">{{ torneo.sede or '-' }}</dd>
+
+            <dt class="col-sm-4">Inscripciones</dt>
+            <dd class="col-sm-8">
+              {% if torneo.inscripciones_abiertas %}Abiertas{% else %}Cerradas{% endif %}
+              {% if torneo.cupo_max %}
+                — Cupo: {{ total_inscriptos }}/{{ torneo.cupo_max }}
+                {% if cupo_disponible is not none %}
+                  <small class="text-muted">(quedan {{ cupo_disponible }})</small>
+                {% endif %}
+                <div class="progress mt-2" role="progressbar" aria-label="Cupo ocupado">
+                  {% set pct = (total_inscriptos * 100 // torneo.cupo_max) if torneo.cupo_max else 0 %}
+                  <div class="progress-bar" style="width: {{ pct }}%">{{ pct }}%</div>
+                </div>
+              {% endif %}
+            </dd>
+
+            <dt class="col-sm-4">Notas</dt>
+            <dd class="col-sm-8">{{ torneo.notas or '-' }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mt-4">
+        <div class="card-header bg-light d-flex align-items-center justify-content-between">
+          <strong>Inscriptos ({{ total_inscriptos }})</strong>
+          {% if torneo.cupo_max %}
+            <small class="text-muted">Cupo {{ total_inscriptos }}/{{ torneo.cupo_max }}</small>
+          {% endif %}
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Jugador/es</th>
+                <th>Alias</th>
+                <th>Club</th>
+                <th>Desde</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ins in inscriptos %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                  {% set j1 = ins.jugador1 %}
+                  {% set j2 = ins.jugador2 %}
+                  {% if torneo.es_dobles() and j2 %}
+                    {{ j1.nombre_completo }} &amp; {{ j2.nombre_completo }}
+                  {% else %}
+                    {{ j1.nombre_completo }}
+                  {% endif %}
+                </td>
+                <td>{{ ins.alias or '-' }}</td>
+                <td>{{ ins.club or '-' }}</td>
+                <td>
+                  {% if ins.created_at %}{{ ins.created_at.strftime("%Y-%m-%d %H:%M") }}{% else %}-{% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="text-center py-3 text-muted">Aún no hay inscriptos.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% if msgs %}
+          {% for cat, msg in msgs %}
+            <div class="alert alert-{{ 'danger' if cat in ['error','danger'] else ('success' if cat in ['ok','success'] else 'info') }} mb-3">
+              {{ msg }}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <section id="inscripcion" class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+          <strong>Inscribirme</strong>
+        </div>
+        <div class="card-body">
+          {% if not puede_inscribirse %}
+            <p class="text-muted mb-0">Este torneo no admite inscripciones en este momento.</p>
+          {% else %}
+            {% if not current_jugador or not current_jugador.activo %}
+              <p class="mb-2">Para inscribirte necesitás <a href="{{ url_for('login') }}">iniciar sesión</a> con un jugador activo.</p>
+            {% else %}
+              {# Guard: dobles sin lista de compañeros #}
+              {% if torneo.es_dobles() and (not jugadores_activos or jugadores_activos|length == 0) %}
+                <div class="alert alert-warning">
+                  No hay compañeros disponibles para seleccionar. Pedile a tu compañero que se active/registre.
+                </div>
+              {% endif %}
+
+              <form action="{{ url_for('torneo_inscribirme', tid=torneo.id) }}" method="post" class="vstack gap-3" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+                <!-- Si usás CSRF, añadí tu token aquí -->
+                <!-- <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"> -->
+
+                {% if torneo.es_dobles() %}
+                  <div>
+                    <label class="form-label">Compañero</label>
+                    <select name="companero_id" class="form-select" {% if not jugadores_activos or jugadores_activos|length==0 %}disabled{% else %}required{% endif %}>
+                      <option value="">Seleccioná un jugador…</option>
+                      {% for jug in jugadores_activos %}
+                        <option value="{{ jug.id }}">{{ jug.nombre_completo }}</option>
+                      {% endfor %}
+                    </select>
+                    <div class="form-text">No podés elegirte a vos mismo.</div>
+                  </div>
+                {% endif %}
+
+                <div>
+                  <label class="form-label">Alias (opcional)</label>
+                  <input type="text" name="alias" class="form-control" maxlength="80" placeholder="Equipo Los Pibes / Tu apodo" autocomplete="nickname">
+                </div>
+
+                <div>
+                  <label class="form-label">Club (opcional)</label>
+                  <input type="text" name="club" class="form-control" maxlength="80" placeholder="Tu club" autocomplete="organization">
+                </div>
+
+                <div>
+                  <label class="form-label">Disponibilidad (opcional)</label>
+                  <input type="text" name="disponibilidad" class="form-control" maxlength="120" placeholder="Días/horarios preferidos" autocomplete="off">
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100"
+                        {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}
+                          disabled
+                        {% endif %}>
+                  {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}Sin cupo{% else %}Confirmar inscripción{% endif %}
+                </button>
+                <small class="text-muted">Inscripción sujeta a cupo y validaciones del torneo.</small>
+              </form>
+            {% endif %}
+          {% endif %}
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
