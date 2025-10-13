@@ -4085,19 +4085,28 @@ def admin_home():
         'partidos_jug': db.session.query(Partido).filter_by(estado='JUGADO').count(),
         'desafios_pend': db.session.query(Desafio).filter(Desafio.estado.in_(['PENDIENTE','ACEPTADO'])).count(),
         'solicitudes_pend': db.session.query(SolicitudAlta).filter_by(estado='PENDIENTE').count(),
+        # NUEVO: total de torneos
+        'torneos': db.session.query(Torneo).count(),
     }
 
-    recientes_partidos = (db.session.query(Partido)
-                          .order_by(Partido.creado_en.desc())
-                          .limit(5).all())
-    recientes_abiertos = (db.session.query(PartidoAbierto)
-                          .order_by(PartidoAbierto.creado_en.desc())
-                          .limit(5).all())
+    recientes_partidos = (
+        db.session.query(Partido)
+        .order_by(Partido.creado_en.desc())
+        .limit(5).all()
+    )
+    recientes_abiertos = (
+        db.session.query(PartidoAbierto)
+        .order_by(PartidoAbierto.creado_en.desc())
+        .limit(5).all()
+    )
 
-    return render_template('admin.html',
-                           counts=counts,
-                           recientes_partidos=recientes_partidos,
-                           recientes_abiertos=recientes_abiertos)
+    return render_template(
+        'admin.html',
+        counts=counts,
+        recientes_partidos=recientes_partidos,
+        recientes_abiertos=recientes_abiertos
+    )
+
 
 @app.route('/admin/solicitudes')
 @admin_required
@@ -4859,8 +4868,11 @@ def torneo_public_detail(torneo_id: int):
     # Traer inscripciones (si existe la tabla/modelo)
     inscriptos = (TorneoInscripcion.query
                   .filter_by(torneo_id=t.id)
-                  .order_by(TorneoInscripcion.created_at.asc()
-                            if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc())
+                  .order_by(
+                      TorneoInscripcion.created_at.asc()
+                      if hasattr(TorneoInscripcion, 'created_at')
+                      else TorneoInscripcion.id.asc()
+                  )
                   .all())
 
     # Conteos y flags de UI
@@ -4871,11 +4883,23 @@ def torneo_public_detail(torneo_id: int):
         getattr(t, 'es_publico', False) and
         getattr(t, 'inscripciones_abiertas', False) and
         getattr(t, 'inscripcion_libre', False) and
+        t.estado == 'INSCRIPCION' and
         (t.cupo_max is None or total_inscriptos < int(t.cupo_max))
     )
 
-    # Si querés también exponer JSON cuando el cliente lo pide:
-    if request.is_json or request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+    # Usuario actual (si tu helper existe)
+    j = get_current_jugador() if 'get_current_jugador' in globals() else None
+
+    # Para formulario de dobles: lista de jugadores activos (excluye al actual)
+    jugadores_activos = []
+    if puede_inscribirse and t.es_dobles() and j and getattr(j, 'activo', False):
+        jugadores_activos = (db.session.query(Jugador)
+                             .filter(Jugador.activo == True, Jugador.id != j.id)
+                             .order_by(Jugador.nombre_completo.asc())
+                             .all())
+
+    # JSON si lo piden explícitamente
+    if request.is_json or (request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html):
         return jsonify({
             "id": t.id,
             "nombre": t.nombre,
@@ -4903,8 +4927,11 @@ def torneo_public_detail(torneo_id: int):
         inscriptos=inscriptos,
         total_inscriptos=total_inscriptos,
         cupo_disponible=cupo_disponible,
-        puede_inscribirse=puede_inscribirse
+        puede_inscribirse=puede_inscribirse,
+        jugadores_activos=jugadores_activos,  # nuevo para el form de dobles
+        current_jugador=j                      # útil para el template público
     )
+
 
 
 
