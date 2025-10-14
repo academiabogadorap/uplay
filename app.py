@@ -4581,22 +4581,22 @@ def torneo_inscribirme(tid):
     # Solo si el torneo está visible y en inscripción
     if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
         flash('El torneo no es público.', 'error')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     if t.estado != 'INSCRIPCION' or not getattr(t, 'inscripciones_abiertas', False):
         flash('La inscripción no está abierta para este torneo.', 'error')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     # ¿permite auto-inscripción?
     if not getattr(t, 'inscripcion_libre', False):
         flash('Este torneo no permite auto-inscripción.', 'error')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     # Control de cupo
     total = db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id).count()
     if t.cupo_max is not None and total >= int(t.cupo_max):
         flash('Cupo completo.', 'error')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     # Evitar duplicado del propio jugador ya inscripto en cualquier rol
     ya = (db.session.query(TorneoInscripcion)
@@ -4606,7 +4606,7 @@ def torneo_inscribirme(tid):
           .first())
     if ya:
         flash('Ya estás inscripto en este torneo.', 'error')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     if request.method == 'POST':
         # Datos opcionales del form
@@ -4644,7 +4644,7 @@ def torneo_inscribirme(tid):
             dup = TorneoInscripcion.query.filter_by(torneo_id=t.id, pareja_key=pareja_key).first()
             if dup:
                 flash('Esa pareja ya está inscripta en este torneo.', 'error')
-                return redirect(url_for('torneo_inscribirme', tid=t.id))
+                return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
             ins = TorneoInscripcion(
                 torneo_id=t.id,
@@ -4663,7 +4663,7 @@ def torneo_inscribirme(tid):
             dup = TorneoInscripcion.query.filter_by(torneo_id=t.id, pareja_key=pareja_key).first()
             if dup:
                 flash('Ya estás inscripto en este torneo.', 'error')
-                return redirect(url_for('torneo_inscribirme', tid=t.id))
+                return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
             ins = TorneoInscripcion(
                 torneo_id=t.id,
@@ -4689,10 +4689,10 @@ def torneo_inscribirme(tid):
         except IntegrityError:
             db.session.rollback()
             flash('Inscripción duplicada (pareja o jugador ya inscripto).', 'error')
-            return redirect(url_for('torneo_inscribirme', tid=t.id))
+            return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
         flash('Inscripción registrada.', 'ok')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     # GET: mostrar form (solo si dobles necesita selector)
     jugadores_activos = (db.session.query(Jugador)
@@ -4705,6 +4705,7 @@ def torneo_inscribirme(tid):
         es_dobles=t.es_dobles(),
         jugadores_activos=jugadores_activos
     )
+
 
 
 
