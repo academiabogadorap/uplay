@@ -4,10 +4,16 @@
   <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
     <h2 style="margin:0;">Torneos</h2>
     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list') }}">Todos</a>
-      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}">Inscripción</a>
-      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='EN_JUEGO') }}">En juego</a>
-      <a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_list', estado='FINALIZADO') }}">Finalizados</a>
+      {# helper para clase activa #}
+      {% set est = (estado or '')|upper %}
+      <a class="btn btn-ghost btn-slim {% if not est %}active{% endif %}"
+         href="{{ url_for('torneos_public_list') }}">Todos</a>
+      <a class="btn btn-ghost btn-slim {% if est == 'INSCRIPCION' %}active{% endif %}"
+         href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}">Inscripción</a>
+      <a class="btn btn-ghost btn-slim {% if est == 'EN_JUEGO' %}active{% endif %}"
+         href="{{ url_for('torneos_public_list', estado='EN_JUEGO') }}">En juego</a>
+      <a class="btn btn-ghost btn-slim {% if est == 'FINALIZADO' %}active{% endif %}"
+         href="{{ url_for('torneos_public_list', estado='FINALIZADO') }}">Finalizados</a>
     </div>
   </div>
 
@@ -19,11 +25,12 @@
         <thead>
           <tr>
             <th>Nombre</th>
-            <th>Modalidad</th>
-            <th>Formato</th>
+            <th>Modalidad</th>  {# t.formato (ej: SINGLES/DOBLES) #}
+            <th>Formato</th>    {# t.tipo (ej: AMERICANO) #}
             <th>Categoría</th>
             <th>Estado</th>
             <th>Inicio</th>
+            <th>Público</th>
             <th></th>
           </tr>
         </thead>
@@ -31,12 +38,24 @@
           {% for t in torneos %}
             <tr>
               <td>{{ t.nombre }}</td>
-              <td>{{ t.formato }}</td>
-              <td>{{ t.tipo }}</td>
+              <td>{{ t.formato or '-' }}</td>
+              <td>{{ t.tipo or '-' }}</td>
               <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
               <td><span class="badge">{{ t.estado }}</span></td>
               <td>{{ t.fecha_inicio or '-' }}</td>
-              <td><a class="btn btn-ghost btn-slim" href="{{ url_for('torneos_public_view', tid=t.id) }}">Ver</a></td>
+              <td>
+                {% if t.es_publico %}
+                  <span class="badge">Público</span>
+                {% else %}
+                  <span class="badge">Privado</span>
+                {% endif %}
+              </td>
+              <td>
+                <a class="btn btn-ghost btn-slim"
+                   href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}">
+                  Ver
+                </a>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

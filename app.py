@@ -4552,40 +4552,8 @@ def admin_torneos_cambiar_estado(tid):
     return redirect(url_for('admin_torneos_view', tid=t.id))
 
 
-@app.route('/torneos/<int:tid>', methods=['GET'])
-def torneos_public_view(tid):
-    t = get_or_404(Torneo, tid)
-    insc_count = db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id).count()
 
-    companeros = []
-    if t.es_dobles():
-        j = get_current_jugador()
-        if j:
-            # jugadores ya inscriptos (no se pueden volver a elegir)
-            ids_inscriptos = set()
-            for ins in db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id):
-                ids_inscriptos.add(ins.jugador1_id)
-                if ins.jugador2_id:
-                    ids_inscriptos.add(ins.jugador2_id)
 
-            if t.categoria_id:
-                cat_id = t.categoria_id
-            else:
-                cat_id = j.categoria_id  # fallback si el torneo no tiene categoría fija
-
-            companeros = (db.session.query(Jugador)
-                          .filter(Jugador.activo == True,
-                                  Jugador.id != j.id,
-                                  Jugador.categoria_id == cat_id,
-                                  ~Jugador.id.in_(ids_inscriptos))
-                          .order_by(Jugador.nombre_completo.asc())
-                          .all())
-
-    return render_template('torneo_public.html',
-                           t=t,
-                           insc_count=insc_count,
-                           companeros=companeros,
-                           companeros_count=len(companeros))
 
 
 @app.route('/torneos/<int:tid>/inscribirme', methods=['GET', 'POST'])
@@ -4932,7 +4900,10 @@ def torneo_public_detail(torneo_id: int):
         current_jugador=j                      # útil para el template público
     )
 
-
+# --- Alias legacy: /torneo/<id> → /torneos/<id> (301) ---
+@app.route('/torneo/<int:torneo_id>')
+def torneo_public_detail_legacy(torneo_id: int):
+    return redirect(url_for('torneo_public_detail', torneo_id=torneo_id), code=301)
 
 
 
