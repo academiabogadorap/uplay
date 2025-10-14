@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: uplay
+    env: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+    preDeployCommand: |
+      flask db upgrade
+    startCommand: |
+      gunicorn app:app --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.6
+      - key: FLASK_APP
+        value: app.py
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SQLALCHEMY_DATABASE_URI
+        value: sqlite:////opt/render/project/src/instance/app.db
+      - key: DATABASE_URL
+        value: sqlite:////opt/render/project/src/instance/app.db
+      - key: ADMIN_NOMBRE
+        value: admin
+      - key: ADMIN_PIN
+        value: "1234"
+    disk:
+      name: db
+      mountPath: /opt/render/project/src/instance
+      sizeGB: 1
