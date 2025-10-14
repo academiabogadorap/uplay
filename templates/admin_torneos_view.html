@@ -5,7 +5,7 @@
     <h2 style="margin:0;">{{ t.nombre }}</h2>
     <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
     <!-- NUEVO: ir a la página pública del torneo -->
-    <a href="{{ url_for('torneos_public_view', tid=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
+    <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
   </div>
 
   <div class="card" style="max-width:820px;">
