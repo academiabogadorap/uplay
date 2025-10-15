@@ -16,6 +16,22 @@
     {% endif %}
   </div>
 
+  <!-- Nav de secciones del torneo -->
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+      <a class="nav-link active" aria-current="page"
+         href="{{ url_for('torneo_public_detail', torneo_id=torneo.id) }}">Inscripción</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link"
+         href="{{ url_for('torneo_public_fixture', torneo_id=torneo.id) }}">Fixture</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link"
+         href="{{ url_for('torneo_public_tabla', torneo_id=torneo.id) }}">Tabla</a>
+    </li>
+  </ul>
+
   <div class="row g-4">
     <div class="col-lg-8">
       <div class="card shadow-sm">
