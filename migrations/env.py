@@ -2,8 +2,8 @@ import logging
 from logging.config import fileConfig
 
 from flask import current_app
-
 from alembic import context
+from sqlalchemy import text
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -26,8 +26,7 @@ def get_engine():
 
 def get_engine_url():
     try:
-        return get_engine().url.render_as_string(hide_password=False).replace(
-            '%', '%%')
+        return get_engine().url.render_as_string(hide_password=False).replace('%', '%%')
     except AttributeError:
         return str(get_engine().url).replace('%', '%%')
 
@@ -39,11 +38,6 @@ def get_engine_url():
 config.set_main_option('sqlalchemy.url', get_engine_url())
 target_db = current_app.extensions['migrate'].db
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
-
 
 def get_metadata():
     if hasattr(target_db, 'metadatas'):
@@ -51,21 +45,35 @@ def get_metadata():
     return target_db.metadata
 
 
-def run_migrations_offline():
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
+def _cleanup_sqlite_tmp_tables(connection):
     """
+    Borra cualquier tabla temporal (prefijo _alembic_tmp_) que haya quedado
+    de corridas interrumpidas. Solo aplica a SQLite.
+    """
+    try:
+        if connection.dialect.name == "sqlite":
+            res = connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '_alembic_tmp_%'"
+            )
+            rows = res.fetchall()
+            if rows:
+                for (tname,) in rows:
+                    connection.exec_driver_sql(f"DROP TABLE IF EXISTS {tname}")
+                    logger.info("[env.py] DROP %s", tname)
+    except Exception as e:
+        logger.warning("[env.py] Limpieza _alembic_tmp_ falló: %s", e)
+
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
+
+    # En offline no tenemos conexión, así que no podemos limpiar tablas aquí.
+    # La limpieza se hace en online (al tener connection).
     context.configure(
-        url=url, target_metadata=get_metadata(), literal_binds=True
+        url=url,
+        target_metadata=get_metadata(),
+        literal_binds=True,
     )
 
     with context.begin_transaction():
@@ -73,17 +81,11 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-
+    """Run migrations in 'online' mode."""
     # this callback is used to prevent an auto-migration from being generated
     # when there are no changes to the schema
     # reference: http://alembic.zzzcomputing.com/en/latest/cookbook.html
-    def process_revision_directives(context, revision, directives):
+    def process_revision_directives(context_, revision, directives):
         if getattr(config.cmd_opts, 'autogenerate', False):
             script = directives[0]
             if script.upgrade_ops.is_empty():
@@ -97,11 +99,22 @@ def run_migrations_online():
     connectable = get_engine()
 
     with connectable.connect() as connection:
+        # Limpieza preventiva antes de configurar el contexto
+        _cleanup_sqlite_tmp_tables(connection)
+
+        # Si es SQLite, forzamos batch mode
+        if connection.dialect.name == "sqlite":
+            # respetamos flags existentes y solo imponemos render_as_batch=True
+            conf_args = {**conf_args, "render_as_batch": True}
+
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
             **conf_args
         )
+
+        # Limpieza adicional justo antes de correr migraciones (por si algo creó tmp nuevamente)
+        _cleanup_sqlite_tmp_tables(connection)
 
         with context.begin_transaction():
             context.run_migrations()
