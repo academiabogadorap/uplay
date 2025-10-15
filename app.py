@@ -24,6 +24,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate  # ← NUEVO
 from sqlalchemy import func
+from werkzeug.routing import BuildError
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -4444,19 +4445,21 @@ def admin_torneos_list():
     return render_template('admin_torneos_list.html', torneos=torneos)
 
 
+
 @app.route('/admin/torneos/new', methods=['GET', 'POST'])
 @admin_required
 def admin_torneos_new():
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
     if request.method == 'POST':
+        # --- Datos del form (con defaults seguros) ---
         nombre = (request.form.get('nombre') or '').strip()
-        modalidad = (request.form.get('modalidad') or 'SINGLES').strip().upper()   # viene del form
-        formato = modalidad  # en modelo se llama 'formato'
+        modalidad = (request.form.get('modalidad') or 'SINGLES').strip().upper()   # UI: SINGLES | DOBLES
+        formato = modalidad  # en el modelo usamos 'formato'
         tipo = (request.form.get('formato') or 'AMERICANO').strip().upper()       # AMERICANO | ZONAS+PLAYOFF | PLAYOFF
 
         categoria_id = request.form.get('categoria_id', type=int)
-        fecha_inicio = request.form.get('fecha_inicio') or None
+        fecha_inicio_raw = (request.form.get('fecha_inicio') or '').strip()
         sede = (request.form.get('sede') or '').strip() or None
         notas = (request.form.get('notas') or '').strip() or None
 
@@ -4464,32 +4467,50 @@ def admin_torneos_new():
         lim_jug = request.form.get('limite_jugadores', type=int)
         lim_par = request.form.get('limite_parejas', type=int)
 
+        current_app.logger.info(
+            "[admin_torneos_new] POST: nombre=%r modalidad=%r tipo=%r cat_id=%r fecha=%r lim_jug=%r lim_par=%r",
+            nombre, modalidad, tipo, categoria_id, fecha_inicio_raw, lim_jug, lim_par
+        )
+
         if not nombre:
             flash('El nombre es obligatorio.', 'error')
             return redirect(url_for('admin_torneos_new'))
 
-        # cupo_max: guardamos lo que venga según modalidad
+        # cupo_max según modalidad
         cupo_max = None
         if formato == 'SINGLES':
             cupo_max = lim_jug if (lim_jug and lim_jug >= 2) else None
         else:  # DOBLES
             cupo_max = lim_par if (lim_par and lim_par >= 2) else None
 
-        # Parse de fecha (si vino)
+        # Parse de fecha tolerante
         fecha_dt = None
-        if fecha_inicio:
-            try:
-                fecha_dt = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
-            except ValueError:
-                flash('Fecha de inicio inválida.', 'error')
+        if fecha_inicio_raw:
+            for fmt in ('%Y-%m-%d', '%Y/%m/%d'):
+                try:
+                    fecha_dt = datetime.strptime(fecha_inicio_raw, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if fecha_dt is None:
+                flash('Fecha de inicio inválida. Usá formato YYYY-MM-DD.', 'error')
                 return redirect(url_for('admin_torneos_new'))
 
-        # Crear torneo (seteamos también modalidad legacy para compatibilidad con la DB)
+        # creador opcional
+        creador_id = None
+        try:
+            cj = get_current_jugador()
+            if cj:
+                creador_id = cj.id
+        except Exception:
+            pass
+
+        # Crear torneo (manteniendo compat con columna legacy modalidad NOT NULL)
         t = Torneo(
             nombre=nombre,
             categoria_id=categoria_id or None,
-            formato=formato,        # 'SINGLES' | 'DOBLES' (campo nuevo)
-            modalidad=formato,      # <-- COMPAT: llenar columna legacy NOT NULL
+            formato=formato,        # 'SINGLES' | 'DOBLES'
+            modalidad=formato,      # compat: legacy
             tipo=tipo,              # 'AMERICANO' | 'ZONAS+PLAYOFF' | 'PLAYOFF'
             estado='BORRADOR',
             inscripcion_libre=True, # MVP
@@ -4497,22 +4518,35 @@ def admin_torneos_new():
             fecha_inicio=fecha_dt,
             sede=sede,
             notas=notas,
-            created_by_id=get_current_jugador().id if get_current_jugador() else None,
+            created_by_id=creador_id,
         )
         db.session.add(t)
         try:
             db.session.commit()
-        except IntegrityError as e:
+            current_app.logger.info("[admin_torneos_new] creado OK id=%s", t.id)
+        except IntegrityError:
             db.session.rollback()
-            current_app.logger.exception("Error creando torneo")
+            current_app.logger.exception("IntegrityError creando torneo")
             flash('No se pudo crear el torneo (datos inválidos o duplicados).', 'error')
+            return redirect(url_for('admin_torneos_new'))
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception("Error inesperado creando torneo")
+            flash(f'Error al crear el torneo: {e}', 'error')
             return redirect(url_for('admin_torneos_new'))
 
         flash('Torneo creado.', 'ok')
-        return redirect(url_for('admin_torneos_view', tid=t.id))
+        # Redirigir al detalle admin; si el endpoint no existe en el deploy, ir al listado
+        try:
+            return redirect(url_for('admin_torneos_view', tid=t.id))
+        except BuildError:
+            current_app.logger.exception("BuildError al redirigir a admin_torneos_view")
+            flash('Torneo creado. No encontré la vista de detalle en este entorno; te llevo al listado.', 'info')
+            return redirect(url_for('admin_torneos_list'))
 
     # GET -> usar tu template existente
     return render_template('admin_torneos_form.html', categorias=categorias)
+
 
 
 @app.route('/admin/torneos/<int:tid>', methods=['GET'])
@@ -4905,6 +4939,25 @@ def torneo_public_detail(torneo_id: int):
 @app.route('/torneo/<int:torneo_id>')
 def torneo_public_detail_legacy(torneo_id: int):
     return redirect(url_for('torneo_public_detail', torneo_id=torneo_id), code=301)
+
+# --- Público: fixture del torneo ---
+@app.route('/torneos/<int:torneo_id>/fixture', methods=['GET'])
+def torneo_public_fixture(torneo_id: int):
+    t = Torneo.query.get_or_404(torneo_id)
+    # Restringir si es privado y no sos admin
+    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
+        abort(404)
+    return render_template('torneo_fixture.html', torneo=t)
+
+# --- Público: tabla (americano / zonas) ---
+@app.route('/torneos/<int:torneo_id>/tabla', methods=['GET'])
+def torneo_public_tabla(torneo_id: int):
+    t = Torneo.query.get_or_404(torneo_id)
+    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
+        abort(404)
+    # Más adelante: calcular tabla. Por ahora, placeholder.
+    return render_template('torneo_tabla.html', torneo=t)
+
 
 
 

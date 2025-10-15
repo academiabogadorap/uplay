@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ torneo.nombre }} — Fixture{% endblock %}
+{% block content %}
+<div class="container my-4">
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <a href="{{ url_for('torneo_public_detail', torneo_id=torneo.id) }}" class="btn btn-sm btn-outline-secondary">Volver al torneo</a>
+    <h1 class="h4 mb-0">Fixture — {{ torneo.nombre }}</h1>
+  </div>
+
+  <div class="alert alert-info">El fixture se generará aquí. (Placeholder)</div>
+</div>
+{% endblock %}
