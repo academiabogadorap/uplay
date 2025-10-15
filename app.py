@@ -115,85 +115,123 @@ def conteo_inscriptos(torneo_id: int) -> int:
 def send_mail(
     subject: str,
     body: str | None,
-    to: list[str],
+    to: list[str] | str | None = None,          # list o str
     html_body: str | None = None,
     from_email: str | None = None,
-    inline_logo_path: str | None = None,   # ← NUEVO (opcional)
-    inline_logo_cid: str = "uplaylogo",    # ← NUEVO (opcional)
+    inline_logo_path: str | None = None,
+    inline_logo_cid: str = "uplaylogo",
+    inline_images: dict[str, str] | None = None,
+    **kwargs
 ) -> bool:
-    # logger seguro dentro/fuera de app context
+    """
+    Envío SMTP con saneo de credenciales (strip/espacios) y logging de diagnóstico
+    para evitar 535 por whitespace/port/flags. Mantiene compat total con tu versión.
+    """
+    import os, ssl, smtplib, logging, mimetypes, unicodedata
+    from email.message import EmailMessage
     try:
-        logger = current_app.logger
+        from flask import current_app
+    except Exception:
+        current_app = None
+
+    # Logger seguro
+    try:
+        logger = current_app.logger  # type: ignore[union-attr]
     except Exception:
         logger = logging.getLogger(__name__)
 
-    host = os.getenv("SMTP_HOST", "")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "")
-    pwd  = os.getenv("SMTP_PASS", "")
-    use_tls = os.getenv("SMTP_TLS", "1") == "1"   # STARTTLS (587)
-    use_ssl = os.getenv("SMTP_SSL", "0") == "1"   # SSL puro (465)
+    # --- Normalización destinatarios
+    recipients = to or kwargs.get("to_addrs") or kwargs.get("recipients") or []
+    if isinstance(recipients, str):
+        recipients = [recipients]
+    to_clean = [str(t).strip() for t in recipients if t and str(t).strip()]
 
-    sender = from_email or os.getenv("SMTP_FROM") or (user or "")
-    to_clean = [t.strip() for t in (to or []) if t and t.strip()]
+    # --- Cargar y SANEAR env vars (evita 535 por espacios ocultos)
+    host = (os.getenv("SMTP_HOST", "") or "").strip()
+    port = int((os.getenv("SMTP_PORT", "587") or "587").strip())
+    user = (os.getenv("SMTP_USER", "") or "").strip()
+    pwd  = (os.getenv("SMTP_PASS", "") or "").strip()
+
+    # eliminar espacios internos (App Password de Gmail suele copiarse con espacios)
+    pwd = pwd.replace(" ", "")
+    # normalizar unicode por si hay caracteres raros pegados
+    user = unicodedata.normalize("NFKC", user)
+    pwd  = unicodedata.normalize("NFKC", pwd)
+
+    use_tls = (os.getenv("SMTP_TLS", "1") or "1").strip() == "1"
+    use_ssl = (os.getenv("SMTP_SSL", "0") or "0").strip() == "1"
+
+    sender_env = (os.getenv("SMTP_FROM") or "").strip()
+    sender = from_email or sender_env or (user or "")
 
     # Validaciones mínimas
     if not host or not port or not sender or not to_clean:
         logger.warning(
-            "SMTP: faltan variables o destinatarios. host=%s port=%s sender=%s to=%s",
+            "SMTP: faltan variables o destinatarios. host=%r port=%r sender=%r to=%r",
             host, port, sender, to_clean
         )
         return False
 
-    # Construcción del mensaje
+    # --- Mensaje
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(to_clean)
 
-    # Contenido: siempre algo en texto; si hay HTML, se adjunta como alternativa
-    texto_plano = body or " "
+    texto_plano = (body or "").strip() or " "
     msg.set_content(texto_plano)
 
     html_part = None
     if html_body:
         msg.add_alternative(html_body, subtype="html")
-        # Localizar la parte HTML para adjuntar el logo inline (si corresponde)
         for part in msg.iter_parts():
-            if part.get_content_type() == "text/html":
-                html_part = part
-                break
-
-        # Adjuntar logo inline usando CID (client-friendly)
-        if inline_logo_path and html_part:
             try:
-                import os as _os
-                import mimetypes as _mimetypes
+                if part.get_content_type() == "text/html":
+                    html_part = part
+                    break
+            except Exception:
+                continue
 
-                mime_type, _ = _mimetypes.guess_type(inline_logo_path)
-                maintype, subtype = ("image", "png")
-                if mime_type and "/" in mime_type:
-                    m_maintype, m_subtype = mime_type.split("/", 1)
-                    if m_maintype == "image" and m_subtype:
-                        maintype, subtype = m_maintype, m_subtype
+    def _attach_inline(path: str, cid: str):
+        nonlocal html_part
+        if not (path and html_part):
+            return
+        try:
+            mime_type, _ = mimetypes.guess_type(path)
+            maintype, subtype = ("image", "png")
+            if mime_type and "/" in mime_type:
+                m_maintype, m_subtype = mime_type.split("/", 1)
+                if m_maintype == "image" and m_subtype:
+                    maintype, subtype = m_maintype, m_subtype
+            with open(path, "rb") as f:
+                img_bytes = f.read()
+            html_part.add_related(img_bytes, maintype=maintype, subtype=subtype, cid=f"<{cid}>")
+            logger.info("SMTP: imagen inline embebida cid=%s desde %s (%s/%s)", cid, path, maintype, subtype)
+        except Exception as e:
+            logger.warning("SMTP: no pude adjuntar inline (%s -> cid=%s): %s", path, cid, e)
 
-                with open(inline_logo_path, "rb") as f:
-                    img_bytes = f.read()
+    if inline_logo_path and html_part:
+        _attach_inline(inline_logo_path, inline_logo_cid)
+    if inline_images and html_part:
+        for cid, path in inline_images.items():
+            if cid and path:
+                _attach_inline(path, cid)
 
-                # Importante: Content-ID con <...>
-                cid_value = f"<{inline_logo_cid}>"
-                html_part.add_related(img_bytes, maintype=maintype, subtype=subtype, cid=cid_value)
-
-                logger.info("SMTP: logo inline embebido cid=%s desde %s (%s/%s)",
-                            inline_logo_cid, inline_logo_path, maintype, subtype)
-            except Exception as e:
-                logger.warning("SMTP: no pude adjuntar logo inline (%s): %s", inline_logo_path, e)
-
+    # --- DEBUG CLAVE: imprime largo de pass y el user real que se usa
     try:
         logger.info(
-            "SMTP intento: host=%s port=%s tls=%s ssl=%s from=%s to=%s",
-            host, port, use_tls, use_ssl, sender, to_clean
+            "SMTP debug: host=%r port=%r TLS=%r SSL=%r user=%r from=%r pass_len=%d",
+            host, port, use_tls, use_ssl, user, sender, len(pwd or "")
         )
+    except Exception:
+        pass
+
+    # --- Envío
+    try:
+        if use_ssl and use_tls:
+            # Evitar combinaciones imposibles
+            logger.warning("SMTP: TLS y SSL habilitados a la vez; desactivando TLS.")
+            use_tls = False
 
         if use_ssl:
             context = ssl.create_default_context()
@@ -212,7 +250,6 @@ def send_mail(
                     server.login(user, pwd)
                 resp = server.send_message(msg)
 
-        # resp: dict de destinatarios que FALLARON; vacío = OK
         if resp:
             logger.error("SMTP: fallos por destinatario: %s", resp)
             return False
@@ -232,6 +269,8 @@ def send_mail(
     except Exception as e:
         logger.exception("SMTP error inesperado: %s", e)
         return False
+
+
 
 
 def get_or_404(model, pk):
@@ -3089,19 +3128,75 @@ def abiertos_join(pa_id):
 @app.route('/abiertos/<int:pa_id>/salir', methods=['POST'])
 def abiertos_leave(pa_id):
     pa = get_or_404(PartidoAbierto, pa_id)
-    jugador_id = request.form.get('jugador_id', type=int)
+
+    # Debe haber sesión
+    j = get_current_jugador()
+    if not j:
+        flash('Iniciá sesión para continuar.', 'error')
+        return redirect(url_for('login'))
+
+    # Si no viene jugador_id en el form, asumimos que el que se baja es el logueado
+    jugador_id = request.form.get('jugador_id', type=int) or j.id
+
+    # Autorización: solo el propio jugador o un admin puede dar la baja
+    if not (j.is_admin or jugador_id == j.id):
+        flash('No tenés permisos para dar de baja a ese jugador.', 'error')
+        return redirect(url_for('abiertos_list'))
+
     r = PartidoAbiertoJugador.query.filter_by(pa_id=pa.id, jugador_id=jugador_id).first()
     if not r:
         flash('Ese jugador no estaba inscripto.', 'error')
         return redirect(url_for('abiertos_list'))
 
+    # Eliminar inscripción
     db.session.delete(r)
-    # Si estaba “LLENO” y alguien sale, vuelve a ABIERTO
-    if pa.estado == 'LLENO':
-        pa.estado = 'ABIERTO'
+    db.session.flush()  # aseguramos que la baja impacte en los conteos
+
+    # Cupo actual luego de la baja
+    cupo_actual = (db.session.query(PartidoAbiertoJugador)
+                   .filter_by(pa_id=pa.id)
+                   .count())
+
+    suplente_promovido = None
+
+    # Si quedó un lugar libre, intentamos promover al primer suplente (FIFO)
+    if cupo_actual < 4:
+        s = (db.session.query(PartidoAbiertoSuplente)
+             .filter_by(pa_id=pa.id)
+             .order_by(PartidoAbiertoSuplente.id.asc())
+             .first())
+
+        if s:
+            # Seguridad: evitar duplicar si por alguna razón ya está inscripto
+            ya_titular = (db.session.query(PartidoAbiertoJugador)
+                          .filter_by(pa_id=pa.id, jugador_id=s.jugador_id)
+                          .first())
+            if not ya_titular:
+                db.session.add(PartidoAbiertoJugador(pa_id=pa.id, jugador_id=s.jugador_id))
+                suplente_promovido = s.jugador
+                cupo_actual += 1
+
+            # Quitamos al suplente de la lista
+            db.session.delete(s)
+            db.session.flush()
+
+    # Estado del abierto según cupo final
+    if cupo_actual >= 4:
+        pa.estado = 'LLENO'
+    else:
+        # Si estaba “LLENO” y ahora hay menos de 4, vuelve a ABIERTO
+        if pa.estado == 'LLENO':
+            pa.estado = 'ABIERTO'
+
     db.session.commit()
-    flash('Baja confirmada.', 'ok')
+
+    if suplente_promovido:
+        flash(f'Baja confirmada. Se sumó {suplente_promovido.nombre_completo} desde la lista de suplentes.', 'ok')
+    else:
+        flash('Baja confirmada.', 'ok')
+
     return redirect(url_for('abiertos_list'))
+
 
 @app.route('/abiertos/<int:pa_id>/armar', methods=['POST'])
 def abiertos_armar(pa_id):
@@ -3472,36 +3567,13 @@ def olvide_pin():
         db.session.add(pr)
         db.session.commit()
 
-        # === URLs útiles para el email (botón y logo)
+        # === URLs útiles para el email (botón)
         try:
             confirmar_url = url_for('olvide_pin_confirmar', _external=True)
         except Exception:
             confirmar_url = request.url_root.rstrip('/') + '/olvide-pin-confirmar'
 
-        # Resolver logo (priorizar PNG por compatibilidad)
-        logo_url = None
-        # 1) fuerza el path donde lo subiste
-        try:
-            logo_url = url_for('static', filename='logo/uplay.png', _external=True)
-        except Exception:
-            logo_url = None
-        # 2) fallbacks por si cambia la ubicación
-        if not logo_url:
-            for candidate in (
-                ('static', 'uplay.png'),
-                ('static', 'logo/uplay.svg'),
-                ('static', 'uplay.svg'),
-            ):
-                try:
-                    logo_url = url_for(candidate[0], filename=candidate[1], _external=True)
-                    if logo_url:
-                        break
-                except Exception:
-                    continue
-
-        current_app.logger.info("olvide-pin: logo_url=%s", logo_url)
-
-        # === HTML con logo (soporta dark mode básico y botón)
+        # === HTML con logo inline (CID), dark mode básico y botón
         subject = f"UPLAY · Código para restablecer tu PIN ({code})"
         html_body = f"""\
 <!doctype html>
@@ -3531,11 +3603,7 @@ def olvide_pin():
         <table role="presentation" width="100%" style="max-width:560px;">
           <tr>
             <td align="center" style="padding:8px 0 16px;">
-              {(
-                f'<img src="{logo_url}" alt="UPLAY" width="120" height="120" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0;outline:0;">'
-                if logo_url else
-                '<div style="font-weight:700;font-size:20px;color:#0F172A;">UPLAY</div>'
-              )}
+              <img src="cid:uplaylogo" alt="UPLAY" width="120" height="120" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0;outline:0;">
             </td>
           </tr>
 
@@ -3596,7 +3664,7 @@ def olvide_pin():
 </html>
 """
 
-        # Enviar email con el código (usa tu helper de SMTP ya configurado)
+        # Enviar email con el código (helper SMTP con imagen inline por CID)
         try:
             subject = f"UPLAY · Código para restablecer tu PIN ({code})"
             body = (
@@ -3608,11 +3676,12 @@ def olvide_pin():
             )
             ok = send_mail(
                 subject=subject,
-                body=body,           # fallback texto plano con URL visible
-                html_body=html_body, # HTML con logo + botón
-                to=[email]
+                body=body,                 # fallback texto plano con URL visible
+                html_body=html_body,       # HTML con botón + código
+                to=[email],
+                inline_images={"uplaylogo": "static/logo/uplay.png"}  # PNG local embebido por CID
             )
-            current_app.logger.info("Resultado send_mail=%s; PIN enviado a %s (jugador_id=%s) logo_url=%s", ok, email, j.id, logo_url)
+            current_app.logger.info("Resultado send_mail=%s; PIN enviado a %s (jugador_id=%s)", ok, email, j.id)
         except Exception:
             # No interrumpir el flujo de seguridad
             current_app.logger.exception("Error enviando PIN a %s", email)
@@ -3622,6 +3691,7 @@ def olvide_pin():
 
     # GET
     return render_template('olvide_pin_request.html')
+
     
 
 @app.route('/olvide-pin/confirmar', methods=['GET', 'POST'])
@@ -3712,9 +3782,14 @@ def mi_panel():
             else:
                 partidos_pend.append(m)
 
-    # Propuestas de resultado existentes para mis partidos pendientes
+    # Propuestas de resultado existentes para mis partidos pendientes (seguro si falta el modelo/tabla)
     propuestas_map = {}
-    if partidos_pend:
+    try:
+        from .models import PartidoResultadoPropuesto
+    except Exception:
+        PartidoResultadoPropuesto = globals().get('PartidoResultadoPropuesto', None)
+
+    if partidos_pend and PartidoResultadoPropuesto:
         p_ids = [m.id for m in partidos_pend]
         props = (
             db.session.query(PartidoResultadoPropuesto)
@@ -3953,6 +4028,7 @@ def mi_panel():
     )
 
 
+
 def en_zona_ascenso(j: 'Jugador') -> bool:
     return bool(j and j.categoria and j.puntos is not None and j.puntos <= j.categoria.puntos_min)
 
@@ -4080,8 +4156,13 @@ def inject_current_jugador():
 
 
 # Endpoints públicos (pueden entrar sin sesión)
-PUBLIC_ENDPOINTS = {'home', 'login', 'alta_publica', 'static', 'ranking', 'categorias_list', 'olvide_pin',
-    'olvide_pin_confirmar',}  # si querés sumar 'ranking', agregalo acá
+PUBLIC_ENDPOINTS = {
+    'home','login','alta_publica','static','ranking','categorias_list',
+    'olvide_pin','olvide_pin_confirmar',
+    # + torneos públicos
+    'torneos_public_list','torneo_public_detail','torneo_public_detail_legacy',
+    'torneo_public_fixture','torneo_public_tabla',
+}
 
 @app.before_request
 def require_login_for_app():
