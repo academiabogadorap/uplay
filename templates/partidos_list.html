@@ -8,8 +8,11 @@
 
   {# --- Tooltip CSS mínimo, solo para esta página --- #}
   <style>
-    .hint-chip{position:relative; display:inline-block;}
-    .hint-chip .badge{cursor:help;}
+    .hint-chip{
+      position:relative;
+      display:inline-block;
+      cursor:help; /* importante: el chip es el mismo elemento */
+    }
     .hint-chip::after{
       content: attr(data-hint);
       position:absolute; left:0; top:calc(100% + 6px);
@@ -17,7 +20,7 @@
       box-shadow:0 6px 18px rgba(0,0,0,.35);
       font-size:.9em; white-space:pre-wrap; max-width:380px; line-height:1.25;
       opacity:0; transform:translateY(-4px); pointer-events:none; transition:.15s ease;
-      z-index:20;
+      z-index:9999; /* subido para evitar que quede tapado */
     }
     .hint-chip:hover::after,
     .hint-chip:focus-within::after{ opacity:1; transform:translateY(0); }
@@ -99,19 +102,31 @@
                   </span>
 
                   {% if m.estado == 'PENDIENTE' and requiere_inv and not ambos_aceptaron %}
-                    <span class="hint-chip badge badge-warn" data-hint="{{ 'Faltan: ' ~ faltan_aceptar_str }}">
+                    <span
+                      class="hint-chip badge badge-warn"
+                      data-hint="{{ ('Faltan: ' ~ faltan_aceptar_str)|e }}"
+                      title="{{ ('Faltan: ' ~ faltan_aceptar_str)|e }}"
+                    >
                       falta aceptación
                     </span>
                   {% endif %}
 
                   {% if m.estado == 'PENDIENTE' and hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
-                    <span class="hint-chip badge" data-hint="{{ 'Falta: ' ~ (faltan_confirmar|join(', ')) }}">
+                    <span
+                      class="hint-chip badge"
+                      data-hint="{{ ('Falta: ' ~ (faltan_confirmar|join(', ')))|e }}"
+                      title="{{ ('Falta: ' ~ (faltan_confirmar|join(', ')))|e }}"
+                    >
                       resultado propuesto — falta confirmación
                     </span>
                   {% endif %}
 
                   {% if m.estado == 'PROPUESTO' and hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
-                    <span class="hint-chip badge" data-hint="{{ 'Falta: ' ~ (faltan_confirmar|join(', ')) }}">
+                    <span
+                      class="hint-chip badge"
+                      data-hint="{{ ('Falta: ' ~ (faltan_confirmar|join(', ')))|e }}"
+                      title="{{ ('Falta: ' ~ (faltan_confirmar|join(', ')))|e }}"
+                    >
                       falta confirmación
                     </span>
                   {% endif %}
@@ -119,7 +134,9 @@
                   {% if hubo_rechazo %}
                     <span
                       class="hint-chip badge badge-danger"
-                      data-hint="Propuesta rechazada por {{ m.rechazo_ultimo_por.nombre_completo if m.rechazo_ultimo_por else 'alguien' }} el {{ m.rechazo_ultimo_en|localdt('%Y-%m-%d %H:%M') if m.rechazo_ultimo_en else '-' }}.">
+                      data-hint="{{ ('Propuesta rechazada por ' ~ (m.rechazo_ultimo_por.nombre_completo if m.rechazo_ultimo_por else 'alguien') ~ ' el ' ~ (m.rechazo_ultimo_en|localdt('%Y-%m-%d %H:%M') if m.rechazo_ultimo_en else '-'))|e }}"
+                      title="{{ ('Propuesta rechazada por ' ~ (m.rechazo_ultimo_por.nombre_completo if m.rechazo_ultimo_por else 'alguien') ~ ' el ' ~ (m.rechazo_ultimo_en|localdt('%Y-%m-%d %H:%M') if m.rechazo_ultimo_en else '-'))|e }}"
+                    >
                       propuesta rechazada
                     </span>
                   {% endif %}
@@ -129,7 +146,9 @@
                     <span
                       class="hint-chip badge autocierre-chip"
                       data-propuesto-ms="{{ m.resultado_propuesto_en|utcms }}"
-                      data-hint="">
+                      data-hint=""
+                      title=""
+                    >
                       auto-cierra en …
                     </span>
                   {% endif %}
@@ -245,11 +264,15 @@
           if(remaining <= 0){
             el.textContent = 'autocierre pendiente';
             el.classList.add('badge-warn');
-            el.setAttribute('data-hint', 'La propuesta ya superó las 12h. Se cerrará automáticamente al refrescar o cuando corra la tarea.');
+            const hint = 'La propuesta ya superó las 12h. Se cerrará automáticamente al refrescar o cuando corra la tarea.';
+            el.setAttribute('data-hint', hint);
+            el.setAttribute('title', hint);
           } else {
             el.textContent = 'auto-cierra en ' + fmt(remaining);
             const when = new Date(deadline).toLocaleString();
-            el.setAttribute('data-hint', 'Auto-cierra el ' + when + ' si nadie rechaza ni confirma.');
+            const hint = 'Auto-cierra el ' + when + ' si nadie rechaza ni confirma.';
+            el.setAttribute('data-hint', hint);
+            el.setAttribute('title', hint);
             el.classList.remove('badge-warn');
           }
         }
