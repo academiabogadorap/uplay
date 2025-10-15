@@ -6,6 +6,47 @@
     <h2 style="margin:0;">Responder invitación</h2>
   </div>
 
+  {# --- Tooltip CSS mínimo, igual al de la lista --- #}
+  <style>
+    .hint-chip{position:relative; display:inline-block;}
+    .hint-chip .badge{cursor:help;}
+    .hint-chip::after{
+      content: attr(data-hint);
+      position:absolute; left:0; top:calc(100% + 6px);
+      background:#111; color:#fff; border-radius:8px; padding:8px 10px;
+      box-shadow:0 6px 18px rgba(0,0,0,.35);
+      font-size:.9em; white-space:pre-wrap; max-width:380px; line-height:1.25;
+      opacity:0; transform:translateY(-4px); pointer-events:none; transition:.15s ease;
+      z-index:20;
+    }
+    .hint-chip:hover::after,
+    .hint-chip:focus-within::after{ opacity:1; transform:translateY(0); }
+  </style>
+
+  {# ==== Helpers de estado/flags para tooltips ==== #}
+  {% set requiere_inv = (partido.rival1_id is not none and partido.rival2_id is not none) %}
+  {% set r1_ok = (partido.rival1_acepto in [True, 1, '1']) %}
+  {% set r2_ok = (partido.rival2_acepto in [True, 1, '1']) %}
+  {% set ambos_ok = r1_ok and r2_ok %}
+
+  {% set faltan = [] %}
+  {% if requiere_inv and not ambos_ok %}
+    {% if (partido.rival1_acepto is none or partido.rival1_acepto in [False,0,'0']) and partido.rival1 %}
+      {% set _ = faltan.append(partido.rival1.nombre_completo) %}
+    {% endif %}
+    {% if (partido.rival2_acepto is none or partido.rival2_acepto in [False,0,'0']) and partido.rival2 %}
+      {% set _ = faltan.append(partido.rival2.nombre_completo) %}
+    {% endif %}
+  {% endif %}
+  {% set faltan_str = faltan|join(', ') %}
+
+  {% set estado = partido.estado %}
+  {% set badge_cls = 'badge' %}
+  {% if estado == 'JUGADO' %}{% set badge_cls = 'badge badge-ok' %}
+  {% elif estado in ['PENDIENTE','PROPUESTO','POR_CONFIRMAR','ACEPTADO'] %}{% set badge_cls = 'badge badge-warn' %}
+  {% elif estado in ['CANCELADO','EN_REVISION'] %}{% set badge_cls = 'badge badge-danger' %}
+  {% endif %}
+
   <!-- Resumen del partido -->
   <div class="card" style="margin-bottom:10px;">
     <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
@@ -23,9 +64,25 @@
           <span class="badge" title="Categoría">{{ partido.categoria.nombre }}</span>
         {% endif %}
         {% if partido.fecha %}
-          <span class="badge" title="Fecha">{{ partido.fecha.strftime('%Y-%m-%d %H:%M') }}</span>
+          {# si tenés el filtro localdt, usalo; si no, caé en strftime #}
+          {% if partido.fecha.__class__.__name__ == 'datetime' and partido.fecha|default(None) %}
+            <span class="badge" title="Fecha">
+              {{ partido.fecha|localdt('%Y-%m-%d %H:%M') if 'localdt' in globals() else partido.fecha.strftime('%Y-%m-%d %H:%M') }}
+            </span>
+          {% else %}
+            <span class="badge" title="Fecha">{{ partido.fecha }}</span>
+          {% endif %}
         {% endif %}
-        <span class="badge badge-warn" title="Estado">PENDIENTE</span>
+
+        <span class="{{ badge_cls }}" title="Estado">{{ estado }}</span>
+
+        {% if requiere_inv and not ambos_ok %}
+          <span class="hint-chip badge badge-warn" data-hint="{{ 'Faltan aceptar: ' ~ faltan_str }}">
+            falta aceptación
+          </span>
+        {% elif ambos_ok and estado in ['PENDIENTE','ACEPTADO'] %}
+          <span class="badge badge-ok">rivales aceptaron</span>
+        {% endif %}
       </div>
     </div>
   </div>

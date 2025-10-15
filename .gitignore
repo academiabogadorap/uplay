@@ -6,3 +6,4 @@ instance/
 .env
 *.sqlite
 *.db
+ar parámetro 'to' en send_mail (reemplaza to_addrs)*
