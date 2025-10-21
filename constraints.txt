@@ -1,0 +1,9 @@
+# Versiones con wheel para evitar compilar en Render
+psycopg2-binary==2.9.9
+cryptography==43.0.1
+cffi==1.17.0
+greenlet==3.0.3
+
+# Si usás estos, descomentá:
+# numpy==2.1.2
+# pandas==2.2.3
