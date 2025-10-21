@@ -12,29 +12,43 @@
       Rivales propuestos: <strong>{{ desafio.rival1.nombre_completo }}</strong> + <strong>{{ desafio.rival2.nombre_completo }}</strong>
     </p>
 
+    {# --- lógica para permitir/denegar cambio de compañero --- #}
+    {% set yo_es_r1 = (yo.id == desafio.rival1_id) %}
+    {% set otro_flag_acepto = (desafio.rival2_acepto if yo_es_r1 else desafio.rival1_acepto) %}
+    {% set puede_cambiar_compa = (otro_flag_acepto != 1) %}
+
     <h3 style="margin:8px 0;">Tus opciones</h3>
 
     <!-- Aceptar tal cual -->
     <form method="post" style="margin-bottom:10px;">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
       <input type="hidden" name="accion" value="aceptar">
       <button type="submit">Aceptar (con el compañero propuesto)</button>
     </form>
 
-    <!-- Aceptar eligiendo compañero -->
-    <form method="post" style="margin-bottom:10px;">
-      <input type="hidden" name="accion" value="aceptar">
-      <label>O aceptar eligiendo tu compañero (de {{ cat_superior_nombre }}):</label>
-      <select name="compa_nuevo_id">
-        <option value="">— Elegí tu compañero —</option>
-        {% for j in candidatos_compa %}
-          <option value="{{ j.id }}">{{ j.nombre_completo }} — {{ j.puntos }} pts</option>
-        {% endfor %}
-      </select>
-      <button type="submit" style="margin-left:6px;">Aceptar con mi compañero</button>
-    </form>
+    <!-- Aceptar eligiendo compañero (solo si está permitido) -->
+    {% if puede_cambiar_compa %}
+      <form method="post" style="margin-bottom:10px;">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <input type="hidden" name="accion" value="aceptar">
+        <label>O aceptar eligiendo tu compañero (de {{ cat_superior_nombre }}):</label>
+        <select name="compa_nuevo_id">
+          <option value="">— Elegí tu compañero —</option>
+          {% for j in candidatos_compa %}
+            <option value="{{ j.id }}">{{ j.nombre_completo }} — {{ j.puntos }} pts</option>
+          {% endfor %}
+        </select>
+        <button type="submit" style="margin-left:6px;">Aceptar con mi compañero</button>
+      </form>
+    {% else %}
+      <div class="flash-warning" style="margin:8px 0;">
+        El otro rival ya aceptó. No se puede cambiar el compañero en este punto.
+      </div>
+    {% endif %}
 
     <!-- Rechazar -->
     <form method="post">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
       <input type="hidden" name="accion" value="rechazar">
       <button type="submit" onclick="return confirm('¿Seguro que querés rechazar este desafío?')">Rechazar</button>
     </form>

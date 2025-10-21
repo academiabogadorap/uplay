@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Proponer resultado — Partido #{{ p.id }}{% endblock %}
+{% block content %}
+  <h2>Proponer resultado</h2>
+  <form method="post">
+    <div class="form-row">
+      <label>Ganador</label>
+      <select name="ganador_lado" required>
+        <option value="">-- Elegí --</option>
+        <option value="A">Lado A ({{ p.ladoA_nombres }})</option>
+        <option value="B">Lado B ({{ p.ladoB_nombres }})</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label>Sets</label>
+      <input name="sets_text" type="text" placeholder="6-3, 4-6, 10-8">
+      <small class="muted">Formato: 6-4, 7-5 (opcional)</small>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn">Enviar propuesta</button>
+      <a class="btn btn-ghost" href="{{ url_for('torneo_partido_detalle', partido_id=p.id) }}">Cancelar</a>
+    </div>
+  </form>
+{% endblock %}

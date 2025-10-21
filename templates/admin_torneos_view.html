@@ -33,6 +33,8 @@
     {% if t.estado in ('BORRADOR','CANCELADO') %}
       <!-- Abrir inscripción -->
       <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
+        {# CSRF opcional #}
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn">Abrir inscripción</button>
       </form>
       <!-- Generar fixture aún bloqueado -->
@@ -41,21 +43,74 @@
       </span>
 
     {% elif t.estado == 'INSCRIPCION' %}
-      <!-- Cerrar inscripción (volver a BORRADOR) -->
+      <!-- Cerrar inscripción -->
       <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn btn-ghost">Cerrar inscripción</button>
       </form>
-      <!-- Generar fixture aún bloqueado -->
+      <!-- Generar fixture bloqueado hasta cerrar inscripción -->
       <span class="btn btn-ghost btn-slim" aria-disabled="true" title="Primero cerrá inscripción">
         Generar fixture
       </span>
 
-    {% elif t.estado == 'EN_JUEGO' %}
-      <span class="btn btn-ghost btn-slim" aria-disabled="true">Inscripción cerrada</span>
-      <span class="btn btn-ghost btn-slim" aria-disabled="true">Fixture en juego</span>
+    {% elif t.estado in ('INSCRIPCION_CERRADA', 'EN_JUEGO') %}
+      {% if t.estado == 'INSCRIPCION_CERRADA' %}
+        <span class="btn btn-ghost btn-slim" aria-disabled="true">Inscripción cerrada</span>
+      {% else %}
+        <span class="btn btn-ghost btn-slim" aria-disabled="true">Fixture en juego</span>
+      {% endif %}
+
+      {# === Form funcional para Generar Fixture === #}
+      <form method="post" action="{{ url_for('admin_torneos_generar_fixture', tid=t.id) }}"
+            style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+        <!-- Modo -->
+        <label class="muted" for="modo" style="margin-left:4px;">Modo</label>
+        <select name="modo" id="modo">
+          {# AMERICANO solo cuando está INSCRIPCION_CERRADA #}
+          <option value="AMERICANO" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
+            Americano (liga / por zonas)
+          </option>
+          {# PLAYOFF (1ª ronda) solo cuando está INSCRIPCION_CERRADA #}
+          <option value="PLAYOFF" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
+            Playoff (crear 1ª ronda)
+          </option>
+          {# PLAYOFF_NEXT disponible también en EN_JUEGO #}
+          <option value="PLAYOFF_NEXT">Siguiente ronda de Playoff</option>
+        </select>
+
+        <!-- Zonas (solo aplica a AMERICANO) -->
+        <label class="muted" for="zonas">Zonas</label>
+        <select name="zonas" id="zonas" title="Solo aplica para AMERICANO">
+          {% for z in range(1, 17) %}
+            <option value="{{ z }}" {{ 'selected' if z == 1 else '' }}>{{ z }}</option>
+          {% endfor %}
+        </select>
+
+        <!-- Ida y vuelta (solo aplica a AMERICANO) -->
+        <label class="muted" for="ida_y_vuelta">Ida y vuelta</label>
+        <select name="ida_y_vuelta" id="ida_y_vuelta" title="Solo aplica para AMERICANO">
+          <option value="0" selected>No</option>
+          <option value="1">Sí</option>
+        </select>
+
+        <button type="submit" class="btn">Generar fixture</button>
+      </form>
+
+    {% elif t.estado in ('FINALIZADO') %}
+      <span class="btn btn-ghost btn-slim" aria-disabled="true">Torneo finalizado</span>
 
     {% else %}
       <span class="btn btn-ghost btn-slim" aria-disabled="true">Acciones no disponibles</span>
     {% endif %}
+
+    {# === NUEVO: Botón Eliminar torneo (visible siempre para admin) === #}
+    <form method="post"
+          action="{{ url_for('admin_torneo_eliminar', tid=t.id) }}"
+          onsubmit="return confirm('¿Seguro que querés eliminar este torneo? Esta acción no se puede deshacer.');">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <button type="submit" class="btn btn-danger">Eliminar torneo</button>
+    </form>
   </div>
 {% endblock %}

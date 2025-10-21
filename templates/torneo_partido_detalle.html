@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Partido de Torneo #{{ p.id }}{% endblock %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+    <h2 style="margin:0;">{{ p.torneo.nombre if p.torneo else 'Torneo' }} — {{ p.ronda or 'Partido' }}</h2>
+    <span class="badge">Estado: {{ p.estado }}</span>
+  </div>
+
+  <div class="card" style="padding:10px;">
+    <div><strong>Lado A:</strong> {{ p.ladoA_nombres }}</div>
+    <div><strong>Lado B:</strong> {{ p.ladoB_nombres }}</div>
+    <div><strong>Programado:</strong> {{ p.programado_en or '-' }} — <strong>Cancha:</strong> {{ p.cancha or '-' }}</div>
+  </div>
+
+  {% if p.resultado_def %}
+    <div class="card" style="margin-top:10px;">
+      <h3 style="margin-top:0;">Resultado</h3>
+      <div><strong>Ganador:</strong> {{ 'Lado A' if p.resultado_def.ganador_lado == 'A' else 'Lado B' }}</div>
+      <div><strong>Sets:</strong> {{ p.resultado_def.sets_text or '-' }}</div>
+    </div>
+  {% elif prop %}
+    <div class="card" style="margin-top:10px;">
+      <h3 style="margin-top:0;">Propuesta pendiente</h3>
+      <div><strong>Ganador propuesto:</strong> {{ 'Lado A' if prop.ganador_lado == 'A' else 'Lado B' }}</div>
+      <div><strong>Sets:</strong> {{ prop.sets_text or '-' }}</div>
+      <div><strong>Confirmaciones:</strong> A={{ prop.confirma_ladoA if prop.confirma_ladoA is not none else 'pend.' }},
+           B={{ prop.confirma_ladoB if prop.confirma_ladoB is not none else 'pend.' }}</div>
+    </div>
+  {% endif %}
+
+  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% if puede_proponer %}
+      <a href="{{ url_for('torneo_partido_proponer', partido_id=p.id) }}" class="btn">Proponer resultado</a>
+    {% endif %}
+    {% if puede_responder and prop %}
+      <a href="{{ url_for('torneo_partido_responder', partido_id=p.id) }}" class="btn btn-ghost">Responder propuesta</a>
+    {% endif %}
+  </div>
+
+  <p style="margin-top:12px;"><a href="{{ url_for('partidos_list') }}">← Volver a /partidos</a></p>
+{% endblock %}

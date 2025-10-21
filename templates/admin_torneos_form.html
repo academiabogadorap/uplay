@@ -17,8 +17,8 @@
         <div>
           <label class="muted" for="modalidad" style="display:block; margin-bottom:4px;">Modalidad</label>
           <select id="modalidad" name="modalidad" required>
-            <option value="SINGLES">SINGLES</option>
-            <option value="DOBLES">DOBLES</option>
+            <option value="SINGLES">INDIVIDUAL</option>
+            <option value="DOBLES">PAREJAS</option>
           </select>
         </div>
         <div>
@@ -42,11 +42,11 @@
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px;">
         <div id="wrap_limite_jug">
-          <label class="muted" for="limite_jugadores" style="display:block; margin-bottom:4px;">Límite de jugadores (solo SINGLES)</label>
+          <label class="muted" for="limite_jugadores" style="display:block; margin-bottom:4px;">Límite de jugadores (solo Individual)</label>
           <input id="limite_jugadores" name="limite_jugadores" type="number" min="2" placeholder="Ej: 16" style="width:100%;">
         </div>
         <div id="wrap_limite_par">
-          <label class="muted" for="limite_parejas" style="display:block; margin-bottom:4px;">Límite de parejas (solo DOBLES)</label>
+          <label class="muted" for="limite_parejas" style="display:block; margin-bottom:4px;">Límite de parejas (solo Parejas)</label>
           <input id="limite_parejas" name="limite_parejas" type="number" min="2" placeholder="Ej: 16" style="width:100%;">
         </div>
         <div>
@@ -73,7 +73,7 @@
   </div>
 
   <script>
-    // Mostrar/ocultar límites según modalidad
+    // Mostrar/ocultar límites según modalidad (los values siguen siendo SINGLES/DOBLES)
     const modalidad = document.getElementById('modalidad');
     const wrapJug = document.getElementById('wrap_limite_jug');
     const wrapPar = document.getElementById('wrap_limite_par');

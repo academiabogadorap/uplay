@@ -28,8 +28,13 @@
       </select>
 
       <label>Sets (opcional)</label>
-      <input name="sets_text" placeholder="Ej: 6-4 3-6 10-7"
+      <input name="sets_text" placeholder="Ej: 6-4, 3-6, 10-7"
              value="{{ partido.resultado.sets_text if partido.resultado else '' }}">
+
+      <label style="display:inline-flex; gap:6px; align-items:center; margin-top:8px;">
+        <input type="checkbox" name="recalcular" value="1">
+        Recalcular puntos ahora
+      </label>
 
       <div style="margin-top:8px;">
         <button type="submit" name="action" value="update">Guardar cambios</button>
@@ -39,9 +44,18 @@
 
     <form method="post" style="border:1px solid #f3caca; padding:10px; border-radius:8px;">
       <h3 style="margin:0 0 8px; color:#a33;">Reabrir partido</h3>
-      <p style="margin:0 0 8px;">Esto borra el resultado (si lo hay) y pasa el partido a <strong>PENDIENTE</strong>.<br>
-      <em>Atención:</em> los puntos NO se recalculan automáticamente.</p>
-      <button type="submit" name="action" value="reopen" onclick="return confirm('¿Reabrir este partido?')">Reabrir</button>
+      <p style="margin:0 0 8px;">
+        Esto borra el resultado (si lo hay) y pasa el partido a <strong>PENDIENTE</strong>.<br>
+        <em>Atención:</em> los puntos NO se recalculan automáticamente a menos que marques la opción de abajo.
+      </p>
+
+      <label style="display:inline-flex; gap:6px; align-items:center; margin-bottom:8px;">
+        <input type="checkbox" name="recalcular" value="1">
+        Recalcular puntos ahora
+      </label>
+
+      <button type="submit" name="action" value="reopen"
+              onclick="return confirm('¿Reabrir este partido?')">Reabrir</button>
     </form>
   </div>
 {% endblock %}

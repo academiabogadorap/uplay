@@ -28,15 +28,30 @@
             {% set puede_borrar = t.estado in ['BORRADOR','INSCRIPCION'] %}
             <tr>
               <td>{{ t.nombre }}</td>
-              <td>{{ t.modalidad }}</td>
-              <td>{{ t.formato }}</td>
+
+              {# Modalidad: Individual/Parejas (desde t.modalidad con valores SINGLES/DOBLES) #}
+              <td>
+                {{ 'INDIVIDUAL' if (t.modalidad or '').upper() == 'SINGLES'
+                   else 'PAREJAS' if (t.modalidad or '').upper() == 'DOBLES'
+                   else (t.modalidad or '-') }}
+              </td>
+
+              {# Formato: mostrar el TIPO del torneo (Americano, Zonas + Playoff, Playoff) #}
+              <td>
+                {% set tipo = (t.tipo or '') %}
+                {{ 'AMERICANO' if tipo.upper() == 'AMERICANO'
+                   else 'ZONAS + PLAYOFF' if tipo.upper() in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
+                   else 'PLAYOFF' if tipo.upper() == 'PLAYOFF'
+                   else (tipo or '-') }}
+              </td>
+
               <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
               <td><span class="badge">{{ t.estado }}</span></td>
               <td>{{ t.fecha_inicio or '-' }}</td>
               <td style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
                 <a class="btn btn-ghost btn-slim" href="{{ url_for('admin_torneos_view', tid=t.id) }}">Ver</a>
 
-                <form action="{{ url_for('admin_torneos_delete', tid=t.id) }}"
+                <form action="{{ url_for('admin_torneo_eliminar', tid=t.id) }}"
                       method="post"
                       style="display:inline;"
                       {% if puede_borrar %}

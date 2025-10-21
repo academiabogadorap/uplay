@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 import os
 import logging
@@ -7,6 +6,8 @@ import secrets
 import string
 import re  # ← agregado para EMAIL_RE
 import unicodedata
+import sqlalchemy as sa
+import hmac
 
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
@@ -19,22 +20,35 @@ from flask import (
     flash, session, abort, jsonify, current_app  # ← agregado current_app para logs
 )
 
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError, generate_csrf
+
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, exists  # ← agregado exists
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import column_property
+from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.orm import synonym
+from sqlalchemy import event
+from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.exc import NoResultFound
 from flask_migrate import Migrate  # ← NUEVO
 from sqlalchemy import func
 from werkzeug.routing import BuildError
+from itertools import islice
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-AUTOCRON_TOKEN = os.environ.get("AUTOCRON_TOKEN", "cambia-esto")
+AUTOCRON_TOKEN = globals().get("AUTOCRON_TOKEN", "changeme-autocron-token")
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
+
+csrf = CSRFProtect()
+csrf.init_app(app)
 
 # SECRET_KEY desde entorno; fallback para desarrollo local
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-cambiala-mas-tarde')
@@ -121,11 +135,16 @@ def send_mail(
     inline_logo_path: str | None = None,
     inline_logo_cid: str = "uplaylogo",
     inline_images: dict[str, str] | None = None,
+    cc: list[str] | str | None = None,          # NUEVO
+    bcc: list[str] | str | None = None,         # NUEVO
+    reply_to: str | None = None,                # NUEVO
     **kwargs
 ) -> bool:
     """
-    Envío SMTP con saneo de credenciales (strip/espacios) y logging de diagnóstico
-    para evitar 535 por whitespace/port/flags. Mantiene compat total con tu versión.
+    Envío SMTP con saneo de credenciales (strip/espacios) y logging de diagnóstico.
+    Compatibilidad:
+      - acepta to_addrs= o recipients= (alias de to)
+      - ahora soporta CC/BCC/Reply-To (sin romper llamadas viejas)
     """
     import os, ssl, smtplib, logging, mimetypes, unicodedata
     from email.message import EmailMessage
@@ -140,11 +159,22 @@ def send_mail(
     except Exception:
         logger = logging.getLogger(__name__)
 
-    # --- Normalización destinatarios
+    # --- Normalización destinatarios principales y alias viejos ---
     recipients = to or kwargs.get("to_addrs") or kwargs.get("recipients") or []
     if isinstance(recipients, str):
         recipients = [recipients]
     to_clean = [str(t).strip() for t in recipients if t and str(t).strip()]
+
+    # CC / BCC (opcionales)
+    def _norm_list(val):
+        if not val:
+            return []
+        if isinstance(val, str):
+            return [val.strip()] if val.strip() else []
+        return [str(x).strip() for x in val if x and str(x).strip()]
+
+    cc_clean  = _norm_list(cc)
+    bcc_clean = _norm_list(bcc)
 
     # --- Cargar y SANEAR env vars (evita 535 por espacios ocultos)
     host = (os.getenv("SMTP_HOST", "") or "").strip()
@@ -152,9 +182,9 @@ def send_mail(
     user = (os.getenv("SMTP_USER", "") or "").strip()
     pwd  = (os.getenv("SMTP_PASS", "") or "").strip()
 
-    # eliminar espacios internos (App Password de Gmail suele copiarse con espacios)
+    # eliminar espacios internos (p. ej. App Password con espacios)
     pwd = pwd.replace(" ", "")
-    # normalizar unicode por si hay caracteres raros pegados
+    # normalizar unicode
     user = unicodedata.normalize("NFKC", user)
     pwd  = unicodedata.normalize("NFKC", pwd)
 
@@ -165,10 +195,10 @@ def send_mail(
     sender = from_email or sender_env or (user or "")
 
     # Validaciones mínimas
-    if not host or not port or not sender or not to_clean:
+    if not host or not port or not sender or not (to_clean or cc_clean or bcc_clean):
         logger.warning(
-            "SMTP: faltan variables o destinatarios. host=%r port=%r sender=%r to=%r",
-            host, port, sender, to_clean
+            "SMTP: faltan variables o destinatarios. host=%r port=%r sender=%r to=%r cc=%r bcc=%r",
+            host, port, sender, to_clean, cc_clean, bcc_clean
         )
         return False
 
@@ -176,7 +206,12 @@ def send_mail(
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = ", ".join(to_clean)
+    if to_clean:
+        msg["To"] = ", ".join(to_clean)
+    if cc_clean:
+        msg["Cc"] = ", ".join(cc_clean)
+    if reply_to:
+        msg["Reply-To"] = reply_to
 
     texto_plano = (body or "").strip() or " "
     msg.set_content(texto_plano)
@@ -217,11 +252,11 @@ def send_mail(
             if cid and path:
                 _attach_inline(path, cid)
 
-    # --- DEBUG CLAVE: imprime largo de pass y el user real que se usa
+    # --- DEBUG
     try:
         logger.info(
-            "SMTP debug: host=%r port=%r TLS=%r SSL=%r user=%r from=%r pass_len=%d",
-            host, port, use_tls, use_ssl, user, sender, len(pwd or "")
+            "SMTP debug: host=%r port=%r TLS=%r SSL=%r user=%r from=%r pass_len=%d to=%s cc=%s bcc=%s",
+            host, port, use_tls, use_ssl, user, sender, len(pwd or ""), to_clean, cc_clean, bcc_clean
         )
     except Exception:
         pass
@@ -229,16 +264,17 @@ def send_mail(
     # --- Envío
     try:
         if use_ssl and use_tls:
-            # Evitar combinaciones imposibles
             logger.warning("SMTP: TLS y SSL habilitados a la vez; desactivando TLS.")
             use_tls = False
+
+        all_rcpts = [*to_clean, *cc_clean, *bcc_clean]
 
         if use_ssl:
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(host, port, context=context, timeout=20) as server:
                 if user:
                     server.login(user, pwd)
-                resp = server.send_message(msg)
+                resp = server.send_message(msg, from_addr=sender, to_addrs=all_rcpts)
         else:
             with smtplib.SMTP(host, port, timeout=20) as server:
                 server.ehlo()
@@ -248,13 +284,13 @@ def send_mail(
                     server.ehlo()
                 if user:
                     server.login(user, pwd)
-                resp = server.send_message(msg)
+                resp = server.send_message(msg, from_addr=sender, to_addrs=all_rcpts)
 
         if resp:
             logger.error("SMTP: fallos por destinatario: %s", resp)
             return False
 
-        logger.info("SMTP: envío OK a %s", to_clean)
+        logger.info("SMTP: envío OK a to=%s cc=%s bcc=%s", to_clean, cc_clean, bcc_clean)
         return True
 
     except smtplib.SMTPAuthenticationError as e:
@@ -272,7 +308,6 @@ def send_mail(
 
 
 
-
 def get_or_404(model, pk):
     """
     Reemplazo 2.x-friendly de Model.query.get_or_404().
@@ -282,6 +317,92 @@ def get_or_404(model, pk):
     if obj is None:
         abort(404)
     return obj
+
+# ==== Helpers de autenticación / permisos (torneos) ====
+
+def _require_login():
+    """
+    Requiere que exista un jugador logueado. Si no, 403.
+    Devuelve el objeto Jugador actual.
+    """
+    j = get_current_jugador()
+    if not j:
+        abort(403)
+    return j
+
+def _lado_flag_dict(partido: "TorneoPartido", jugador_id: int) -> dict[str, bool]:
+    """
+    Devuelve un dict {'A': bool, 'B': bool} indicando si el jugador_id pertenece
+    al lado A y/o B del partido. Usa primero la tabla de LADOS (insc1/insc2) y
+    si no encuentra, cae al participante_a/participante_b (fallback).
+    """
+    flags = {'A': False, 'B': False}
+
+    try:
+        # 1) Preferimos la tabla de lados si está poblada
+        lados = getattr(partido, "lados", None) or []
+        if lados:
+            Ins = globals().get('TorneoInscripcion')
+            if Ins:
+                for l in lados:
+                    lado = (getattr(l, "lado", "") or "").upper()
+                    if lado not in ("A", "B"):
+                        continue
+                    for insc_id in (getattr(l, "insc1_id", None), getattr(l, "insc2_id", None)):
+                        if not insc_id:
+                            continue
+                        insc = db.session.get(Ins, insc_id)
+                        if not insc:
+                            continue
+                        if jugador_id in [insc.jugador1_id, insc.jugador2_id]:
+                            flags[lado] = True
+        # 2) Fallback: si no hay lados, usamos los participantes A/B
+        if not any(flags.values()):
+            def players_from_part(tp):
+                if not tp:
+                    return []
+                # intentamos derivar jugadores desde la inscripción del participante
+                Ins = globals().get('TorneoInscripcion')
+                insc = getattr(tp, "inscripcion", None)
+                if not insc and Ins and getattr(tp, "inscripcion_id", None):
+                    insc = db.session.get(Ins, tp.inscripcion_id)
+                if insc:
+                    return [x for x in (getattr(insc, "jugador1_id", None),
+                                        getattr(insc, "jugador2_id", None)) if x]
+                return []
+
+            a_players = players_from_part(getattr(partido, "participante_a", None))
+            b_players = players_from_part(getattr(partido, "participante_b", None))
+            flags['A'] = jugador_id in a_players
+            flags['B'] = jugador_id in b_players
+    except Exception:
+        # En caso de cualquier rareza, no romper
+        pass
+
+    return flags
+
+
+def _require_participante(partido: "TorneoPartido", jugador_id: int | None = None) -> None:
+    """
+    Exige que el jugador actual participe en el partido. Si no, 403.
+    Opcionalmente podés pasar jugador_id; si es None toma el actual.
+    """
+    j = get_current_jugador() if jugador_id is None else db.session.get(Jugador, int(jugador_id))
+    if not j:
+        abort(403)
+
+    try:
+        # Usamos el método robusto del modelo (ya contempla lados y participantes)
+        if hasattr(partido, "jugador_participa") and partido.jugador_participa(int(j.id)):
+            return
+    except Exception:
+        # Si algo falló arriba, hacemos un chequeo mínimo por lados
+        flags = _lado_flag_dict(partido, int(j.id))
+        if flags['A'] or flags['B']:
+            return
+
+    abort(403)
+
 
 def db_first_or_404(query):
     """
@@ -381,72 +502,665 @@ def _crear_participantes_desde_inscripciones(torneo: Torneo) -> list[TorneoParti
     return list(torneo.participantes)  # refrescado
 
 
-def generar_fixture_americano(torneo_id: int, por_zonas: bool = False, tamanio_zona: int | None = None):
-    t: Torneo = db.session.get(Torneo, torneo_id)
-    if not t:
-        raise ValueError("Torneo no encontrado")
-    participantes = _crear_participantes_desde_inscripciones(t)
+def generar_fixture_americano(torneo_id: int, zonas: int | None = None, ida_y_vuelta: bool = False):
+    """
+    Genera fixture AMERICANO según formato del torneo:
+      - DOBLES  -> parejas fijas (round-robin por grupos o general)
+      - SINGLES -> parejas rotativas 2v2 (usa generar_fixture_americano_individual)
+    """
+    t = get_or_404(Torneo, torneo_id)
 
-    # Crear fase
-    fase = TorneoFase(torneo_id=t.id, tipo='LIGA' if not por_zonas else 'ZONAS', orden=1,
-                      nombre='Americano', config_json={'por_zonas': por_zonas, 'tamanio_zona': tamanio_zona})
-    db.session.add(fase)
-    db.session.flush()
+    # Solo aplica a tipo AMERICANO
+    if not t.es_americano():
+        raise ValueError("Este generador es solo para torneos de tipo AMERICANO.")
 
-    # TODO: implementar round-robin real ("circle method"), grupos si por_zonas=True
-    # Por ahora: stub mínimo que no rompe.
-    if len(participantes) >= 2:
-        for i in range(0, len(participantes)-1, 2):
-            a = participantes[i]
-            b = participantes[i+1]
-            m = TorneoPartido(
-                torneo_id=t.id, fase_id=fase.id,
-                participante_a_id=a.id, participante_b_id=b.id,
-                estado='PENDIENTE', ronda='R1'
-            )
-            db.session.add(m)
+    # ---- AMERICANO INDIVIDUAL (SINGLES; parejas rotativas 2v2) ----
+    if t.es_americano_individual():
+        res = generar_fixture_americano_individual(t.id, ida_y_vuelta=ida_y_vuelta)
+        if not res.get("ok"):
+            raise ValueError(res.get("msg", "No se pudo generar el fixture SINGLES."))
+        return int(res.get("partidos_creados", 0))
 
-    t.estado = 'EN_JUEGO'
-    db.session.commit()
-    return True
+    # ---- AMERICANO EN PAREJAS (DOBLES; parejas fijas) ----
+    # Tomamos SOLO inscripciones activas/confirmadas con jugador2_id (dobles).
+    insc_q = (db.session.query(TorneoInscripcion)
+              .filter(
+                  TorneoInscripcion.torneo_id == t.id,
+                  TorneoInscripcion.estado == 'ACTIVA',
+                  (TorneoInscripcion.confirmado.is_(True) if hasattr(TorneoInscripcion, 'confirmado') else True),
+                  TorneoInscripcion.jugador2_id.isnot(None)  # requisito: pareja fija
+              ))
 
-
-def generar_playoff_directo(torneo_id: int, size: int | None = None, usar_seeds: bool = True):
-    t: Torneo = db.session.get(Torneo, torneo_id)
-    if not t:
-        raise ValueError("Torneo no encontrado")
-    participantes = _crear_participantes_desde_inscripciones(t)
-
-    # Orden por seed si hay, o por id como fallback
-    if usar_seeds:
-        participantes.sort(key=lambda p: (p.inscripcion.seed if p.inscripcion and p.inscripcion.seed is not None else 9999, p.id))
+    # Orden estable (seed si existe, luego created_at/id)
+    if hasattr(TorneoInscripcion, 'seed'):
+        insc_q = insc_q.order_by(
+            (db.nulls_last(TorneoInscripcion.seed.asc()) if hasattr(db, 'nulls_last') else TorneoInscripcion.seed.asc()),
+            (TorneoInscripcion.created_at.asc() if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc()),
+        )
     else:
-        participantes.sort(key=lambda p: p.id)
+        insc_q = insc_q.order_by(
+            (TorneoInscripcion.created_at.asc() if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc()),
+        )
 
-    n = size or len(participantes)
-    n = max(2, n)
-    participantes = participantes[:n]
+    insc = insc_q.all()
+    if not insc:
+        raise ValueError("No hay inscripciones de DOBLES activas/confirmadas para generar el fixture.")
 
-    # Crear fase playoff
-    fase = TorneoFase(torneo_id=t.id, tipo='PLAYOFF', orden=1, nombre='Playoff', config_json={'size': n})
-    db.session.add(fase)
-    db.session.flush()
+    # Asegurar TorneoParticipante 1–a–1 por cada inscripción (tu helper)
+    participantes = []
+    for i in insc:
+        p = _inscripcion_to_participante(t, i)
+        participantes.append(p)
 
-    # TODO: armar llaves reales (1-8, 4-5, etc.), crear nodos y partidos; stub mínimo:
-    # emparejar de a dos en QF/SF/Final según n
-    ronda = 'R1' if n > 4 else ('SF' if n == 4 else 'Final')
-    for i in range(0, len(participantes)-1, 2):
-        a = participantes[i]
-        b = participantes[i+1]
+    # Fase única (LIGA) y armado de grupos
+    fase = _get_or_create_fase_unica(t)
+
+    cant_zonas = int(zonas) if (zonas and zonas > 1) else 1
+    participantes.sort(key=lambda x: (getattr(x, 'seed', None) is None, getattr(x, 'seed', 10**9), x.id))
+
+    grupos = []
+    if cant_zonas == 1:
+        g = _get_or_create_grupo(t, fase, "GENERAL", 1)
+        grupos.append((g, [p.id for p in participantes]))
+    else:
+        repartidas = _repartir_en_zonas(participantes, cant_zonas)
+        for idx, zona_list in enumerate(repartidas, start=1):
+            g = _get_or_create_grupo(t, fase, f"ZONA {idx}", idx)
+            grupos.append((g, [p.id for p in zona_list]))
+
+    # Crear partidos (round-robin), ida y vuelta opcional
+    partidos_creados = 0
+    for g, ids in grupos:
+        if len(ids) < 2:
+            continue
+
+        rounds = _round_robin_pairs(ids)
+        jornada = 1
+        for pares in rounds:
+            for (a, b) in pares:
+                _crear_partido_rr(t, g, a, b, jornada)
+                partidos_creados += 1
+            jornada += 1
+
+        if ida_y_vuelta:
+            for pares in rounds:
+                for (a, b) in pares:
+                    _crear_partido_rr(t, g, b, a, jornada)
+                    partidos_creados += 1
+                jornada += 1
+
+    db.session.commit()
+    return partidos_creados
+
+def generar_playoff_directo(torneo_id: int) -> int:
+    t = get_or_404(Torneo, torneo_id)
+
+    participantes = _listar_participantes_desde_inscripciones(t)
+    n = len(participantes)
+    if n < 2:
+        raise ValueError("Se necesitan al menos 2 participantes para playoff.")
+
+    fase = _get_or_create_fase_playoff(t)
+    grupo = _get_or_create_grupo_llaves(t, fase)
+
+    if _primer_round_ya_generado(t, grupo):
+        return 0
+
+    M = _next_power_of_two(n)
+    byes = M - n
+
+    partidos_creados = 0
+    ronda_num = "1"  # string para ser consistente
+
+    auto_winners_ids = set()
+    for idx in range(byes):
+        ganador = participantes[idx]
         m = TorneoPartido(
-            torneo_id=t.id, fase_id=fase.id, ronda=ronda,
-            participante_a_id=a.id, participante_b_id=b.id, estado='PENDIENTE'
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante_a_id=ganador.id,
+            participante_b_id=ganador.id,  # o None si tu DB lo permite; si no, usa self-bye
+            estado='JUGADO',
+            ganador_participante_id=ganador.id,
+            resultado_json={'walkover': 'BYE'},
+            ronda=ronda_num
         )
         db.session.add(m)
+        partidos_creados += 1
+        auto_winners_ids.add(ganador.id)
 
-    t.estado = 'EN_JUEGO'
+    vivos = [p for p in participantes if p.id not in auto_winners_ids]
+    i, j = 0, len(vivos) - 1
+    while i < j:
+        a = vivos[i]
+        b = vivos[j]
+        m = TorneoPartido(
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante_a_id=a.id,
+            participante_b_id=b.id,
+            estado='PENDIENTE',
+            ronda=ronda_num
+        )
+        db.session.add(m)
+        partidos_creados += 1
+        i += 1
+        j -= 1
+
     db.session.commit()
-    return True
+    return partidos_creados
+
+
+def _obtener_ganador_partido(p: 'TorneoPartido') -> int | None:
+    """Devuelve el participante_id ganador si el partido está JUGADO; si no, None."""
+    try:
+        if getattr(p, 'estado', None) == 'JUGADO' and getattr(p, 'ganador_participante_id', None):
+            return int(p.ganador_participante_id)
+    except Exception:
+        pass
+    return None
+
+
+def _max_ronda_de_playoff(torneo_id: int) -> int | None:
+    """Devuelve el número de ronda de playoff más alta creada para el torneo, o None si no hay."""
+    # Asumimos que en TorneoPartido guardás la ronda (p.ej. 1: cuartos, 2: semis, 3: final).
+    # Si tu modelo guarda ronda en otro lado (TorneoLlaveNodo o similar), ajustá este query.
+    max_r = (db.session.query(sa.func.max(TorneoPartido.ronda))
+             .filter(TorneoPartido.torneo_id == torneo_id)
+             .scalar())
+    return int(max_r) if max_r is not None else None
+
+
+def generar_playoff_siguiente_ronda(torneo_id: int) -> int:
+    """
+    Crea la siguiente ronda del playoff para el torneo dado.
+    Empareja ganadores de la ronda previa en orden de ID de partido (estable).
+    Retorna la cantidad de partidos creados en la nueva ronda.
+    Reglas:
+      - Si no hay ronda previa o no está completa, no crea nada.
+      - Si la ronda previa tiene un único partido y ya tiene ganador, no crea nada (ya hay campeón).
+    """
+    t = db.session.get(Torneo, int(torneo_id))
+    if not t:
+        raise RuntimeError("Torneo inexistente.")
+
+    # Última ronda existente
+    ronda_actual = _max_ronda_de_playoff(t.id)
+    if not ronda_actual:
+        # No hay playoff previo generado (primera ronda se crea con generar_playoff_directo)
+        raise RuntimeError("Aún no hay partidos de playoff generados para este torneo.")
+
+    # Traer partidos de la ronda actual, orden estable
+    partidos_actual = (db.session.query(TorneoPartido)
+                       .filter(TorneoPartido.torneo_id == t.id,
+                               TorneoPartido.ronda == ronda_actual)
+                       .order_by(TorneoPartido.id.asc())
+                       .all())
+
+    if not partidos_actual:
+        return 0  # nada que hacer
+
+    # Si solo quedaba la final: si ya está jugada -> hay campeón; si no, no hay siguiente
+    if len(partidos_actual) == 1:
+        ganador = _obtener_ganador_partido(partidos_actual[0])
+        # Si la final ya tiene ganador, no hay siguiente ronda; si no, se espera resultado.
+        return 0
+
+    # Reunir ganadores de la ronda actual
+    ganadores_ids: list[int] = []
+    for p in partidos_actual:
+        g = _obtener_ganador_partido(p)
+        if not g:
+            # Algún partido sin definir -> no se puede crear ronda siguiente
+            return 0
+        ganadores_ids.append(g)
+
+    # Emparejar ganadores de a pares (1 vs 2, 3 vs 4, etc.)
+    if len(ganadores_ids) % 2 != 0:
+        # Playoff bien formado debería dar número par
+        raise RuntimeError("Cantidad de ganadores impar; el playoff previo no está bien definido.")
+
+    nueva_ronda = ronda_actual + 1
+    creados = 0
+
+    # Si usás TorneoFase / TorneoLlaveNodo para modelar el árbol, podés crear/ubicar la fase de playoff aquí.
+    # Este MVP crea los partidos directamente en TorneoPartido, como ya venís haciendo.
+    for i in range(0, len(ganadores_ids), 2):
+        a = ganadores_ids[i]
+        b = ganadores_ids[i + 1]
+
+        # Evitar duplicado paranoico: ¿ya existe un partido con esos participantes en esta ronda?
+        dup = (db.session.query(TorneoPartido)
+               .filter(TorneoPartido.torneo_id == t.id,
+                       TorneoPartido.ronda == nueva_ronda,
+                       sa.or_(
+                           sa.and_(TorneoPartido.participante1_id == a,
+                                   TorneoPartido.participante2_id == b),
+                           sa.and_(TorneoPartido.participante1_id == b,
+                                   TorneoPartido.participante2_id == a)
+                       ))
+               .first())
+        if dup:
+            continue
+
+        m = TorneoPartido(
+            torneo_id=t.id,
+            ronda=nueva_ronda,
+            participante1_id=a,
+            participante2_id=b,
+            estado='PENDIENTE'
+        )
+        # Sellar timestamps si tu modelo los tiene
+        now = datetime.utcnow()
+        if hasattr(m, "created_at") and getattr(m, "created_at") is None:
+            m.created_at = now
+        if hasattr(m, "updated_at") and getattr(m, "updated_at") is None:
+            m.updated_at = now
+
+        db.session.add(m)
+        creados += 1
+
+    if creados > 0 and t.estado != 'EN_JUEGO':
+        # pequeño ajuste: si seguía en BORRADOR/INSCRIPCION pero ya hay playoff, lo marcamos en juego
+        t.estado = 'EN_JUEGO'
+
+    db.session.commit()
+    return creados
+
+def _round_robin_pairs(ids, ida_y_vuelta=False):
+    """
+    ids: lista de IDs de TorneoParticipante (enteros)
+    Devuelve lista de dicts: {a_id, b_id, ronda, orden}
+    Implementa método del círculo. Soporta BYE si es impar.
+    """
+    jugadores = list(ids)
+    bye = None
+    if len(jugadores) % 2 == 1:
+        jugadores.append(bye)
+
+    n = len(jugadores)
+    if n < 2:
+        return []
+
+    mitad = n // 2
+    rondas = n - 1
+    arr = jugadores[:]
+    resultado = []
+
+    orden_global = 1
+    for r in range(1, rondas + 1):
+        izquierda = arr[:mitad]
+        derecha = arr[mitad:][::-1]
+
+        orden_en_ronda = 1
+        for i in range(mitad):
+            a = izquierda[i]
+            b = derecha[i]
+            if a is not None and b is not None:
+                resultado.append({
+                    "a_id": a,
+                    "b_id": b,
+                    "ronda": r,
+                    "orden": orden_en_ronda
+                })
+                orden_en_ronda += 1
+                orden_global += 1
+
+        # rotación: fijamos arr[0]
+        arr = [arr[0]] + [arr[-1]] + arr[1:-1]
+
+    if ida_y_vuelta:
+        # segunda rueda invirtiendo local/visita
+        vuelta = []
+        for item in resultado:
+            vuelta.append({
+                "a_id": item["b_id"],
+                "b_id": item["a_id"],
+                "ronda": item["ronda"] + rondas,
+                "orden": item["orden"]
+            })
+        resultado.extend(vuelta)
+
+    return resultado
+
+
+def generar_fixture_americano_singles(torneo_id: int, ida_y_vuelta: bool = False) -> dict:
+    torneo = Torneo.query.options(joinedload(Torneo.inscripciones)).get(torneo_id)
+    if not torneo:
+        return {"ok": False, "msg": "Torneo no encontrado."}
+
+    if torneo.es_dobles():
+        return {"ok": False, "msg": "El torneo está en formato DOBLES. Este generador es para SINGLES."}
+
+    # Inscripciones válidas SINGLES: confirmadas + activas + sin jugador2
+    inscs = (TorneoInscripcion.query
+             .filter(
+                 TorneoInscripcion.torneo_id == torneo.id,
+                 TorneoInscripcion.confirmado.is_(True),
+                 TorneoInscripcion.estado == 'ACTIVA',
+                 or_(TorneoInscripcion.jugador2_id.is_(None), TorneoInscripcion.jugador2_id == 0)
+             )
+             .options(joinedload(TorneoInscripcion.jugador1))
+             .all())
+
+    if len(inscs) < 2:
+        return {"ok": False, "msg": "Se necesitan al menos 2 inscripciones activas para generar el fixture."}
+
+    # Forzar IDs y detectar inconsistentes
+    db.session.flush()
+    malas = [i for i in inscs if not getattr(i, 'id', None)]
+    if malas:
+        return {"ok": False, "msg": "Hay inscripciones sin ID. Revisá persistencia antes de generar."}
+
+    # Asegurar/crear TorneoParticipante usando el helper seguro
+    participantes_ids = []
+    nuevos_participantes = 0
+    for insc in inscs:
+        antes = TorneoParticipante.query.filter_by(torneo_id=torneo.id, inscripcion_id=insc.id).one_or_none()
+        tp = _inscripcion_to_participante(torneo, insc)  # <-- clave
+        if not antes:
+            nuevos_participantes += 1
+        participantes_ids.append(tp.id)
+
+    # Evitar duplicados (A-B o B-A) si se vuelve a correr
+    ya = set()
+    for p in TorneoPartido.query.filter_by(torneo_id=torneo.id).all():
+        ya.add(frozenset({p.participante_a_id, p.participante_b_id}))
+
+    # Round-robin plano (usa tu helper _round_robin_pairs)
+    cruces = _round_robin_pairs(participantes_ids, ida_y_vuelta=ida_y_vuelta)
+    creados = 0
+
+    for c in cruces:
+        par = frozenset({c["a_id"], c["b_id"]})
+        if par in ya:
+            continue
+        db.session.add(TorneoPartido(
+            torneo_id=torneo.id,
+            fase_id=None,
+            grupo_id=None,
+            ronda=f"R{c['ronda']}",
+            orden=c["orden"],
+            participante_a_id=c["a_id"],
+            participante_b_id=c["b_id"],
+            estado='PENDIENTE'
+        ))
+        ya.add(par)
+        creados += 1
+
+    db.session.commit()
+    return {
+        "ok": True,
+        "msg": f"Fixture generado: {creados} partidos. (SINGLES{' ida y vuelta' if ida_y_vuelta else ''})",
+        "nuevos_participantes": nuevos_participantes,
+        "partidos_creados": creados
+    }
+
+def _generar_fixture_americano_parejas(t: Torneo, zonas: int | None = None, ida_y_vuelta: bool = False) -> int:
+    """
+    AMERICANO PAREJAS (pareja fija):
+      - Toma inscripciones ACTIVAS, CONFIRMADAS, con jugador2_id (dobles)
+      - Crea/asegura TorneoParticipante (1–a–1 con la inscripción)
+      - Genera round robin por grupo(s)
+    """
+    # 1) Inscripciones válidas de DOBLES
+    insc_q = (db.session.query(TorneoInscripcion)
+              .filter(
+                  TorneoInscripcion.torneo_id == t.id,
+                  TorneoInscripcion.estado == 'ACTIVA',
+                  TorneoInscripcion.confirmado.is_(True),
+                  TorneoInscripcion.jugador2_id.isnot(None)  # pareja fija
+              ))
+
+    # orden estable: por seed si existe, si no por created_at/id
+    if hasattr(TorneoInscripcion, 'seed'):
+        insc_q = insc_q.order_by(
+            db.nulls_last(TorneoInscripcion.seed.asc())
+            if hasattr(db, 'nulls_last') else TorneoInscripcion.seed.asc(),
+            TorneoInscripcion.created_at.asc() if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc()
+        )
+    else:
+        insc_q = insc_q.order_by(
+            TorneoInscripcion.created_at.asc() if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc()
+        )
+
+    insc = insc_q.all()
+    if len(insc) < 2:
+        raise ValueError("Se necesitan al menos 2 parejas inscriptas (ACTIVAS y CONFIRMADAS) para generar el fixture DOBLES.")
+
+    # 2) Asegurar TorneoParticipante por cada inscripción (1–a–1)
+    participantes: list[TorneoParticipante] = []
+    for i in insc:
+        p = _inscripcion_to_participante(t, i)  # tu helper existente
+        participantes.append(p)
+
+    # 3) Fase única (LIGA) y grupos/zona(s)
+    fase = _get_or_create_fase_unica(t)  # tu helper
+
+    cant_zonas = int(zonas) if (zonas and zonas > 1) else 1
+
+    # ordenar por seed (si la tenés como proxy desde la inscripción) y luego por id
+    participantes.sort(
+        key=lambda x: (
+            getattr(x, 'seed', None) is None,
+            getattr(x, 'seed', 10**9),
+            x.id
+        )
+    )
+
+    grupos: list[tuple[TorneoGrupo, list[int]]] = []
+    if cant_zonas == 1:
+        g = _get_or_create_grupo(t, fase, "GENERAL", 1)
+        grupos.append((g, [p.id for p in participantes]))
+    else:
+        repartidas = _repartir_en_zonas(participantes, cant_zonas)  # tu helper
+        for idx, zona_list in enumerate(repartidas, start=1):
+            g = _get_or_create_grupo(t, fase, f"ZONA {idx}", idx)
+            grupos.append((g, [p.id for p in zona_list]))
+
+    # 4) Crear partidos: round robin por grupo (ida y vuelta opcional)
+    partidos_creados = 0
+    for g, ids in grupos:
+        if len(ids) < 2:
+            continue
+
+        # _round_robin_pairs debe devolver lista de rondas; cada ronda = lista de pares (a,b)
+        rounds = _round_robin_pairs(ids)
+
+        jornada = 1
+        for pares in rounds:
+            for (a, b) in pares:
+                _crear_partido_rr(t, g, a, b, jornada)  # tu helper pone estado/ronda/orden si lo configuraste
+                partidos_creados += 1
+            jornada += 1
+
+        if ida_y_vuelta:
+            for pares in rounds:
+                for (a, b) in pares:
+                    _crear_partido_rr(t, g, b, a, jornada)
+                    partidos_creados += 1
+                jornada += 1
+
+    db.session.commit()
+    return partidos_creados
+
+def _rotaciones_americano_individual(insc_ids: list[int]) -> list[list[tuple[tuple[int,int], tuple[int,int]]]]:
+    """
+    Devuelve una lista de rondas.
+    Cada ronda es una lista de partidos, y cada partido es ((A1,A2),(B1,B2)),
+    donde A1/A2 y B1/B2 son IDs de TorneoInscripcion (SINGLES).
+    """
+    n = len(insc_ids)
+    if n < 4 or n % 2 != 0:
+        raise ValueError("Americano individual requiere N par >= 4 inscripciones SINGLES.")
+
+    ids = list(insc_ids)
+    if n == 4:
+        A,B,C,D = ids
+        return [
+            [((A,B), (C,D))],
+            [((A,C), (B,D))],
+            [((A,D), (B,C))],
+        ]
+
+    # Rotación general (círculo), formando parejas internas/externas cada ronda
+    left = ids[:n//2]
+    right = ids[n//2:][::-1]  # espejo
+    rondas = []
+    R = n - 1  # número estándar de rondas
+
+    for _ in range(R):
+        # Formamos parejas: extremos hacia el centro
+        parejas = []
+        half = n // 4
+        for i in range(half):
+            parejas.append( (left[i], left[-(i+1)]) )     # internas del lado izquierdo
+            parejas.append( (right[i], right[-(i+1)]) )   # internas del lado derecho
+
+        # Cruzar de a dos parejas para formar partidos
+        partidos = []
+        for i in range(0, len(parejas), 2):
+            partidos.append( (parejas[i], parejas[i+1]) )
+
+        rondas.append(partidos)
+
+        # Rotar manteniendo left[0] fijo
+        pivot = left[0]
+        ring = left[1:] + right
+        ring = [ring[-1]] + ring[:-1]
+        left = [pivot] + list(islice(ring, 0, len(left)-1))
+        right = list(islice(ring, len(left)-1, None))
+
+    return rondas
+
+
+def generar_fixture_americano_individual(torneo_id: int, ida_y_vuelta: bool = False) -> dict:
+    t = Torneo.query.get(torneo_id)
+    if not t:
+        return {"ok": False, "msg": "Torneo no encontrado."}
+    if not t.es_americano_individual():
+        return {"ok": False, "msg": "El torneo no es AMERICANO SINGLES."}
+
+    # SINGLES: inscripciones activas/confirmadas SIN jugador2
+    inscs = (TorneoInscripcion.query
+             .filter(
+                 TorneoInscripcion.torneo_id == t.id,
+                 TorneoInscripcion.estado == 'ACTIVA',
+                 (TorneoInscripcion.confirmado.is_(True) if hasattr(TorneoInscripcion, 'confirmado') else True),
+                 or_(TorneoInscripcion.jugador2_id.is_(None), TorneoInscripcion.jugador2_id == 0)
+             )
+             .order_by(TorneoInscripcion.created_at.asc() if hasattr(TorneoInscripcion, 'created_at') else TorneoInscripcion.id.asc())
+             .all())
+
+    if len(inscs) < 4 or len(inscs) % 2 != 0:
+        return {"ok": False, "msg": "Se requieren al menos 4 inscripciones SINGLES (número par)."}
+
+    # Asegurar participantes (1–a–1)
+    tp_map = {}  # insc_id -> TorneoParticipante.id
+    nuevos_participantes = 0
+    for insc in inscs:
+        antes = TorneoParticipante.query.filter_by(torneo_id=t.id, inscripcion_id=insc.id).one_or_none()
+        tp = _inscripcion_to_participante(t, insc)
+        if not antes:
+            nuevos_participantes += 1
+        tp_map[insc.id] = tp.id
+
+    insc_ids = [i.id for i in inscs]
+    rondas = _rotaciones_americano_individual(insc_ids)
+
+    fase = _get_or_create_fase_unica(t)
+    grupo = _get_or_create_grupo(t, fase, "GENERAL", 1)
+
+    # --- helper idempotente para lados (evita UNIQUE (partido_id, lado)) ---
+    LadoModel = globals().get('TorneoPartidoLado')
+    def _set_lado(partido_id: int, lado: str, insc1_id: int | None, insc2_id: int | None):
+        if not LadoModel:
+            return None
+        lado = (lado or 'A').upper()
+        existente = (db.session.query(LadoModel)
+                     .filter_by(partido_id=partido_id, lado=lado)
+                     .one_or_none())
+        if existente:
+            existente.insc1_id = insc1_id
+            existente.insc2_id = insc2_id
+            return existente
+        nuevo = LadoModel(partido_id=partido_id, lado=lado, insc1_id=insc1_id, insc2_id=insc2_id)
+        db.session.add(nuevo)
+        return nuevo
+
+    creados = 0
+    orden_global = 1
+    jornada = 1
+
+    # Utilidad: limpia lados previos por si SQLite reusó IDs de partido
+    def _clear_lados(partido_id: int):
+        if not LadoModel:
+            return
+        db.session.query(LadoModel).filter_by(partido_id=partido_id).delete(synchronize_session=False)
+
+    # ------- Ida -------
+    for partidos in rondas:
+        for (A1, A2), (B1, B2) in partidos:
+            # Crear TorneoPartido “titular” apuntando a un participante por lado (p.ej. A1 y B1)
+            p_obj = TorneoPartido(
+                torneo_id=t.id,
+                fase_id=fase.id,
+                grupo_id=grupo.id,
+                ronda=f"R{jornada}",
+                orden=orden_global,
+                participante_a_id=tp_map[A1],  # uno del lado A
+                participante_b_id=tp_map[B1],  # uno del lado B
+                estado='PENDIENTE'
+            )
+            db.session.add(p_obj)
+            db.session.flush()  # obtener p_obj.id
+
+            # Limpiar posibles lados viejos con el mismo partido_id (por reutilización de IDs)
+            _clear_lados(p_obj.id)
+
+            # Guardar / actualizar explícitamente las duplas reales de cada lado
+            _set_lado(p_obj.id, 'A', A1, A2)
+            _set_lado(p_obj.id, 'B', B1, B2)
+
+            creados += 1
+            orden_global += 1
+        jornada += 1
+
+    # ------- Vuelta (opcional) -------
+    if ida_y_vuelta:
+        for partidos in rondas:
+            for (A1, A2), (B1, B2) in partidos:
+                p_obj = TorneoPartido(
+                    torneo_id=t.id,
+                    fase_id=fase.id,
+                    grupo_id=grupo.id,
+                    ronda=f"R{jornada}",
+                    orden=orden_global,
+                    participante_a_id=tp_map[B1],  # invertimos localía
+                    participante_b_id=tp_map[A1],
+                    estado='PENDIENTE'
+                )
+                db.session.add(p_obj)
+                db.session.flush()
+
+                _clear_lados(p_obj.id)
+                _set_lado(p_obj.id, 'A', B1, B2)
+                _set_lado(p_obj.id, 'B', A1, A2)
+
+                creados += 1
+                orden_global += 1
+            jornada += 1
+
+    db.session.commit()
+    return {
+        "ok": True,
+        "msg": f"Fixture generado: {creados} partidos. (AMERICANO SINGLES rotativo 2v2{' ida y vuelta' if ida_y_vuelta else ''})",
+        "nuevos_participantes": nuevos_participantes,
+        "partidos_creados": creados
+    }
+
+
+
 
 # ----------------------------
 # MODELOS
@@ -543,6 +1257,17 @@ class Partido(db.Model):
     rechazo_ultimo_por_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
     rechazo_ultimo_en     = db.Column(db.DateTime, nullable=True)
 
+    # --- trazabilidad (NUEVO): si fue creado desde un Desafío ---
+    # FK blanda para no depender del __tablename__ de Desafio ni romper en entornos legacy.
+    creado_por_desafio_id = db.Column(db.Integer, nullable=True)
+    # Relación de solo lectura usando primaryjoin explícito (no requiere FK real):
+    creado_por_desafio = db.relationship(
+        'Desafio',
+        primaryjoin="foreign(Partido.creado_por_desafio_id)==Desafio.id",
+        viewonly=True,
+        lazy='joined'
+    )
+
     # Campos básicos
     fecha = db.Column(db.DateTime, nullable=True)  # opcional por ahora
     # Estados posibles:
@@ -603,7 +1328,6 @@ class Partido(db.Model):
             # Import tardío para evitar problemas de orden de definición
             from .models import PartidoResultadoPropuesto
         except Exception:
-            # Si el import relativo no aplica en tu proyecto, ajustalo al path correcto.
             PartidoResultadoPropuesto = globals().get('PartidoResultadoPropuesto', None)
 
         if not PartidoResultadoPropuesto:
@@ -651,15 +1375,14 @@ class Partido(db.Model):
         if not self.jugador_participa(jugador_id):
             return False
 
-        # Si ya hay resultado final (relación backref desde PartidoResultado)
         if hasattr(self, "resultado") and self.resultado is not None:
             return False
 
-        # Si ya existe una propuesta abierta, no se puede proponer de nuevo
         if self.propuesta_abierta():
             return False
 
         return self.estado in ('PENDIENTE', 'POR_CONFIRMAR')
+
 
 
 class PartidoResultado(db.Model):
@@ -814,6 +1537,14 @@ class PinReset(db.Model):
 
 # ===== Torneos: modelos base (MVP) =====
 
+EST_BORRADOR = "BORRADOR"
+EST_INSCRIPCION = "INSCRIPCION"
+EST_INSCRIPCION_CERRADA = "INSCRIPCION_CERRADA"
+EST_EN_JUEGO = "EN_JUEGO"
+EST_FINALIZADO = "FINALIZADO"
+EST_CANCELADO = "CANCELADO"
+
+
 class Torneo(db.Model):
     __tablename__ = 'torneos'
     id = db.Column(db.Integer, primary_key=True)
@@ -853,15 +1584,34 @@ class Torneo(db.Model):
         db.Index('ix_torneos_publicos_cat', 'es_publico', 'categoria_id'),
     )
 
+    # ----------------- Helpers existentes -----------------
     def es_dobles(self) -> bool:
         return (self.formato or '').upper() == 'DOBLES'
 
-    # (Opcional, azucar para vistas)
+    # (Azúcar para vistas)
     def inscripcion_habilitada(self) -> bool:
         return bool(self.es_publico and self.inscripciones_abiertas)
 
+    # ----------------- Helpers nuevos (americano) -----------------
+    def _formato_norm(self) -> str:
+        """Devuelve el formato normalizado priorizando 'formato' y usando 'modalidad' como fallback legacy."""
+        v = (self.formato or '').strip().upper()
+        if not v:
+            v = (self.modalidad or '').strip().upper()
+        return v
 
-from datetime import datetime
+    def es_americano(self) -> bool:
+        return (self.tipo or '').strip().upper() == 'AMERICANO'
+
+    def es_americano_individual(self) -> bool:
+        """Americano con formato SINGLES: parejas rotativas, puntaje por jugador."""
+        return self.es_americano() and self._formato_norm() == 'SINGLES'
+
+    def es_americano_parejas(self) -> bool:
+        """Americano con formato DOBLES: pareja fija, puntaje por pareja."""
+        return self.es_americano() and self._formato_norm() == 'DOBLES'
+
+
 
 class TorneoInscripcion(db.Model):
     __tablename__ = 'torneos_inscripciones'
@@ -931,20 +1681,20 @@ class TorneoInscripcion(db.Model):
         return jugador_id in self.integrantes_ids()
 
 
-
 class TorneoFase(db.Model):
     __tablename__ = 'torneos_fases'
     id = db.Column(db.Integer, primary_key=True)
     torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
 
-    # 'ZONAS','LIGA','PLAYOFF'
-    tipo = db.Column(db.String(12), nullable=False)
+    # 'ZONAS','LIGA','PLAYOFF'  -> dejamos default 'LIGA' para el round-robin (americano)
+    tipo = db.Column(db.String(12), nullable=False, default='LIGA')
 
     orden = db.Column(db.Integer, nullable=False, default=1)
     nombre = db.Column(db.String(80), nullable=False, default='Fase')
     config_json = db.Column(db.JSON, nullable=True)
 
     torneo = db.relationship('Torneo', backref='fases', lazy='joined')
+
 
 
 class TorneoGrupo(db.Model):
@@ -959,24 +1709,61 @@ class TorneoGrupo(db.Model):
     fase = db.relationship('TorneoFase', backref='grupos', lazy='joined')
 
 
+
 class TorneoParticipante(db.Model):
     __tablename__ = 'torneos_participantes'
+
     id = db.Column(db.Integer, primary_key=True)
     torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
-    inscripcion_id = db.Column(db.Integer, db.ForeignKey('torneos_inscripciones.id'), nullable=False)
+    inscripcion_id = db.Column(db.Integer, db.ForeignKey('torneos_inscripciones.id'), nullable=False, index=True)
 
+    # Relaciones
     torneo = db.relationship('Torneo', backref='participantes', lazy='joined')
-    inscripcion = db.relationship('TorneoInscripcion', backref='participante', lazy='joined')
+    # 1–a–1 con la inscripción (un participante referencia exactamente una inscripción)
+    inscripcion = db.relationship('TorneoInscripcion', backref='participante', lazy='joined', uselist=False)
+
+    # ===== Proxies a datos derivados de la inscripción (NO columnas reales) =====
+    pareja_key   = association_proxy('inscripcion', 'pareja_key')
+    jugador1_id  = association_proxy('inscripcion', 'jugador1_id')
+    jugador2_id  = association_proxy('inscripcion', 'jugador2_id')
+    seed         = association_proxy('inscripcion', 'seed')
+
+    # Alias opcional si en algún lado referenciás participante.participante_key
+    participante_key = synonym('pareja_key')
+
+    # === Constructor seguro (airbag) ===
+    def __init__(self, **kwargs):
+        # Permitir pasar el objeto 'inscripcion' y resolver a su id
+        insc_obj = kwargs.pop("inscripcion", None)
+        if insc_obj is not None and getattr(insc_obj, "id", None):
+            kwargs["inscripcion_id"] = insc_obj.id
+
+        # Aceptamos solo estas claves reales de la tabla
+        allowed = {"torneo_id", "inscripcion_id"}
+        filtered = {k: v for k, v in kwargs.items() if k in allowed}
+
+        # Validaciones fuertes
+        if filtered.get("torneo_id") is None:
+            raise RuntimeError("No se puede crear TorneoParticipante sin torneo_id.")
+        if filtered.get("inscripcion_id") is None:
+            raise RuntimeError(
+                "No se puede crear TorneoParticipante sin inscripcion_id. "
+                "Pasá una TorneoInscripcion válida o usá _inscripcion_to_participante(t, insc)."
+            )
+
+        super().__init__(**filtered)
 
 
 class TorneoPartido(db.Model):
     __tablename__ = 'torneos_partidos'
+
     id = db.Column(db.Integer, primary_key=True)
     torneo_id = db.Column(db.Integer, db.ForeignKey('torneos.id'), nullable=False)
     fase_id = db.Column(db.Integer, db.ForeignKey('torneos_fases.id'), nullable=True)
     grupo_id = db.Column(db.Integer, db.ForeignKey('torneos_grupos.id'), nullable=True)
 
-    ronda = db.Column(db.String(30), nullable=True)   # ej. "R1", "QF", "SF", "Final"
+    # ej. "J1" (jornada 1), "QF", "SF", "Final"
+    ronda = db.Column(db.String(30), nullable=True)
     orden = db.Column(db.Integer, nullable=True)
 
     participante_a_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=False)
@@ -985,12 +1772,14 @@ class TorneoPartido(db.Model):
     # 'PENDIENTE','PROGRAMADO','JUGADO','WO','SUSPENDIDO'
     estado = db.Column(db.String(12), nullable=False, default='PENDIENTE')
 
-    resultado_json = db.Column(db.JSON, nullable=True)  # sets/games
+    # sets/games u otro payload
+    resultado_json = db.Column(db.JSON, nullable=True)
     ganador_participante_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=True)
 
     programado_en = db.Column(db.DateTime, nullable=True)
     cancha = db.Column(db.String(80), nullable=True)
 
+    # Relaciones (respetando tus lazy='joined')
     torneo = db.relationship('Torneo', backref='partidos', lazy='joined')
     fase = db.relationship('TorneoFase', backref='partidos', lazy='joined')
     grupo = db.relationship('TorneoGrupo', backref='partidos', lazy='joined')
@@ -999,6 +1788,349 @@ class TorneoPartido(db.Model):
     participante_b = db.relationship('TorneoParticipante', foreign_keys=[participante_b_id], lazy='joined')
     ganador_participante = db.relationship('TorneoParticipante', foreign_keys=[ganador_participante_id], lazy='joined')
 
+    __table_args__ = (
+        # Evita duplicar el mismo cruce A vs B dentro del mismo grupo
+        db.UniqueConstraint('grupo_id', 'participante_a_id', 'participante_b_id', name='uq_grupo_partido_ab'),
+        # Índices útiles para listados / filtros
+        db.Index('ix_torneos_partidos_torneo_estado', 'torneo_id', 'estado'),
+        db.Index('ix_torneos_partidos_programado', 'programado_en'),
+    )
+
+    # -----------------------------
+    # Helpers NO intrusivos (robustos)
+    # -----------------------------
+    def _extraer_ids_de_participante(self, tp: 'TorneoParticipante') -> list[int]:
+        """
+        Devuelve 1 o 2 ids de Jugador desde TorneoParticipante.
+        Intenta múltiples variantes de campos: single, parejas, inscripción y pareja relacional.
+        No rompe si algo no existe. Devuelve [] si no puede resolver.
+        """
+        if not tp:
+            return []
+
+        Ins = globals().get('TorneoInscripcion')
+        Pareja = globals().get('Pareja')
+
+        # --- 1) Campo "single" (varias variantes)
+        single_variants = ['jugador_id', 'player_id', 'id_jugador']
+        for attr in single_variants:
+            j_id = getattr(tp, attr, None)
+            if j_id:
+                return [j_id]
+
+        # --- 2) Campos de pareja (varias variantes)
+        pair_variants = [
+            ('jugador1_id', 'jugador2_id'),
+            ('player1_id',  'player2_id'),
+            ('jugador_a_id','jugador_b_id'),
+            ('j1_id',       'j2_id'),
+        ]
+        for a1, a2 in pair_variants:
+            j1 = getattr(tp, a1, None)
+            j2 = getattr(tp, a2, None)
+            ids = [j for j in (j1, j2) if j]
+            if ids:
+                return ids
+
+        # --- 3) Vía inscripción (id o relación) con variantes de nombre
+        insc_rel = getattr(tp, 'inscripcion', None) or getattr(tp, 'insc', None)
+        if not insc_rel:
+            insc_id = getattr(tp, 'inscripcion_id', None) or getattr(tp, 'insc_id', None)
+            if insc_id and Ins:
+                try:
+                    insc_rel = db.session.get(Ins, insc_id)  # SQLAlchemy 2.x safe
+                except Exception:
+                    insc_rel = db.session.query(Ins).get(insc_id)  # compat
+
+        if insc_rel:
+            # Inscripción puede ser single o pareja (probamos varias)
+            for a1, a2 in [('jugador1_id','jugador2_id'),
+                           ('player1_id','player2_id'),
+                           ('jugador_id', None),
+                           ('player_id', None)]:
+                j1 = getattr(insc_rel, a1, None)
+                j2 = getattr(insc_rel, a2, None) if a2 else None
+                ids = [j for j in (j1, j2) if j]
+                if ids:
+                    return ids
+
+        # --- 4) Vía pareja (id o relación)
+        pareja_rel = getattr(tp, 'pareja', None)
+        if not pareja_rel:
+            pareja_id = getattr(tp, 'pareja_id', None)
+            if pareja_id and Pareja:
+                try:
+                    pareja_rel = db.session.get(Pareja, pareja_id)
+                except Exception:
+                    pareja_rel = db.session.query(Pareja).get(pareja_id)
+
+        if pareja_rel:
+            ids = [getattr(pareja_rel, x, None) for x in ('jugador1_id','jugador2_id')]
+            ids = [j for j in ids if j]
+            if ids:
+                return ids
+
+        # --- 5) Último recurso: listas tipo "participante_jugadores"
+        rel_list = getattr(tp, 'jugadores', None) or getattr(tp, 'participante_jugadores', None)
+        if rel_list:
+            out = []
+            for j in rel_list:
+                jid = getattr(j, 'id', None) or getattr(j, 'jugador_id', None)
+                if jid:
+                    out.append(jid)
+            if out:
+                return out[:2]
+
+        return []
+
+    # === LADOS (soporta SINGLES 2v2 y también dobles) ===
+    def _jugadores_ids_desde_lados(self) -> list[int]:
+        """
+        Extrae IDs de jugador desde TorneoPartidoLado (insc1_id/insc2_id -> TorneoInscripcion).
+        Soporta singles (jugador1_id) y dobles (jugador1_id/jugador2_id).
+        """
+        Ins = globals().get('TorneoInscripcion')
+        if not Ins:
+            return []
+        out: list[int] = []
+        try:
+            for lado in getattr(self, 'lados', []) or []:
+                for insc_id in (getattr(lado, 'insc1_id', None), getattr(lado, 'insc2_id', None)):
+                    if not insc_id:
+                        continue
+                    insc = db.session.get(Ins, insc_id)
+                    if not insc:
+                        continue
+                    j1 = getattr(insc, 'jugador1_id', None)
+                    j2 = getattr(insc, 'jugador2_id', None)
+                    if j1:
+                        out.append(int(j1))
+                    if j2:
+                        out.append(int(j2))
+        except Exception:
+            # fail-safe: no rompemos el render si algo raro pasa
+            pass
+        return out
+
+    def _nombres_lado_desde_lados(self, lado_char: str) -> list[str]:
+        """
+        Si existen registros en TorneoPartidoLado para el lado dado ('A'/'B'),
+        devuelve los nombres de ambos integrantes. Si no, lista vacía.
+        """
+        lado_char = (lado_char or '').upper()
+        if lado_char not in ('A', 'B'):
+            return []
+        Ins = globals().get('TorneoInscripcion')
+        Jug = globals().get('Jugador')
+        if not (Ins and Jug):
+            return []
+
+        try:
+            # buscar el registro del lado A o B
+            for l in getattr(self, 'lados', []) or []:
+                if getattr(l, 'lado', '').upper() != lado_char:
+                    continue
+                nombres: list[str] = []
+                for insc_id in (getattr(l, 'insc1_id', None), getattr(l, 'insc2_id', None)):
+                    if not insc_id:
+                        continue
+                    insc = db.session.get(Ins, insc_id)
+                    if not insc:
+                        continue
+                    for jid in (getattr(insc, 'jugador1_id', None), getattr(insc, 'jugador2_id', None)):
+                        if jid:
+                            try:
+                                j = db.session.get(Jug, int(jid))
+                            except Exception:
+                                j = db.session.query(Jug).get(int(jid))
+                            if j and getattr(j, 'nombre_completo', None):
+                                nombres.append(j.nombre_completo)
+                # solo primer match (cada lado es único por constraint)
+                return nombres
+        except Exception:
+            pass
+        return []
+
+    # === API pública para permisos/vistas ===
+    def jugadores_ids(self) -> set[int]:
+        """
+        Set de IDs de jugadores (1 o 2 por lado) que participan en este partido.
+        Incluye A1/A2/B1/B2 a través de participante_* y también de la tabla de LADOS.
+        """
+        ids: set[int] = set()
+        ids.update(self._extraer_ids_de_participante(self.participante_a))
+        ids.update(self._extraer_ids_de_participante(self.participante_b))
+        ids.update(self._jugadores_ids_desde_lados())
+        return ids
+
+    def jugadores_ids_por_lado(self) -> dict[str, set[int]]:
+        """
+        {'A': {ids...}, 'B': {ids...}}.
+        Si existen LADOS, se priorizan; si no, se infieren desde participante_a/b.
+        """
+        lados_presentes = bool(getattr(self, 'lados', None))
+        out = {'A': set(), 'B': set()}
+        if lados_presentes:
+            Ins = globals().get('TorneoInscripcion')
+            if Ins:
+                for l in self.lados:
+                    bucket = out.get((l.lado or '').upper())
+                    if bucket is None:
+                        continue
+                    for insc_id in (getattr(l, 'insc1_id', None), getattr(l, 'insc2_id', None)):
+                        if not insc_id:
+                            continue
+                        insc = db.session.get(Ins, insc_id)
+                        if not insc:
+                            continue
+                        for jid in (getattr(insc, 'jugador1_id', None), getattr(insc, 'jugador2_id', None)):
+                            if jid:
+                                bucket.add(int(jid))
+            return out
+
+        # Fallback participantes
+        out['A'].update(self._extraer_ids_de_participante(self.participante_a))
+        out['B'].update(self._extraer_ids_de_participante(self.participante_b))
+        return out
+
+    def lado_de_jugador(self, jugador_id: int) -> str | None:
+        """
+        Devuelve 'A' si el jugador está del lado A, 'B' si está del lado B, o None.
+        Prioriza LADOS; si no hay, usa participante_a/b.
+        """
+        if not jugador_id:
+            return None
+        lados = self.jugadores_ids_por_lado()
+        if jugador_id in lados['A']:
+            return 'A'
+        if jugador_id in lados['B']:
+            return 'B'
+        return None
+
+    def jugador_participa(self, jugador_id: int) -> bool:
+        """
+        True si 'jugador_id' pertenece al lado A o B.
+        """
+        if not jugador_id:
+            return False
+        return jugador_id in self.jugadores_ids()
+
+    def _nombres_de_ids(self, jugador_ids: list[int]) -> list[str]:
+        """
+        Resuelve nombres a partir de IDs de Jugador. Falla-silencioso si Jugador no existe.
+        Usa db.session.get(...) para evitar LegacyAPIWarning.
+        """
+        Jug = globals().get('Jugador')
+        nombres: list[str] = []
+        if not (Jug and jugador_ids):
+            return nombres
+        for jid in jugador_ids:
+            if not jid:
+                continue
+            try:
+                j = db.session.get(Jug, jid)  # SQLAlchemy 2.x
+            except Exception:
+                j = db.session.query(Jug).get(jid)  # compat
+            if j and getattr(j, 'nombre_completo', None):
+                nombres.append(j.nombre_completo)
+        return nombres
+
+    def nombres_lado(self, lado: str) -> str:
+        """
+        'A' o 'B' -> "Nombre1 / Nombre2" (o el que haya).
+        Prefiere los datos de LADOS si existen; si no, usa participante_a/b.
+        """
+        # 1) intentar por LADOS
+        by_lados = self._nombres_lado_desde_lados(lado)
+        if by_lados:
+            return " / ".join(by_lados)
+
+        # 2) fallback al participante_a/b (comportamiento original)
+        lado = (lado or '').upper()
+        tp = self.participante_a if lado == 'A' else self.participante_b
+        ids = self._extraer_ids_de_participante(tp)
+        nombres = self._nombres_de_ids(ids)
+        return " / ".join(nombres) if nombres else f"Lado {lado or '-'}"
+
+    # Azúcar sintáctico útil en templates
+    @property
+    def ladoA_nombres(self) -> str:
+        return self.nombres_lado('A')
+
+    @property
+    def ladoB_nombres(self) -> str:
+        return self.nombres_lado('B')
+
+    # -----------------------------
+    # Azúcar para Paso 2 (listado unificado)
+    # -----------------------------
+    @property
+    def tipo(self) -> str:
+        """Etiqueta de tipo para el view-model unificado en /partidos."""
+        return "TORNEO"
+
+    @property
+    def display_ladoA(self) -> str:
+        """Alias legible para plantillas/VM."""
+        return self.ladoA_nombres
+
+    @property
+    def display_ladoB(self) -> str:
+        """Alias legible para plantillas/VM."""
+        return self.ladoB_nombres
+
+    @property
+    def sort_key(self):
+        """Clave de orden estable: primero por fecha (None al final), luego por id desc."""
+        from datetime import datetime
+        # None al final → usamos tuplas con bandera
+        return (self.programado_en is None, self.programado_en or datetime.max, -self.id)
+
+    def to_list_vm(self) -> dict:
+        """
+        View-model base para mezclar en /partidos.
+        (Las URLs se agregan en la ruta con url_for, para no acoplar el modelo a Flask.)
+        """
+        return {
+            "id": f"TP-{self.id}",
+            "tipo": self.tipo,
+            "torneo_id": self.torneo_id,
+            "torneo_nombre": getattr(self.torneo, "nombre", "Torneo"),
+            "ronda": self.ronda,
+            "estado": self.estado,
+            "programado_en": self.programado_en,
+            "cancha": self.cancha,
+            "ladoA": self.display_ladoA,
+            "ladoB": self.display_ladoB,
+            # urls: se agregan en la ruta
+        }
+
+    # -----------------------------
+    # Debug amigable
+    # -----------------------------
+    def __repr__(self) -> str:
+        tn = getattr(self.torneo, "nombre", None)
+        return f"<TorneoPartido id={self.id} torneo={tn or self.torneo_id} ronda={self.ronda} estado={self.estado}>"
+
+
+
+class TorneoPartidoLado(db.Model):
+    __tablename__ = 'torneos_partidos_lados'
+    id = db.Column(db.Integer, primary_key=True)
+
+    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id', ondelete='CASCADE'), nullable=False, index=True)
+    lado = db.Column(db.String(1), nullable=False)  # 'A' o 'B'
+
+    # Inscripciones individuales que formaron la pareja de ese lado en este partido
+    insc1_id = db.Column(db.Integer, db.ForeignKey('torneos_inscripciones.id'), nullable=False)
+    insc2_id = db.Column(db.Integer, db.ForeignKey('torneos_inscripciones.id'), nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint("lado in ('A','B')", name='chk_lado_A_B'),
+        db.UniqueConstraint('partido_id', 'lado', name='uq_partidolado_unico'),
+    )
+
+    partido = db.relationship('TorneoPartido', backref=db.backref('lados', cascade="all, delete-orphan", lazy='joined'))
 
 class TorneoLlaveNodo(db.Model):
     __tablename__ = 'torneos_llave_nodos'
@@ -1019,7 +2151,41 @@ class TorneoLlaveNodo(db.Model):
     fase = db.relationship('TorneoFase', backref='llave_nodos', lazy='joined')
     partido = db.relationship('TorneoPartido', lazy='joined')
 
+# models.py (junto a tus otros modelos)
+from sqlalchemy import func
 
+class TorneoPartidoResultadoPropuesto(db.Model):
+    __tablename__ = 'torneos_partidos_resultados_propuestos'
+    id = db.Column(db.Integer, primary_key=True)
+    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id'), nullable=False, unique=True)
+
+    ganador_lado = db.Column(db.String(1), nullable=False)   # 'A' o 'B'
+    sets_text   = db.Column(db.String(120), nullable=True)   # ej. "6-3, 4-6, 10-8"
+
+    # tracking / auditoría básica
+    propuesto_por_jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
+    creado_en = db.Column(db.DateTime, server_default=func.now(), nullable=False)
+    actualizado_en = db.Column(db.DateTime, onupdate=func.now())
+
+    # confirmaciones por lado (None = pendiente; True = acepta; False = rechaza)
+    confirma_ladoA = db.Column(db.Boolean, nullable=True)
+    confirma_ladoB = db.Column(db.Boolean, nullable=True)
+
+    partido = db.relationship('TorneoPartido', backref=db.backref('propuesta', uselist=False, lazy='joined'))
+
+class TorneoPartidoResultado(db.Model):
+    __tablename__ = 'torneos_partidos_resultados'
+    id = db.Column(db.Integer, primary_key=True)
+    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id'), nullable=False, unique=True)
+
+    ganador_lado = db.Column(db.String(1), nullable=False)    # 'A' o 'B'
+    ganador_participante_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=False)
+    sets_text = db.Column(db.String(120), nullable=True)
+
+    confirmado_en = db.Column(db.DateTime, server_default=func.now(), nullable=False)
+    confirmado_por_jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
+
+    partido = db.relationship('TorneoPartido', backref=db.backref('resultado_def', uselist=False, lazy='joined'))
 
 
 # Crear DB si no existe
@@ -1926,12 +3092,478 @@ def parejas_new():
 
     return render_template('parejas_form.html', categorias=categorias, jugadores=jugadores)
 
+
+# ===== Helpers =====
+
+def _partido_to_vm(p: 'Partido') -> dict:
+    """Mapper defensivo para tus Partidos 'sueltos'."""
+    def _nom(j):
+        return getattr(j, "nombre_completo", None) or getattr(j, "nombre", None) or "-"
+
+    # Intento 1: parejas (jugador1/jugador2)
+    ladoA, ladoB = None, None
+    try:
+        pj1 = getattr(getattr(p, "pareja1", None), "jugador1", None)
+        pj2 = getattr(getattr(p, "pareja1", None), "jugador2", None)
+        if pj1 or pj2:
+            ladoA = " + ".join([_nom(x) for x in [pj1, pj2] if x])
+    except Exception:
+        pass
+    try:
+        pj1 = getattr(getattr(p, "pareja2", None), "jugador1", None)
+        pj2 = getattr(getattr(p, "pareja2", None), "jugador2", None)
+        if pj1 or pj2:
+            ladoB = " + ".join([_nom(x) for x in [pj1, pj2] if x])
+    except Exception:
+        pass
+
+    # Intento 2: individuales (si tu modelo los tiene)
+    if not ladoA:
+        ladoA = _nom(getattr(p, "jugador_a", None))
+    if not ladoB:
+        ladoB = _nom(getattr(p, "jugador_b", None))
+
+    # Respaldo final
+    if not ladoA or ladoA == "-":
+        ladoA = getattr(p, "rival1", None) or "Lado A"
+    if not ladoB or ladoB == "-":
+        ladoB = getattr(p, "rival2", None) or "Lado B"
+
+    # Fecha/cancha/estado con tolerancia a ausencia de campos
+    prog = getattr(p, "programado_en", None) or getattr(p, "fecha", None)
+    cancha = getattr(p, "cancha", None)
+    estado = getattr(p, "estado", None) or "-"
+
+    try:
+        url_detalle  = url_for("partido_detalle", partido_id=p.id)
+    except Exception:
+        url_detalle = url_for("partidos_list")
+
+    return {
+        "id": f"P-{p.id}",
+        "tipo": "PARTIDO",
+        "torneo_nombre": None,
+        "ronda": None,
+        "estado": estado,
+        "programado_en": prog,
+        "cancha": cancha,
+        "ladoA": ladoA,
+        "ladoB": ladoB,
+        "url_detalle": url_detalle,
+        "url_proponer": None,
+        "url_responder": None,
+    }
+
+
+from sqlalchemy import or_, and_, exists
+from sqlalchemy.orm import joinedload
+
+def _query_torneo_partidos_del_jugador(jugador_id: int):
+    """
+    Devuelve TODOS los TorneoPartido en los que participa 'jugador_id'.
+    - Hace un match SQL *siempre* (cuando es posible) y además
+      filtra *siempre* en Python con tp.jugador_participa(jugador_id).
+    - Une ambos resultados y deduplica por id.
+    - Loguea contadores para diagnóstico.
+    """
+    TP   = TorneoPartido
+    TPar = globals().get('TorneoParticipante')
+    TIns = globals().get('TorneoInscripcion')
+
+    # ---------- 1) SQL (mejor esfuerzo; puede ser parcial según el esquema) ----------
+    tps_sql = []
+    try:
+        if TPar is not None:
+            match_par = []
+
+            # Campos directos si existen en TPar
+            for attr in ('jugador_id', 'jugador1_id', 'jugador2_id'):
+                if hasattr(TPar, attr):
+                    match_par.append(getattr(TPar, attr) == jugador_id)
+
+            # Vía inscripción si existe, solo con attrs reales de TIns
+            if hasattr(TPar, 'inscripcion_id') and TIns is not None:
+                ins_or_terms = []
+                for ins_attr in ('jugador1_id', 'jugador2_id', 'jugador_id'):
+                    if hasattr(TIns, ins_attr):
+                        ins_or_terms.append(getattr(TIns, ins_attr) == jugador_id)
+                if ins_or_terms:
+                    match_par.append(
+                        and_(
+                            TPar.inscripcion_id.isnot(None),
+                            exists().where(
+                                and_(
+                                    TIns.id == TPar.inscripcion_id,
+                                    or_(*ins_or_terms)
+                                )
+                            )
+                        )
+                    )
+
+            if match_par:
+                participa_en_A = exists().where(and_(TPar.id == TP.participante_a_id, or_(*match_par)))
+                participa_en_B = exists().where(and_(TPar.id == TP.participante_b_id, or_(*match_par)))
+                tps_sql = (
+                    TP.query
+                      .filter(or_(participa_en_A, participa_en_B))
+                      .options(
+                          joinedload(TP.torneo),
+                          joinedload(TP.participante_a),
+                          joinedload(TP.participante_b),
+                      )
+                      .all()
+                )
+    except Exception as e:
+        try:
+            current_app.logger.exception(f"[/partidos] SQL match falló: {e}")
+        except Exception:
+            pass
+        tps_sql = []
+
+    # ---------- 2) Fallback Python (SIEMPRE) ----------
+    try:
+        candidatos = (
+            TP.query
+              .options(
+                  joinedload(TP.torneo),
+                  joinedload(TP.participante_a),
+                  joinedload(TP.participante_b),
+              )
+              .all()
+        )
+        tps_py = [tp for tp in candidatos
+                  if getattr(tp, 'jugador_participa', None) and tp.jugador_participa(jugador_id)]
+    except Exception as e:
+        try:
+            current_app.logger.exception(f"[/partidos] fallback falló: {e}")
+        except Exception:
+            pass
+        tps_py = []
+
+    # ---------- 3) Unión + deduplicación ----------
+    by_id = {}
+    for tp in tps_sql:
+        by_id[tp.id] = tp
+    for tp in tps_py:
+        by_id[tp.id] = tp
+    result = list(by_id.values())
+
+    # ---------- 4) Logs de diagnóstico útiles ----------
+    try:
+        current_app.logger.info(
+            f"[/partidos] torneo union: jugador_id={jugador_id} sql={len(tps_sql)} py={len(tps_py)} union={len(result)}"
+        )
+        # Si querés, logueá también los ids para ver cuáles “faltaban” en SQL:
+        if len(result) != len(tps_sql):
+            ids_sql = {tp.id for tp in tps_sql}
+            ids_py  = {tp.id for tp in tps_py}
+            ids_missing_in_sql = sorted(ids_py - ids_sql)
+            current_app.logger.info(f"[/partidos] ids faltantes en SQL: {ids_missing_in_sql}")
+    except Exception:
+        pass
+
+    return result
+
+
+
+def _tp_to_vm(tp: 'TorneoPartido', jugador_id: int | None = None) -> dict:
+    try:
+        ladoA = tp.ladoA_nombres
+        ladoB = tp.ladoB_nombres
+    except Exception:
+        ladoA = "Lado A"
+        ladoB = "Lado B"
+
+    # ¿el usuario actual participa?
+    soy_participante = False
+    try:
+        if jugador_id:
+            soy_participante = bool(getattr(tp, "jugador_participa", None) and tp.jugador_participa(jugador_id))
+    except Exception:
+        soy_participante = False
+
+    vm = {
+        "id": f"TP-{tp.id}",
+        "tipo": "TORNEO",
+        "torneo_nombre": getattr(tp.torneo, "nombre", "Torneo"),
+        "ronda": tp.ronda,
+        "estado": tp.estado,
+        "programado_en": tp.programado_en,
+        "cancha": tp.cancha,
+        "ladoA": ladoA,
+        "ladoB": ladoB,
+        "url_detalle":  url_for("torneo_partido_detalle", partido_id=tp.id),
+        "url_proponer": url_for("torneo_partido_proponer", partido_id=tp.id),
+        "url_responder":url_for("torneo_partido_responder", partido_id=tp.id),
+        # permisos
+        "puede_ver": True,                # cualquiera puede ver
+        "puede_proponer": soy_participante,
+        "puede_responder": soy_participante,
+    }
+    return vm
+
+
+def _order_items(items: list[dict]) -> None:
+    """Ordena IN PLACE: fecha (None al final) y luego id numérico desc."""
+    def key(it):
+        prog = it.get("programado_en")
+        try:
+            nid = int(str(it.get("id", "")).split("-")[-1])
+        except Exception:
+            nid = 0
+        return (prog is None, prog or datetime.max, -nid)
+    items.sort(key=key)
+
+def _resolve_jugador_id():
+    """
+    Devuelve el jugador_id del usuario actual buscando en varios lugares:
+    1) current_user.jugador.id
+    2) g.current_jugador.id
+    3) session['jugador_id']
+    4) Jugador.user_id == current_user.id   (si existe ese campo)
+    5) Jugador.email == current_user.email  (último recurso, si existe campo email)
+    """
+    # 1) current_user.jugador.id
+    try:
+        from flask_login import current_user as _cu
+        if _cu and getattr(_cu, "is_authenticated", False):
+            j = getattr(_cu, "jugador", None)
+            jid = getattr(j, "id", None)
+            if jid:
+                return jid
+    except Exception:
+        pass
+
+    # 2) g.current_jugador.id
+    try:
+        from flask import g
+        jid = getattr(getattr(g, "current_jugador", None), "id", None)
+        if jid:
+            return jid
+    except Exception:
+        pass
+
+    # 3) session['jugador_id']
+    try:
+        from flask import session
+        jid = session.get("jugador_id")
+        if jid:
+            return jid
+    except Exception:
+        pass
+
+    # 4) buscar por user_id si el modelo Jugador tiene ese campo
+    try:
+        from app import Jugador  # ajustá import si tu modelo está en otro módulo
+        if _cu and getattr(_cu, "is_authenticated", False):
+            if hasattr(Jugador, "user_id"):
+                q = db.session.query(Jugador.id).filter(Jugador.user_id == _cu.id).first()
+                if q and q[0]:
+                    return q[0]
+    except Exception:
+        pass
+
+    # 5) buscar por email si el modelo Jugador tiene 'email'
+    try:
+        from app import Jugador
+        if _cu and getattr(_cu, "is_authenticated", False):
+            email = getattr(_cu, "email", None)
+            if email and hasattr(Jugador, "email"):
+                q = db.session.query(Jugador.id).filter(Jugador.email == email).first()
+                if q and q[0]:
+                    return q[0]
+    except Exception:
+        pass
+
+    return None
+
+
+# ===== Ruta =====
+
 @app.route('/partidos')
 def partidos_list():
-    partidos = (db.session.query(Partido)
-                .order_by(Partido.creado_en.desc())
-                .all())
-    return render_template('partidos_list.html', partidos=partidos)
+    # ---- helpers locales de respaldo (no pisan los que ya existan) -----------------
+    def _safe_resolve_jugador_id():
+        # Usa tu helper si existe
+        try:
+            if '._resolve_jugador_id' in str(_resolve_jugador_id):  # pragma: no cover
+                pass
+        except Exception:
+            pass
+        try:
+            return _resolve_jugador_id()  # ya lo tenés en tu app
+        except Exception:
+            # fallback con current_user.jugador.id si existiera
+            try:
+                cu = globals().get('current_user')
+                j = getattr(cu, 'jugador', None)
+                return getattr(j, 'id', None)
+            except Exception:
+                return None
+
+    def _safe_partido_to_vm(p):
+        try:
+            return _partido_to_vm(p)  # tu formateador si existe
+        except Exception:
+            # fallback mínimo
+            return {
+                'tipo': 'libre',
+                'obj': p,
+                'cuando': getattr(p, 'fecha', None) or getattr(p, 'creado_en', None),
+            }
+
+    def _safe_tp_to_vm(tp, jugador_id):
+        try:
+            return _tp_to_vm(tp, jugador_id)  # tu formateador si existe
+        except Exception:
+            return {
+                'tipo': 'torneo',
+                'obj': tp,
+                'cuando': getattr(tp, 'programado_en', None) or getattr(tp, 'creado_en', None),
+            }
+
+    def _safe_order_items(items):
+        try:
+            _order_items(items)  # tu ordenador si existe
+            return
+        except Exception:
+            # fallback: por fecha/cuando desc y luego id desc
+            def _k(it):
+                o = it.get('obj')
+                tstamp = it.get('cuando')
+                oid = getattr(o, 'id', 0)
+                return (0 if isinstance(tstamp, datetime) else 1, tstamp or datetime.min, oid)
+            items.sort(key=_k, reverse=True)
+
+    def _safe_query_torneo_partidos_del_jugador(jugador_id: int):
+        # Usa tu helper si existe
+        try:
+            return _query_torneo_partidos_del_jugador(jugador_id)
+        except Exception:
+            pass
+
+        # Fallback genérico: trae TP y filtra por pertenencia usando lado_de_jugador_en_partido
+        TP = globals().get('TorneoPartido')
+        if TP is None:
+            return []
+
+        q = (db.session.query(TP)
+             .options(
+                 joinedload(TP.participante_a) if hasattr(TP, 'participante_a') else joinedload(TP.torneo),
+                 joinedload(TP.participante_b) if hasattr(TP, 'participante_b') else joinedload(TP.torneo),
+             )
+             )
+        # ordenar “razonable”
+        ordenes = []
+        if hasattr(TP, 'ronda'): ordenes.append(TP.ronda.asc())
+        if hasattr(TP, 'orden'): ordenes.append(TP.orden.asc())
+        ordenes.append(TP.id.asc())
+        q = q.order_by(*ordenes)
+
+        tps = []
+        for tp in q.all():
+            try:
+                lado = lado_de_jugador_en_partido(tp, jugador_id)
+            except Exception:
+                lado = None
+            if lado in ('A', 'B'):
+                tps.append(tp)
+        return tps
+
+    # ---- 1) Partidos “libres” (mantengo tu lógica) --------------------------------
+    try:
+        q_libres = (db.session.query(Partido)
+                    .options(
+                        joinedload(Partido.pareja1).joinedload(Pareja.jugador1),
+                        joinedload(Partido.pareja1).joinedload(Pareja.jugador2),
+                        joinedload(Partido.pareja2).joinedload(Pareja.jugador1),
+                        joinedload(Partido.pareja2).joinedload(Pareja.jugador2),
+                        joinedload(Partido.categoria),
+                    )
+                    .order_by(Partido.creado_en.desc()))
+        partidos = q_libres.all()
+    except Exception:
+        current_app.logger.exception("Error listando partidos libres; uso fallback simple")
+        partidos = (db.session.query(Partido)
+                    .order_by(Partido.id.desc())
+                    .all())
+
+    items = [_safe_partido_to_vm(p) for p in partidos]
+
+    # ---- 2) Jugador actual ---------------------------------------------------------
+    jugador_id = _safe_resolve_jugador_id()
+    try:
+        current_app.logger.info("[/partidos] jugador_id(resuelto)=%r", jugador_id)
+    except Exception:
+        pass
+
+    # ---- 3) Partidos de TORNEO del jugador ----------------------------------------
+    if jugador_id:
+        try:
+            tps = _safe_query_torneo_partidos_del_jugador(jugador_id)
+            current_app.logger.info("[/partidos] torneo encontrados=%d", len(tps))
+        except Exception:
+            current_app.logger.exception("Error consultando TorneoPartido del jugador")
+            tps = []
+
+        items.extend([_safe_tp_to_vm(tp, jugador_id) for tp in tps])
+
+    # ---- 4) Orden unificado --------------------------------------------------------
+    _safe_order_items(items)
+
+    # ---- 5) Render ----------------------------------------------------------------
+    return render_template('partidos_list.html', items=items, partidos=partidos)
+
+def subq_participantes_de_jugador(jugador_id: int):
+    # Casos: individual (jugador1_id usado y jugador2_id = NULL) y parejas (ambos llenos)
+    return (
+        db.session.query(TorneoParticipante.id)
+        .join(TorneoInscripcion, TorneoInscripcion.id == TorneoParticipante.inscripcion_id)
+        .filter(
+            (TorneoInscripcion.jugador1_id == jugador_id) |
+            (TorneoInscripcion.jugador2_id == jugador_id)
+        )
+        .subquery()
+    )
+
+def _q_partidos_torneo_de(jugador_id: int):
+    subp = subq_participantes_de_jugador(jugador_id)
+
+    q = (
+        db.session.query(TorneoPartido)
+        .filter(
+            (TorneoPartido.participante_a_id.in_(subp)) |
+            (TorneoPartido.participante_b_id.in_(subp))
+        )
+        # si querés excluir finalizados, ajustá este filtro:
+        # .filter(TorneoPartido.estado.in_(("PROPUESTO","ACEPTADO","PENDIENTE","PROGRAMADO","EN_CURSO","FINALIZADO")))
+        .order_by(TorneoPartido.fase_id.nullslast(), TorneoPartido.grupo_id.nullslast(), TorneoPartido.orden.nullslast(), TorneoPartido.id.desc())
+    )
+
+    # Log de diagnóstico bien claro:
+    total = q.count()
+    app.logger.info(f"[/partidos] torneo: jugador_id={jugador_id} partidos_encontrados={total}")
+
+    # Extra opcional: desglose por torneo/grupo para detectar “huecos”
+    rows = (
+        db.session.query(
+            TorneoPartido.torneo_id,
+            TorneoPartido.grupo_id,
+            db.func.count(TorneoPartido.id)
+        )
+        .filter(
+            (TorneoPartido.participante_a_id.in_(subp)) |
+            (TorneoPartido.participante_b_id.in_(subp))
+        )
+        .group_by(TorneoPartido.torneo_id, TorneoPartido.grupo_id)
+        .all()
+    )
+    for tid, gid, cnt in rows:
+        app.logger.info(f"[/partidos] torneo: jugador_id={jugador_id} torneo={tid} grupo={gid} cnt={cnt}")
+
+    return q
+
+
 
 @app.route('/partidos/nuevo', methods=['GET', 'POST'])
 def partidos_new():
@@ -2037,123 +3669,118 @@ def partidos_new():
         candidatos_rivales=candidatos_rivales
     )
 
+# =========================
+# RUTA: PROPONER RESULTADO (vista de carga / edición de propuesta)
+# =========================
 @app.route('/partidos/<int:partido_id>/resultado', methods=['GET', 'POST'])
 def partidos_resultado(partido_id):
-    # --- Sesión requerida
     j = get_current_jugador()
     if not j:
         flash('Iniciá sesión.', 'error')
         return redirect(url_for('login'))
 
-    partido = get_or_404(Partido, partido_id)
+    p = get_or_404(Partido, partido_id)
 
-    # No permitir si ya hay resultado final
-    if hasattr(partido, 'resultado') and partido.resultado is not None:
+    # 0) Bloqueos duros
+    if getattr(p, 'resultado', None) is not None:
         flash('El partido ya tiene un resultado confirmado.', 'warning')
         return redirect(url_for('partidos_list'))
 
-    # --- Estados permitidos para proponer
-    # Permitimos PENDIENTE y POR_CONFIRMAR. Si ya está PROPUESTO, vamos a confirmar.
-    if partido.estado not in ('PENDIENTE', 'POR_CONFIRMAR'):
-        if partido.estado == 'PROPUESTO':
-            flash('Ya hay un resultado propuesto. Podés confirmarlo o rechazarlo.', 'ok')
-            return redirect(url_for('partidos_confirmar_resultado', partido_id=partido.id))
-        else:
-            flash('Este partido no permite cargar resultado en su estado actual.', 'error')
-            return redirect(url_for('partidos_list'))
-
-    # --- Sólo participantes o admin pueden proponer resultado
-    try:
-        participantes_ids = {
-            partido.pareja1.jugador1_id, partido.pareja1.jugador2_id,
-            partido.pareja2.jugador1_id, partido.pareja2.jugador2_id
-        }
-    except Exception:
-        participantes_ids = set()
-
-    if not (j.is_admin or j.id in participantes_ids):
-        flash('Solo los jugadores del partido (o un admin) pueden cargar el resultado.', 'error')
-        return redirect(url_for('partidos_list'))
-
-    # --- Si el partido fue armado invitando rivales, exigir aceptación de ambos
-    requiere_aceptaciones = (partido.rival1_id is not None and partido.rival2_id is not None)
-    if requiere_aceptaciones and not (partido.rival1_acepto == 1 and partido.rival2_acepto == 1):
+    # 1) Si fue armado por invitación, exigir aceptación de ambos rivales
+    requiere_aceptaciones = (p.rival1_id is not None and p.rival2_id is not None)
+    if requiere_aceptaciones and not (p.rival1_acepto == 1 and p.rival2_acepto == 1):
         flash('Aún falta que ambos rivales acepten la invitación.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # --- Si ya existe una propuesta previa (legacy o tabla) → ir directo a confirmar
-    if partido.resultado_propuesto_ganador_pareja_id is not None:
-        flash('Ya hay un resultado propuesto. Podés confirmarlo o rechazarlo.', 'ok')
-        return redirect(url_for('partidos_confirmar_resultado', partido_id=partido.id))
-
-    # Chequear también en la tabla PartidoResultadoPropuesto
+    # 2) Solo participantes (o admin) pueden proponer/editar
     try:
-        from .models import PartidoResultadoPropuesto
+        participantes_ids = {
+            p.pareja1.jugador1_id, p.pareja1.jugador2_id,
+            p.pareja2.jugador1_id, p.pareja2.jugador2_id
+        }
     except Exception:
-        PartidoResultadoPropuesto = globals().get('PartidoResultadoPropuesto', None)
+        participantes_ids = set()
+    soy_participante = j.id in participantes_ids
+    if not (soy_participante or getattr(j, 'is_admin', False)):
+        flash('Solo los jugadores del partido (o un admin) pueden cargar el resultado.', 'error')
+        return redirect(url_for('partidos_list'))
 
-    if PartidoResultadoPropuesto:
-        existente = (db.session.query(PartidoResultadoPropuesto)
-                     .filter_by(partido_id=partido.id)
-                     .one_or_none())
-        if existente:
-            flash('Ya existe una propuesta de resultado pendiente para este partido.', 'ok')
-            return redirect(url_for('partidos_confirmar_resultado', partido_id=partido.id))
+    # 3) Evaluar permisos/flujo con helper (incluye estados válidos como ACEPTADO)
+    ok, motivo, debe_responder, prp = puede_proponer_resultado(p, j)
+    if debe_responder:
+        flash("Ya hay una propuesta del rival: por favor, respondela.", "warning")
+        return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
+    if not ok and not getattr(j, 'is_admin', False):
+        flash(motivo or "Este partido no permite cargar resultado en su estado actual.", "error")
+        return redirect(url_for('partidos_list'))
 
+    # 4) Modelo PRP (si existe el modelo en tu app)
+    try:
+        from .models import PartidoResultadoPropuesto as PRP
+    except Exception:
+        PRP = globals().get('PartidoResultadoPropuesto', None)
+
+    # 5) POST: crear/editar propuesta (no cierra partido)
     if request.method == 'POST':
-        # Este POST **propone** resultado (no lo cierra)
         ganador_id = request.form.get('ganador_pareja_id')
-        sets_text  = (request.form.get('sets_text') or '').strip()
+        sets_text  = (request.form.get('sets_text') or '').strip() or None
 
         if not ganador_id:
             flash('Elegí la pareja ganadora.', 'error')
-            return redirect(url_for('partidos_resultado', partido_id=partido.id))
-
+            return redirect(url_for('partidos_resultado', partido_id=p.id))
         try:
             ganador_id = int(ganador_id)
         except ValueError:
             flash('Ganador inválido.', 'error')
-            return redirect(url_for('partidos_resultado', partido_id=partido.id))
+            return redirect(url_for('partidos_resultado', partido_id=p.id))
 
-        if ganador_id not in (partido.pareja1_id, partido.pareja2_id):
+        if ganador_id not in (p.pareja1_id, p.pareja2_id):
             flash('La pareja ganadora no corresponde a este partido.', 'error')
-            return redirect(url_for('partidos_resultado', partido_id=partido.id))
+            return redirect(url_for('partidos_resultado', partido_id=p.id))
 
-        # Determinar si el proponente es pareja1 o pareja2
-        soy_p1 = j.id in (partido.pareja1.jugador1_id, partido.pareja1.jugador2_id)
+        soy_p1 = bool(p.pareja1 and j.id in (p.pareja1.jugador1_id, p.pareja1.jugador2_id))
 
-        # Crear registro de propuesta (si la tabla existe)
-        if PartidoResultadoPropuesto:
-            nueva_prop = PartidoResultadoPropuesto(
-                partido_id=partido.id,
-                propuesto_por_pareja_id=partido.pareja1_id if soy_p1 else partido.pareja2_id,
-                ganador_pareja_id=ganador_id,
-                sets_text=sets_text or None
-            )
-            db.session.add(nueva_prop)
+        # Crear/editar PRP (si hay tabla)
+        if PRP:
+            if prp is None:
+                prp = PRP(partido_id=p.id)
+            prp.propuesto_por_pareja_id = p.pareja1_id if soy_p1 else p.pareja2_id
+            prp.ganador_pareja_id = ganador_id
+            prp.sets_text = sets_text
+            # Si tu modelo tiene updated_at/usá creado_en como timestamp de última edición
+            if hasattr(prp, 'updated_en'):
+                prp.updated_en = datetime.utcnow()
+            else:
+                prp.creado_en = datetime.utcnow()
+            db.session.add(prp)
 
-        # Guardar también en campos "legacy" del Partido para compatibilidad
-        partido.resultado_propuesto_ganador_pareja_id = ganador_id
-        partido.resultado_propuesto_sets_text = sets_text or None
-        partido.resultado_propuesto_por_id = j.id
-        partido.resultado_propuesto_en = datetime.utcnow()   # ← NUEVO: timestamp de propuesta
+        # Legacy para compatibilidad (autocierre >12h)
+        p.resultado_propuesto_ganador_pareja_id = ganador_id
+        p.resultado_propuesto_sets_text = sets_text
+        p.resultado_propuesto_por_id = j.id
+        p.resultado_propuesto_en = datetime.utcnow()
 
-        # Estado pasa a PROPUESTO y la pareja que propone queda auto-confirmada (=1)
-        partido.estado = 'PROPUESTO'
+        # Estado y confirmaciones: dejo mi lado confirmado y reseteo el rival
+        p.estado = 'PROPUESTO'
         if soy_p1:
-            partido.confirmo_pareja1 = 1
-            partido.confirmo_pareja2 = None  # pendiente rival
+            p.confirmo_pareja1 = 1
+            p.confirmo_pareja2 = None  # limpiar por si había confirmación vieja
         else:
-            partido.confirmo_pareja2 = 1
-            partido.confirmo_pareja1 = None  # pendiente rival
+            p.confirmo_pareja2 = 1
+            p.confirmo_pareja1 = None  # limpiar por si había confirmación vieja
 
         db.session.commit()
         flash('Resultado propuesto. Ahora debe confirmarlo la otra pareja.', 'ok')
-        return redirect(url_for('partidos_confirmar_resultado', partido_id=partido.id))
+        return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
 
-    # GET -> mostrar formulario para proponer
-    return render_template('partidos_resultado.html', partido=partido)
+    # 6) GET → mostrar formulario (si prp existe y es de mi lado, permitimos “editar”)
+    return render_template('partidos_resultado.html', partido=p, prp=prp)
 
+
+
+# =========================
+# RUTA: RESPONDER INVITACIÓN (aceptar/rechazar rivales/compañero)
+# =========================
 @app.route('/partidos/<int:partido_id>/responder', methods=['GET', 'POST'])
 def partidos_responder(partido_id):
     j = get_current_jugador()
@@ -2163,22 +3790,19 @@ def partidos_responder(partido_id):
 
     p = get_or_404(Partido, partido_id)
 
-    # Debe estar en flujo de invitación (y tener rivales definidos)
+    # Flujo de invitación
     requiere_inv = (p.rival1_id is not None and p.rival2_id is not None)
     if p.estado not in ('PENDIENTE', 'POR_CONFIRMAR') or not requiere_inv:
         flash('Este partido ya no está pendiente de invitación.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # Solo los rivales invitados pueden responder
     if j.id not in (p.rival1_id, p.rival2_id):
         flash('Solo los rivales invitados pueden responder.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # Datos de los contrarios (creador + compañero)
     contrario_1 = p.creador
     contrario_2 = p.companero
 
-    # Determinar mi compañero actual (si ya está seteado el otro slot rival)
     if j.id == p.rival1_id:
         mi_compa_id = p.rival2_id
         soy_rival1 = True
@@ -2188,28 +3812,21 @@ def partidos_responder(partido_id):
 
     mi_compa = db.session.get(Jugador, int(mi_compa_id)) if mi_compa_id else None
 
-    # Opciones de compañero (misma categoría del PARTIDO, activo, y que no esté ya en el partido)
     ocupados_base = {pid for pid in [p.creador_id, p.companero_id, p.rival1_id, p.rival2_id] if pid}
     candidatos = (
         db.session.query(Jugador)
         .filter(
             Jugador.activo.is_(True),
-            Jugador.categoria_id == p.categoria_id,  # atado a la categoría del partido
+            Jugador.categoria_id == p.categoria_id,
             Jugador.id != j.id
         )
         .order_by(Jugador.nombre_completo.asc())
         .all()
     )
-
-    # Permitimos seleccionar siempre: si ya hay compa, se podrá "cambiar"
-    # Para el combo, quitamos ocupados EXCEPTO el actual (lo podemos ofrecer como "mantener")
     ocupados_para_filtrar = set(ocupados_base)
     if mi_compa:
         ocupados_para_filtrar.discard(mi_compa.id)
-
     opciones_companero = [c for c in candidatos if c.id not in ocupados_para_filtrar]
-
-    # Flag de mi aceptación (para mensajes en la vista)
     yo_acepto = (p.rival1_acepto if soy_rival1 else p.rival2_acepto)
 
     if request.method == 'POST':
@@ -2219,12 +3836,10 @@ def partidos_responder(partido_id):
             return redirect(url_for('partidos_responder', partido_id=p.id))
 
         if accion == 'rechazar':
-            # Marcar mi rechazo y cancelar el partido
             if soy_rival1:
                 p.rival1_acepto = 0
             else:
                 p.rival2_acepto = 0
-            # Por claridad, dejar ambos flags en 0
             if p.rival1_acepto is None:
                 p.rival1_acepto = 0
             if p.rival2_acepto is None:
@@ -2237,28 +3852,20 @@ def partidos_responder(partido_id):
         # === ACEPTAR ===
         elegido_id = request.form.get('partner_id', type=int)
 
-        # Caso A: no tengo compañero aún → debo elegir uno
-        if not mi_compa:
-            if not elegido_id:
-                flash('Elegí un compañero antes de aceptar.', 'error')
-                return redirect(url_for('partidos_responder', partido_id=p.id))
+        if not mi_compa and not elegido_id:
+            flash('Elegí un compañero antes de aceptar.', 'error')
+            return redirect(url_for('partidos_responder', partido_id=p.id))
 
-        # Caso B: tengo compañero → puedo mantenerlo o cambiarlo si viene partner_id distinto
         if elegido_id:
-            if mi_compa and elegido_id == mi_compa.id:
-                # Mantener actual: no hay cambios de compañero
-                pass
-            else:
+            if not (mi_compa and elegido_id == mi_compa.id):
                 elegido = db.session.get(Jugador, int(elegido_id))
                 if (not elegido) or (not elegido.activo) or (elegido.categoria_id != p.categoria_id):
                     flash('El compañero elegido no es válido para este partido.', 'error')
                     return redirect(url_for('partidos_responder', partido_id=p.id))
-                # No debe estar ya en el partido (salvo que sea el actual)
                 if elegido.id in ocupados_para_filtrar:
                     flash('Ese jugador ya está en este partido.', 'error')
                     return redirect(url_for('partidos_responder', partido_id=p.id))
 
-                # Asignar/reemplazar compañero en mi lado y dejar su aceptación pendiente
                 if soy_rival1:
                     p.rival2_id = elegido.id
                     p.rival2_acepto = None
@@ -2266,38 +3873,31 @@ def partidos_responder(partido_id):
                     p.rival1_id = elegido.id
                     p.rival1_acepto = None
 
-                # Estado coherente mientras falta la aceptación del nuevo
                 if p.estado not in ('PENDIENTE', 'POR_CONFIRMAR'):
                     p.estado = 'POR_CONFIRMAR'
 
-        # Marcar mi aceptación
         if soy_rival1:
             p.rival1_acepto = 1
         else:
             p.rival2_acepto = 1
 
-        # ¿Ambos rivales aceptaron?
         ambos_ok = (
             p.rival1_id is not None and p.rival2_id is not None and
             p.rival1_acepto in (True, 1, '1') and p.rival2_acepto in (True, 1, '1')
         )
 
         if ambos_ok:
-            p.estado = 'ACEPTADO'  # <- ahora sí queda explícitamente aceptado
+            p.estado = 'ACEPTADO'
             msg = 'Ambos rivales aceptaron. El partido está listo para jugar.'
         else:
-            # Falta aceptación del compañero (si se cambió) o del otro rival
             if p.estado not in ('PENDIENTE', 'POR_CONFIRMAR'):
                 p.estado = 'POR_CONFIRMAR'
-            # Si el otro rival aún no aceptó y el estado era PENDIENTE, lo dejamos en PENDIENTE
-            # pero el mensaje aclara que falta la otra aceptación.
             msg = 'Respuesta registrada. Falta que el otro rival/compañero confirme.'
 
         db.session.commit()
         flash(msg, 'ok')
         return redirect(url_for('partidos_list'))
 
-    # GET → mostrar vista con info de compañero y selector (si corresponde)
     return render_template(
         'partidos_responder.html',
         partido=p,
@@ -2309,6 +3909,10 @@ def partidos_responder(partido_id):
         yo_acepto=yo_acepto
     )
 
+
+# =========================
+# RUTA: CONFIRMAR / RECHAZAR PROPUESTA DE RESULTADO
+# =========================
 @app.route('/partidos/<int:partido_id>/confirmar-resultado', methods=['GET', 'POST'])
 def partidos_confirmar_resultado(partido_id):
     p = get_or_404(Partido, partido_id)
@@ -2318,23 +3922,20 @@ def partidos_confirmar_resultado(partido_id):
         return redirect(url_for('login'))
 
     # Estados válidos para confirmar/rechazar una propuesta
-    if p.estado not in ('PENDIENTE', 'PROPUESTO'):
+    if p.estado not in ('PENDIENTE', 'PROPUESTO', 'CONFIRMADO', 'EN_JUEGO'):
         flash('Este partido ya no está pendiente de confirmación.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # Buscar propuesta en la tabla (si existe), además de los campos legacy del Partido
+    # PRP (si existe) + legacy
     try:
-        from .models import PartidoResultadoPropuesto
+        from .models import PartidoResultadoPropuesto as PRP
     except Exception:
-        PartidoResultadoPropuesto = globals().get('PartidoResultadoPropuesto', None)
+        PRP = globals().get('PartidoResultadoPropuesto', None)
 
     prp = None
-    if PartidoResultadoPropuesto:
-        prp = (db.session.query(PartidoResultadoPropuesto)
-               .filter_by(partido_id=p.id)
-               .one_or_none())
+    if PRP:
+        prp = db.session.query(PRP).filter_by(partido_id=p.id).one_or_none()
 
-    # Debe existir propuesta (tabla o legacy)
     if (p.resultado_propuesto_ganador_pareja_id is None) and (prp is None):
         flash('Aún no hay un resultado propuesto.', 'error')
         return redirect(url_for('partidos_list'))
@@ -2344,7 +3945,7 @@ def partidos_confirmar_resultado(partido_id):
         p.pareja1.jugador1_id, p.pareja1.jugador2_id,
         p.pareja2.jugador1_id, p.pareja2.jugador2_id
     }
-    if yo.id not in participantes_ids:
+    if yo.id not in participantes_ids and not getattr(yo, 'is_admin', False):
         flash('Solo jugadores de este partido pueden confirmar el resultado.', 'error')
         return redirect(url_for('partidos_list'))
 
@@ -2363,14 +3964,12 @@ def partidos_confirmar_resultado(partido_id):
             p.resultado_propuesto_ganador_pareja_id = None
             p.resultado_propuesto_sets_text = None
             p.resultado_propuesto_por_id = None
+            p.resultado_propuesto_en = None
             p.confirmo_pareja1 = None
             p.confirmo_pareja2 = None
-
-            # 🔴 NUEVO: registrar quién y cuándo rechazó
+            # trazabilidad del rechazo
             p.rechazo_ultimo_por_id = yo.id
             p.rechazo_ultimo_en = datetime.utcnow()
-            p.resultado_propuesto_en = None
-
             p.estado = 'PENDIENTE'
             db.session.commit()
             flash('Rechazaste la propuesta. El partido sigue pendiente sin resultado.', 'ok')
@@ -2384,33 +3983,34 @@ def partidos_confirmar_resultado(partido_id):
 
         # ¿Ambas parejas confirmadas? → cerrar y aplicar puntos
         if (p.confirmo_pareja1 == 1) and (p.confirmo_pareja2 == 1):
-            # Origen de la propuesta: priorizar tabla PRP; si no, legacy
             ganador_id = prp.ganador_pareja_id if prp else p.resultado_propuesto_ganador_pareja_id
             sets_text  = prp.sets_text if prp else p.resultado_propuesto_sets_text
 
-            # === Tu lógica de cierre (puntos, bonus, desafíos, etc.) tal cual ===
-            p1 = p.pareja1
-            p2 = p.pareja2
-
+            # === CIERRE con tu lógica de puntos + bonus + desafío ===
             DELTA_WIN = globals().get('DELTA_WIN', -10)
             DELTA_LOSS = globals().get('DELTA_LOSS', +5)
             DELTA_WIN_BONUS = globals().get('DELTA_WIN_BONUS', -3)
             BONUS_APLICA_DESDE = globals().get('BONUS_APLICA_DESDE', 3)
 
             def clamp_por_jugador(j):
-                cat = j.categoria
+                cat = getattr(j, 'categoria', None)
                 if not cat:
                     return j.puntos
-                return max(cat.puntos_min, min(cat.puntos_max, j.puntos))
+                try:
+                    p_val = int(j.puntos or 0)
+                    pmin = int(cat.puntos_min)
+                    pmax = int(cat.puntos_max)
+                except Exception:
+                    return j.puntos
+                j.puntos = max(pmin, min(pmax, p_val))
+                return j.puntos
 
-            if ganador_id == p1.id:
-                pareja_g = p1
-                pareja_p = p2
-            else:
-                pareja_g = p2
-                pareja_p = p1
+            p1 = p.pareja1
+            p2 = p.pareja2
+            pareja_g = p1 if ganador_id == p1.id else p2
+            pareja_p = p2 if ganador_id == p1.id else p1
 
-            ganadores = [pareja_g.jugador1, pareja_g.jugador2]
+            ganadores  = [pareja_g.jugador1, pareja_g.jugador2]
             perdedores = [pareja_p.jugador1, pareja_p.jugador2]
 
             victorias_previas = (
@@ -2425,20 +4025,20 @@ def partidos_confirmar_resultado(partido_id):
             for jg in ganadores:
                 base = (jg.puntos or (jg.categoria.puntos_max if jg.categoria else 0))
                 jg.puntos = base + DELTA_WIN + (DELTA_WIN_BONUS if aplica_bonus else 0)
-                jg.puntos = clamp_por_jugador(jg)
+                clamp_por_jugador(jg)
 
             for jp in perdedores:
                 base = (jp.puntos or (jp.categoria.puntos_max if jp.categoria else 0))
                 jp.puntos = base + DELTA_LOSS
-                jp.puntos = clamp_por_jugador(jp)
+                clamp_por_jugador(jp)
 
             pr = PartidoResultado(
                 partido_id=p.id,
                 ganador_pareja_id=ganador_id,
                 sets_text=sets_text or None
             )
-            p.estado = 'JUGADO'
             db.session.add(pr)
+            p.estado = 'JUGADO'
 
             # Desafío (si aplica)
             desafio = Desafio.query.filter_by(partido_id=p.id).first()
@@ -2490,7 +4090,7 @@ def partidos_confirmar_resultado(partido_id):
 
                 desafio.estado = 'JUGADO'
 
-            # Limpiar propuesta (tabla + legacy) al cerrar
+            # Limpiar propuesta (tabla + legacy)
             if prp:
                 db.session.delete(prp)
             p.resultado_propuesto_ganador_pareja_id = None
@@ -2507,7 +4107,7 @@ def partidos_confirmar_resultado(partido_id):
             flash(base_msg + (f' {msg_extra}' if msg_extra else ''), 'ok')
             return redirect(url_for('partidos_list'))
 
-        # Aceptación parcial: mantener PROPUESTO (si aún no estaba) y avisar
+        # Aceptación parcial: mantener/forzar PROPUESTO
         if p.estado != 'PROPUESTO':
             p.estado = 'PROPUESTO'
         db.session.commit()
@@ -2548,18 +4148,115 @@ def _cerrar_propuestas_vencidas_core():
     DELTA_WIN_BONUS = globals().get('DELTA_WIN_BONUS', -3)
     BONUS_APLICA_DESDE = globals().get('BONUS_APLICA_DESDE', 3)
 
-    def clamp_por_jugador(j):
-        cat = j.categoria
-        if not cat:
-            return j.puntos
-        return max(cat.puntos_min, min(cat.puntos_max, j.puntos))
+# --- imports necesarios en el módulo ---
+from datetime import datetime, timedelta
+from sqlalchemy import and_
+
+# === HELPERS ================================================================
+
+def clamp_por_jugador(j):
+    """
+    Lleva j.puntos al rango [pmin, pmax] de su categoría (sin mover categoria_id).
+    No decide deltas; sólo encierra.
+    """
+    if not j or getattr(j, "puntos", None) is None:
+        return None
+
+    cat = getattr(j, "categoria", None)
+    if not cat:
+        return j.puntos
+
+    try:
+        p    = int(j.puntos)
+        pmin = int(cat.puntos_min)
+        pmax = int(cat.puntos_max)
+    except Exception:
+        return j.puntos
+
+    j.puntos = max(pmin, min(pmax, p))
+    return j.puntos
+
+
+def aplicar_delta_rankeable(j, delta):
+    """
+    Aplica un delta respetando bordes de categoría:
+    - Si j.puntos > pmax y delta<0 => queda en pmax (no baja).
+    - Si j.puntos < pmin y delta>0 => queda en pmin (no sube).
+    - En otros casos: puntos += delta y luego clamp al rango.
+    """
+    if not j or getattr(j, "puntos", None) is None:
+        return
+
+    cat = getattr(j, "categoria", None)
+    if not cat:
+        # sin categoría, aplicamos delta “crudo”
+        try:
+            j.puntos = int(j.puntos) + int(delta)
+        except Exception:
+            pass
+        return
+
+    try:
+        p    = int(j.puntos)
+        pmin = int(cat.puntos_min)
+        pmax = int(cat.puntos_max)
+        delta = int(delta)
+    except Exception:
+        return
+
+    # reglas de borde
+    if p > pmax and delta < 0:
+        j.puntos = pmax
+        return
+    if p < pmin and delta > 0:
+        j.puntos = pmin
+        return
+
+    # caso normal (+ clamp final)
+    j.puntos = max(pmin, min(pmax, p + delta))
+
+
+# === FUNCIÓN CORE: cierra propuestas >12h (idéntica a confirmar por ambas partes) ===
+def _cerrar_propuestas_vencidas_core():
+    """Cierra automáticamente propuestas con >12h de antigüedad y resultado propuesto."""
+    limite = datetime.utcnow() - timedelta(hours=12)
+
+    candidatos = (
+        db.session.query(Partido)
+        .filter(
+            Partido.estado == 'PROPUESTO',
+            Partido.resultado_propuesto_en.isnot(None),
+            Partido.resultado_propuesto_en <= limite
+        )
+        .all()
+    )
+
+    cerrados = 0
+
+    # Intentamos usar PRP si existe, sino los campos legacy en Partido
+    try:
+        from .models import PartidoResultadoPropuesto
+    except Exception:
+        PartidoResultadoPropuesto = globals().get('PartidoResultadoPropuesto', None)
+
+    # Helpers / constantes
+    DELTA_WIN = globals().get('DELTA_WIN', -10)
+    DELTA_LOSS = globals().get('DELTA_LOSS', +5)
+    DELTA_WIN_BONUS = globals().get('DELTA_WIN_BONUS', -3)
+    BONUS_APLICA_DESDE = globals().get('BONUS_APLICA_DESDE', 3)
 
     for p in candidatos:
-        # Si por alguna razón ambas confirmaciones están ok, lo salteamos (ya se habría cerrado)
-        if p.confirmo_pareja1 == 1 and p.confirmo_pareja2 == 1:
+        # por si el partido quedó confirmado por ambos antes de correr este cierre
+        if (getattr(p, "confirmo_pareja1", None) == 1) and (getattr(p, "confirmo_pareja2", None) == 1):
             continue
 
-        # Tomamos ganador + marcador desde PRP (si existe) o desde Partido (legacy)
+        # Validaciones mínimas de estructura
+        p1 = getattr(p, "pareja1", None)
+        p2 = getattr(p, "pareja2", None)
+        if not p1 or not p2:
+            # partido mal conformado, lo salteamos
+            continue
+
         prp = None
         if PartidoResultadoPropuesto:
             prp = (
@@ -2568,20 +4265,23 @@ def _cerrar_propuestas_vencidas_core():
                 .one_or_none()
             )
 
-        ganador_id = prp.ganador_pareja_id if prp else p.resultado_propuesto_ganador_pareja_id
-        sets_text  = prp.sets_text if prp else p.resultado_propuesto_sets_text
+        ganador_id = prp.ganador_pareja_id if prp else getattr(p, "resultado_propuesto_ganador_pareja_id", None)
+        sets_text  = prp.sets_text            if prp else getattr(p, "resultado_propuesto_sets_text", None)
 
-        # Si falta info mínima, lo dejamos pasar (no cerramos)
+        # Si falta info mínima, no cerramos
         if not ganador_id:
             continue
 
-        p1, p2 = p.pareja1, p.pareja2
         pareja_g = p1 if ganador_id == p1.id else p2
         pareja_p = p2 if ganador_id == p1.id else p1
 
-        ganadores = [pareja_g.jugador1, pareja_g.jugador2]
-        perdedores = [pareja_p.jugador1, pareja_p.jugador2]
+        # Seguridad: que existan jugadores
+        ganadores  = [getattr(pareja_g, "jugador1", None), getattr(pareja_g, "jugador2", None)]
+        perdedores = [getattr(pareja_p, "jugador1", None), getattr(pareja_p, "jugador2", None)]
+        ganadores  = [j for j in ganadores  if j]
+        perdedores = [j for j in perdedores if j]
 
+        # Bonus por victoria n° N (contando ésta)
         victorias_previas = (
             db.session.query(PartidoResultado)
             .join(Partido, PartidoResultado.partido_id == Partido.id)
@@ -2591,22 +4291,20 @@ def _cerrar_propuestas_vencidas_core():
         )
         aplica_bonus = (victorias_previas + 1) >= BONUS_APLICA_DESDE
 
-        # Aplicar puntos
+        # ===== Aplicar puntos (con bordes de categoría) =====
         for jg in ganadores:
-            base = (jg.puntos or (jg.categoria.puntos_max if jg.categoria else 0))
-            jg.puntos = base + DELTA_WIN + (DELTA_WIN_BONUS if aplica_bonus else 0)
-            jg.puntos = clamp_por_jugador(jg)
+            delta = DELTA_WIN + (DELTA_WIN_BONUS if aplica_bonus else 0)
+            aplicar_delta_rankeable(jg, delta)
 
         for jp in perdedores:
-            base = (jp.puntos or (jp.categoria.puntos_max if jp.categoria else 0))
-            jp.puntos = base + DELTA_LOSS
-            jp.puntos = clamp_por_jugador(jp)
+            aplicar_delta_rankeable(jp, DELTA_LOSS)
+        # ===== fin aplicar puntos =====
 
         # Guardar resultado final
         pr = PartidoResultado(
             partido_id=p.id,
             ganador_pareja_id=ganador_id,
-            sets_text=sets_text or None
+            sets_text=(sets_text or None)
         )
         db.session.add(pr)
         p.estado = 'JUGADO'
@@ -2624,8 +4322,10 @@ def _cerrar_propuestas_vencidas_core():
 
             pareja_inferior = p.pareja1
             pareja_superior = p.pareja2
-            inferiores = [pareja_inferior.jugador1, pareja_inferior.jugador2]
-            superiores = [pareja_superior.jugador1, pareja_superior.jugador2]
+            inferiores = [getattr(pareja_inferior, "jugador1", None), getattr(pareja_inferior, "jugador2", None)]
+            superiores = [getattr(pareja_superior, "jugador1", None), getattr(pareja_superior, "jugador2", None)]
+            inferiores = [j for j in inferiores if j]
+            superiores = [j for j in superiores if j]
 
             if ganador_id == pareja_inferior.id:
                 for jj in inferiores:
@@ -2655,6 +4355,7 @@ def _cerrar_propuestas_vencidas_core():
         # Limpiar propuesta (tabla + legacy)
         if prp:
             db.session.delete(prp)
+
         p.resultado_propuesto_ganador_pareja_id = None
         p.resultado_propuesto_sets_text = None
         p.resultado_propuesto_por_id = None
@@ -2667,14 +4368,112 @@ def _cerrar_propuestas_vencidas_core():
     db.session.commit()
     return cerrados
 
+def pertenece_a_alguna_pareja(p, usuario):
+    """Devuelve 'p1'/'p2' si el usuario integra esa pareja, sino ''."""
+    if not usuario or not p:
+        return ''
+    uid = getattr(usuario, 'id', None)
+    if not uid:
+        return ''
+    if p.pareja1 and (getattr(p.pareja1.jugador1, 'id', None) == uid or getattr(p.pareja1.jugador2, 'id', None) == uid):
+        return 'p1'
+    if p.pareja2 and (getattr(p.pareja2.jugador1, 'id', None) == uid or getattr(p.pareja2.jugador2, 'id', None) == uid):
+        return 'p2'
+    return ''
+
+
+def puede_proponer_resultado(p, usuario=None):
+    """
+    Reglas:
+      - Bloquear sólo estados terminales/no editables ('JUGADO', 'CANCELADO', 'EN_REVISION').
+      - No debe existir PartidoResultado definitivo.
+      - Si existe PRP:
+          * si la propuso mi misma pareja -> permitir 'editar propuesta' (opcional)
+          * si la propuso la pareja rival -> NO proponer; redirigir a 'responder propuesta'.
+      - Debe pertenecer a alguna pareja del partido (o ser admin; el admin pasa el guard
+        pero no se le asigna 'side' automáticamente).
+    """
+    if not p:
+        return (False, "Partido inválido.", False, None)
+
+    # Estados no editables (blacklist)
+    estados_bloqueados = {'JUGADO', 'CANCELADO', 'EN_REVISION'}
+    if getattr(p, 'estado', None) in estados_bloqueados:
+        return (False, "Estado no habilitado.", False, None)
+
+    # ¿ya hay resultado final?
+    ya = db.session.query(PartidoResultado).filter_by(partido_id=p.id).first()
+    if ya:
+        return (False, "El partido ya tiene resultado definitivo.", False, None)
+
+    # ¿existe propuesta?
+    try:
+        from .models import PartidoResultadoPropuesto as PRP
+    except Exception:
+        PRP = globals().get('PartidoResultadoPropuesto', None)
+
+    if PRP:
+        prp = db.session.query(PRP).filter_by(partido_id=p.id).one_or_none()
+    else:
+        prp = None
+
+    # ¿pertenezco a alguna pareja? (o soy admin)
+    side = pertenece_a_alguna_pareja(p, usuario)
+    es_admin = bool(getattr(usuario, 'is_admin', False))
+    if not side and not es_admin:
+        return (False, "No integrás este partido.", False, None)
+
+    # Si no hay PRP, puedo proponer
+    if not prp:
+        return (True, "", False, None)  # OK proponer
+
+    # Hay PRP existente → ¿de quién es?
+    pareja_prop_id = getattr(prp, 'propuesto_por_pareja_id', None)
+    mi_pareja_id = None
+    if side == 'p1':
+        mi_pareja_id = getattr(p.pareja1, 'id', None)
+    elif side == 'p2':
+        mi_pareja_id = getattr(p.pareja2, 'id', None)
+
+    # Si soy admin pero no integrante, no forzamos ownership: tratamos como "rival" para obligar a responder
+    if mi_pareja_id is not None and pareja_prop_id == mi_pareja_id:
+        # Mi misma pareja propuso → permitir “editar”
+        return (True, "", False, prp)
+    else:
+        # La tiene que responder la pareja rival (o el admin viene a revisar)
+        return (False, "Hay una propuesta pendiente del rival. Debés responderla.", True, prp)
+
+
+
+
 
 # === ENDPOINT HTTP: para cron (protegido por token) ===
-@app.route('/tareas/propuestas/autocerrar')
+import hmac
+
+# === CRON SEGURO: POST + Authorization: Bearer ===
+@app.post('/tareas/propuestas/autocerrar')
 def tareas_autocerrar_propuestas_vencidas():
-    if request.args.get('token') != AUTOCRON_TOKEN:
+    # Esperamos: Authorization: Bearer <AUTOCRON_TOKEN>
+    auth = request.headers.get('Authorization', '')
+    expected = f"Bearer {AUTOCRON_TOKEN}"
+
+    if not (auth and hmac.compare_digest(auth, expected)):
+        # No revelamos detalles: 403 genérico
         return jsonify({"error": "forbidden"}), 403
-    cerrados = _cerrar_propuestas_vencidas_core()
-    return jsonify({"cerrados": cerrados})
+
+    try:
+        cerrados = _cerrar_propuestas_vencidas_core()
+        return jsonify({"cerrados": cerrados}), 200
+    except Exception as e:
+        current_app.logger.exception("Error en autocerrar propuestas vencidas")
+        return jsonify({"error": "internal_error"}), 500
+
+
+# (Opcional, pero útil): si alguien usa el viejo GET, respondemos 405
+@app.get('/tareas/propuestas/autocerrar')
+def tareas_autocerrar_propuestas_vencidas_get_deprecated():
+    return jsonify({"error": "method_not_allowed", "hint": "use POST with Authorization header"}), 405
+
 
 
 # === HOOK LAZY: lo corre como máximo 1 vez por minuto cuando hay tráfico ===
@@ -2704,6 +4503,7 @@ def desafios_list():
                 .all())
     return render_template('desafios_list.html', desafios=desafios)
 
+
 @app.route('/desafios/<int:desafio_id>/programar', methods=['POST'])
 def desafios_programar(desafio_id):
     d = get_or_404(Desafio, desafio_id)
@@ -2716,21 +4516,24 @@ def desafios_programar(desafio_id):
     pareja_inferior = get_or_create_pareja(d.desafiante_id, d.companero_id, d.categoria_origen_id)
     pareja_superior = get_or_create_pareja(d.rival1_id, d.rival2_id, d.categoria_superior_id)
 
+    # ⬅️ Trazabilidad: guardar el desafío que originó el partido
     partido = Partido(
         categoria_id=d.categoria_superior_id,
         pareja1_id=pareja_inferior.id,  # inferior
         pareja2_id=pareja_superior.id,  # superior
-        estado='PENDIENTE'
+        estado='PENDIENTE',
+        creado_por_desafio_id=d.id      # <<<<<<<<<<<<<<<<< clave de trazabilidad
     )
     db.session.add(partido)
-    db.session.commit()
+    db.session.flush()  # asegura partido.id sin cerrar la transacción
 
     d.partido_id = partido.id
-    # Estado se mantiene en ACEPTADO hasta que se juegue
+    # El estado del desafío se mantiene en ACEPTADO hasta que se juegue
     db.session.commit()
 
     flash(f'Partido #{partido.id} programado para el desafío.', 'ok')
     return redirect(url_for('desafios_list'))
+
 
 @app.route('/desafios/nuevo', methods=['GET', 'POST'])
 def desafios_new():
@@ -2916,7 +4719,13 @@ def desafios_responder(desafio_id):
             flash('Rechazaste el desafío.', 'ok')
             return redirect(url_for('desafios_list'))
 
-        # ACEPTAR
+        # ========= ACEPTAR =========
+        # Si el otro rival ya aceptó, NO permitir cambiar compañero
+        otro_flag_acepto = d.rival2_acepto if j.id == d.rival1_id else d.rival1_acepto
+        if compa_nuevo_id is not None and compa_nuevo_id and (otro_flag_acepto == 1):
+            flash('No podés cambiar el compañero: el otro rival ya aceptó la dupla.', 'error')
+            return redirect(url_for('desafios_responder', desafio_id=d.id))
+
         # ¿elige nuevo compañero?
         if compa_nuevo_id:
             if compa_nuevo_id == j.id:
@@ -2958,7 +4767,6 @@ def desafios_responder(desafio_id):
         candidatos_compa=candidatos_compa,
         cat_superior_nombre=cat_sup.nombre
     )
-
 
 @app.route('/abiertos')
 def abiertos_list():
@@ -3081,8 +4889,10 @@ def abiertos_join(pa_id):
         flash('Solo pueden unirse jugadores de la misma categoría.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    # Capacidad
-    cupo = len(pa.inscriptos)
+    # Capacidad (consulta directa a DB para evitar desfasajes)
+    cupo = (db.session.query(PartidoAbiertoJugador)
+            .filter_by(pa_id=pa.id)
+            .count())
     if cupo >= 4:
         flash('Este partido ya tiene 4 inscriptos.', 'error')
         return redirect(url_for('abiertos_list'))
@@ -3097,7 +4907,12 @@ def abiertos_join(pa_id):
     pref_id = request.form.get('partner_pref_id', type=int)
     partner_pref_id = None
     if pref_id:
-        ids_inscriptos = {it.jugador_id for it in pa.inscriptos}
+        # aseguramos que la preferencia apunte a alguien ya inscripto
+        ids_inscriptos = {
+            it.jugador_id
+            for it in db.session.query(PartidoAbiertoJugador)
+                                 .filter_by(pa_id=pa.id).all()
+        }
         if pref_id == j.id:
             flash('No podés elegirte a vos mismo como compañero.', 'error')
             return redirect(url_for('abiertos_list'))
@@ -3106,12 +4921,19 @@ def abiertos_join(pa_id):
             return redirect(url_for('abiertos_list'))
         partner_pref_id = pref_id
 
-    # Inscribir
+    # Inscribir (y limpiar suplencia si la tuviera en este abierto)
     db.session.add(PartidoAbiertoJugador(
         pa_id=pa.id,
         jugador_id=j.id,
         partner_pref_id=partner_pref_id
     ))
+
+    # Si estaba como suplente en este mismo abierto, lo quitamos
+    sup = (db.session.query(PartidoAbiertoSuplente)
+           .filter_by(pa_id=pa.id, jugador_id=j.id)
+           .first())
+    if sup:
+        db.session.delete(sup)
 
     # Actualizar estado si corresponde
     cupo += 1
@@ -3120,9 +4942,16 @@ def abiertos_join(pa_id):
 
     db.session.commit()
 
-    msg_extra = ' Preferencia de compañero guardada.' if partner_pref_id else ''
-    flash('Te uniste al partido abierto.' + msg_extra, 'ok')
+    msg = 'Te uniste al partido abierto.'
+    if partner_pref_id:
+        msg += ' Preferencia de compañero guardada.'
+    if sup:
+        msg += ' (Se eliminó tu suplencia en este abierto).'
+
+    flash(msg, 'ok')
     return redirect(url_for('abiertos_list'))
+
+
 
 
 @app.route('/abiertos/<int:pa_id>/salir', methods=['POST'])
@@ -3148,8 +4977,20 @@ def abiertos_leave(pa_id):
         flash('Ese jugador no estaba inscripto.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    # Eliminar inscripción
+    # Guardamos el jugador que se baja (para notificaciones)
+    try:
+        jugador_baja = r.jugador  # si hay relación
+    except Exception:
+        jugador_baja = db.session.get(Jugador, int(jugador_id)) if jugador_id else None
+
+    # Eliminar inscripción de titular
     db.session.delete(r)
+
+    # Si, además, estaba como suplente por alguna razón, quitarlo también
+    s_mismo = PartidoAbiertoSuplente.query.filter_by(pa_id=pa.id, jugador_id=jugador_id).first()
+    if s_mismo:
+        db.session.delete(s_mismo)
+
     db.session.flush()  # aseguramos que la baja impacte en los conteos
 
     # Cupo actual luego de la baja
@@ -3190,12 +5031,94 @@ def abiertos_leave(pa_id):
 
     db.session.commit()
 
+    # ================== Notificaciones por email (no bloqueantes) ==================
+    # Link útil (lista de abiertos)
+    try:
+        abiertos_url = url_for('abiertos_list', _external=True)
+    except Exception:
+        abiertos_url = request.url_root.rstrip('/') + '/abiertos'
+
+    categoria_nombre = getattr(pa.categoria, 'nombre', 'Categoría')
+    creador = getattr(pa, 'creador', None)
+    creador_nombre = getattr(creador, 'nombre_completo', 'alguien')
+
+    # 1) Aviso al suplente promovido
+    if suplente_promovido and getattr(suplente_promovido, 'email', None):
+        try:
+            subject = f"UPLAY: Fuiste promovido a titular en un abierto (#{pa.id})"
+            body = (
+                f"¡Buenas {suplente_promovido.nombre_completo}!\n\n"
+                f"Se liberó un lugar y fuiste promovido a titular en el abierto #{pa.id} "
+                f"de {categoria_nombre} (creado por {creador_nombre}).\n\n"
+                f"Ver abiertos: {abiertos_url}\n\n"
+                f"— UPLAY"
+            )
+            html_body = (
+                f"<p>¡Hola <strong>{suplente_promovido.nombre_completo}</strong>!</p>"
+                f"<p>Se liberó un lugar y fuiste promovido a <strong>titular</strong> en el "
+                f"abierto <strong>#{pa.id}</strong> de <strong>{categoria_nombre}</strong> "
+                f"(creado por {creador_nombre}).</p>"
+                f"<p><a href='{abiertos_url}'>Ver abiertos</a></p>"
+                f"<p>— UPLAY</p>"
+            )
+            send_mail(subject=subject, body=body, html_body=html_body, to=[suplente_promovido.email])
+        except Exception as e:
+            current_app.logger.exception("No se pudo enviar correo al suplente promovido: %s", e)
+
+    # 2) Aviso al creador del abierto (CC admins)
+    try:
+        # Emails de admins (solo los que tienen email)
+        admin_emails = [a.email for a in db.session.query(Jugador).filter(
+            Jugador.is_admin.is_(True),
+            Jugador.email.isnot(None)
+        ).all() if a.email]
+
+        creador_email = getattr(creador, 'email', None)
+        if creador_email or admin_emails:
+            quien_baja = getattr(jugador_baja, 'nombre_completo', f'Jugador #{jugador_id}')
+            promo_txt = (f" Fue promovido {suplente_promovido.nombre_completo} desde la lista de suplentes."
+                         if suplente_promovido else
+                         " No había suplentes disponibles.")
+            subject_c = f"UPLAY: Baja en abierto #{pa.id} ({categoria_nombre})"
+            body_c = (
+                f"Hola {creador_nombre},\n\n"
+                f"{quien_baja} se dio de baja del abierto #{pa.id} de {categoria_nombre}.\n"
+                f"{promo_txt}\n\n"
+                f"Ver abiertos: {abiertos_url}\n\n"
+                f"— UPLAY"
+            )
+            html_body_c = (
+                f"<p>Hola <strong>{creador_nombre}</strong>,</p>"
+                f"<p><strong>{quien_baja}</strong> se dio de baja del abierto <strong>#{pa.id}</strong> "
+                f"de <strong>{categoria_nombre}</strong>.</p>"
+                f"<p>{promo_txt}</p>"
+                f"<p><a href='{abiertos_url}'>Ver abiertos</a></p>"
+                f"<p>— UPLAY</p>"
+            )
+
+            to_list = [creador_email] if creador_email else []
+            cc_list = admin_emails or []
+
+            # Tu helper puede aceptar cc/bcc; si no, duplicá el envío a admins.
+            try:
+                send_mail(subject=subject_c, body=body_c, html_body=html_body_c, to=to_list, cc=cc_list)
+            except TypeError:
+                # Fallback si send_mail no soporta cc: enviar a creador y luego a admins
+                if to_list:
+                    send_mail(subject=subject_c, body=body_c, html_body=html_body_c, to=to_list)
+                for adm in cc_list:
+                    send_mail(subject=subject_c, body=body_c, html_body=html_body_c, to=[adm])
+    except Exception as e:
+        current_app.logger.exception("No se pudo enviar correo de notificación al creador/admins: %s", e)
+
+    # ================== Mensajes de UI ==================
     if suplente_promovido:
         flash(f'Baja confirmada. Se sumó {suplente_promovido.nombre_completo} desde la lista de suplentes.', 'ok')
     else:
         flash('Baja confirmada.', 'ok')
 
     return redirect(url_for('abiertos_list'))
+
 
 
 @app.route('/abiertos/<int:pa_id>/armar', methods=['POST'])
@@ -4424,10 +6347,24 @@ def admin_abiertos_cancelar(pa_id):
 @admin_required
 def admin_abiertos_eliminar(pa_id):
     pa = get_or_404(PartidoAbierto, pa_id)
-    db.session.delete(pa)
-    db.session.commit()
-    flash('Abierto eliminado.', 'ok')
+
+    # Misma regla que en la ruta pública: si ya creó un partido, no permitir borrado duro
+    if pa.estado == 'PARTIDO_CREADO':
+        flash('Este abierto ya creó un partido. No se puede eliminar.', 'warning')
+        return redirect(url_for('abiertos_list'))
+
+    try:
+        # Borrado duro; gracias a los backrefs con cascade se eliminan inscriptos/suplentes
+        db.session.delete(pa)
+        db.session.commit()
+        flash(f'Abierto #{pa_id} eliminado.', 'ok')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error eliminando abierto (admin): %s", e)
+        flash('No se pudo eliminar el abierto.', 'error')
+
     return redirect(url_for('abiertos_list'))
+
 
 
 # ====== ADMIN: PARTIDOS ======
@@ -4471,6 +6408,7 @@ def admin_desafios_eliminar(desafio_id):
     flash('Desafío eliminado.', 'ok')
     return redirect(url_for('desafios_list'))
 
+
 @app.route('/admin/partidos/<int:partido_id>/resultado/editar', methods=['GET', 'POST'])
 @admin_required
 def admin_partido_resultado_editar(partido_id):
@@ -4483,8 +6421,25 @@ def admin_partido_resultado_editar(partido_id):
         flash('El partido no tiene parejas válidas.', 'error')
         return redirect(url_for('partidos_list'))
 
+    # Helper local: intenta llamar a tu recálculo si existe (no rompe si no está)
+    def _try_recalc(_partido):
+        try:
+            fn = (globals().get('recalcular_puntos_partido')
+                  or globals().get('recalcular_elo_para_partido'))
+            if callable(fn):
+                fn(_partido.id)
+                return True
+        except Exception as e:
+            try:
+                current_app.logger.exception("Error recalculando puntos para partido_id=%s: %s", _partido.id, e)
+            except Exception:
+                pass
+        return False
+
     if request.method == 'POST':
         action = (request.form.get('action') or '').strip()
+        # checkbox/flag opcional del form: <input type="checkbox" name="recalcular" value="1">
+        want_recalc = (request.form.get('recalcular') or '').lower() in ('1', 'true', 'on', 'sí', 'si')
 
         if action == 'reopen':
             # Reabrir partido: borrar resultado y volver a PENDIENTE
@@ -4492,7 +6447,13 @@ def admin_partido_resultado_editar(partido_id):
                 db.session.delete(partido.resultado)
             partido.estado = 'PENDIENTE'
             db.session.commit()
-            flash('Partido reabierto. (Ojo: puntos NO se recalcularon automáticamente)', 'ok')
+
+            # recálculo opcional (por si querés revertir/corregir puntos al reabrir)
+            if want_recalc and _try_recalc(partido):
+                flash('Partido reabierto y puntos recalculados.', 'ok')
+            else:
+                flash('Partido reabierto. (Ojo: puntos NO se recalcularon automáticamente)', 'ok')
+
             return redirect(url_for('partidos_list'))
 
         elif action == 'update':
@@ -4525,7 +6486,12 @@ def admin_partido_resultado_editar(partido_id):
 
             partido.estado = 'JUGADO'
             db.session.commit()
-            flash('Resultado actualizado. (Ojo: puntos NO se recalcularon automáticamente)', 'ok')
+
+            if want_recalc and _try_recalc(partido):
+                flash('Resultado actualizado y puntos recalculados.', 'ok')
+            else:
+                flash('Resultado actualizado. (Ojo: puntos NO se recalcularon automáticamente)', 'ok')
+
             return redirect(url_for('partidos_list'))
 
         else:
@@ -4534,6 +6500,7 @@ def admin_partido_resultado_editar(partido_id):
 
     # GET -> mostrar formulario con datos actuales
     return render_template('admin_partido_resultado_edit.html', partido=partido, p1=p1, p2=p2)
+
 
 # ===== Torneos: rutas MVP =====
 
@@ -4665,19 +6632,37 @@ def admin_torneos_view(tid):
 @admin_required
 def admin_torneos_cambiar_estado(tid):
     t = get_or_404(Torneo, tid)
+
+    # Usar tus constantes si están definidas; si no, fallback a literales
+    EST_BORRADOR            = globals().get('EST_BORRADOR', 'BORRADOR')
+    EST_INSCRIPCION         = globals().get('EST_INSCRIPCION', 'INSCRIPCION')
+    EST_INSCRIPCION_CERRADA = globals().get('EST_INSCRIPCION_CERRADA', 'INSCRIPCION_CERRADA')
+    EST_EN_JUEGO            = globals().get('EST_EN_JUEGO', 'EN_JUEGO')
+    EST_FINALIZADO          = globals().get('EST_FINALIZADO', 'FINALIZADO')
+    EST_CANCELADO           = globals().get('EST_CANCELADO', 'CANCELADO')
+
     nuevo_estado = (request.form.get('estado') or '').upper()
-    validos = {'BORRADOR','INSCRIPCION','EN_JUEGO','FINALIZADO','CANCELADO'}
+    validos = {
+        EST_BORRADOR, EST_INSCRIPCION, EST_INSCRIPCION_CERRADA,
+        EST_EN_JUEGO, EST_FINALIZADO, EST_CANCELADO
+    }
     if nuevo_estado not in validos:
         flash('Estado inválido.', 'error')
         return redirect(url_for('admin_torneos_view', tid=t.id))
 
-    # Reglas simples MVP
-    if t.estado == 'BORRADOR' and nuevo_estado == 'INSCRIPCION':
-        t.estado = 'INSCRIPCION'
-    elif t.estado in {'BORRADOR','INSCRIPCION'} and nuevo_estado == 'EN_JUEGO':
-        t.estado = 'EN_JUEGO'
-    elif nuevo_estado in {'FINALIZADO','CANCELADO'}:
+    # Reglas MVP actualizadas (ahora incluye INSCRIPCION_CERRADA)
+    if t.estado == EST_BORRADOR and nuevo_estado == EST_INSCRIPCION:
+        t.estado = EST_INSCRIPCION
+
+    elif t.estado == EST_INSCRIPCION and nuevo_estado == EST_INSCRIPCION_CERRADA:
+        t.estado = EST_INSCRIPCION_CERRADA
+
+    elif t.estado in {EST_BORRADOR, EST_INSCRIPCION, EST_INSCRIPCION_CERRADA} and nuevo_estado == EST_EN_JUEGO:
+        t.estado = EST_EN_JUEGO
+
+    elif nuevo_estado in {EST_FINALIZADO, EST_CANCELADO}:
         t.estado = nuevo_estado
+
     else:
         flash('Transición no permitida en MVP.', 'error')
         return redirect(url_for('admin_torneos_view', tid=t.id))
@@ -4685,10 +6670,6 @@ def admin_torneos_cambiar_estado(tid):
     db.session.commit()
     flash(f'Estado actualizado a {t.estado}.', 'ok')
     return redirect(url_for('admin_torneos_view', tid=t.id))
-
-
-
-
 
 
 @app.route('/torneos/<int:tid>/inscribirme', methods=['GET', 'POST'])
@@ -4848,20 +6829,80 @@ def torneo_inscribirme(tid):
 @admin_required
 def admin_torneos_generar_fixture(tid):
     t = get_or_404(Torneo, tid)
-    modo = (request.form.get('modo') or '').upper()  # 'AMERICANO'|'PLAYOFF'
+
+    EST_INSCRIPCION_CERRADA = globals().get('EST_INSCRIPCION_CERRADA', 'INSCRIPCION_CERRADA')
+    EST_EN_JUEGO            = globals().get('EST_EN_JUEGO', 'EN_JUEGO')
+
+    modo = (request.form.get('modo') or '').upper().strip()  # 'AMERICANO' | 'PLAYOFF' | 'PLAYOFF_NEXT'
+    zonas = request.form.get('zonas', type=int) or 1
+    if zonas < 1:
+        zonas = 1
+    ida_y_vuelta = (request.form.get('ida_y_vuelta') or '').lower() in ('1','true','on','sí','si')
+
+    # ✅ usar el tid del path para no tocar la sesión si está en error
+    def back():
+        return redirect(url_for('admin_torneos_view', tid=tid))
+
+    if modo not in ('AMERICANO', 'PLAYOFF', 'PLAYOFF_NEXT'):
+        flash('Modo de fixture inválido.', 'error')
+        return back()
+
+    if modo in ('AMERICANO', 'PLAYOFF') and t.estado != EST_INSCRIPCION_CERRADA:
+        flash('Primero cerrá la inscripción para generar el fixture.', 'error')
+        return back()
+
     try:
         if modo == 'AMERICANO':
-            generar_fixture_americano(t.id, por_zonas=False)
-            flash('Fixture AMERICANO generado (stub).', 'ok')
-        elif modo == 'PLAYOFF':
-            generar_playoff_directo(t.id)
-            flash('Playoff generado (stub).', 'ok')
+            # ⬇️ FIX: sin 'por_zonas'
+            generar_fixture_americano(
+                t.id,
+                zonas=zonas,
+                ida_y_vuelta=ida_y_vuelta
+            )
+            extra = f" (zonas={zonas}{', ida y vuelta' if ida_y_vuelta else ''})"
+            flash('Fixture AMERICANO generado' + extra + '.', 'ok')
+
+            if t.estado != EST_EN_JUEGO:
+                t.estado = EST_EN_JUEGO
+                db.session.commit()
+            return back()
+
+        if modo == 'PLAYOFF':
+            creados = generar_playoff_directo(t.id)
+            if creados is not None:
+                flash(f'Playoff generado ({creados} partido(s) en 1ª ronda).', 'ok')
+            else:
+                flash('Playoff generado.', 'ok')
+
+            if t.estado != EST_EN_JUEGO:
+                t.estado = EST_EN_JUEGO
+                db.session.commit()
+            return back()
+
+        # PLAYOFF_NEXT
+        creados = generar_playoff_siguiente_ronda(t.id)
+        if creados == 0:
+            flash('No se creó nueva ronda (ya hay campeón o falta definir ganadores de la ronda previa).', 'info')
         else:
-            flash('Modo de fixture inválido.', 'error')
+            flash(f'Siguiente ronda de playoff generada: {creados} partido(s).', 'ok')
+
+        if t.estado != EST_EN_JUEGO:
+            t.estado = EST_EN_JUEGO
+            db.session.commit()
+        return back()
+
+    except RuntimeError as e:
+        # ✅ limpiar la sesión tras errores controlados
+        db.session.rollback()
+        flash(str(e), 'error')
+        return back()
     except Exception as e:
-        logging.exception('Error generando fixture')
+        # ✅ limpiar también en errores no controlados
+        db.session.rollback()
+        current_app.logger.exception('Error generando fixture')
         flash(f'Error generando fixture: {e}', 'error')
-    return redirect(url_for('admin_torneos_view', tid=t.id))
+        return back()
+
 
 
 @app.route('/admin/torneos/partidos/<int:pid>/resultado', methods=['POST'])
@@ -4884,37 +6925,35 @@ def admin_torneo_partido_resultado(pid):
     return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
 
 
-@app.route('/admin/torneos/<int:tid>/eliminar', methods=['POST'])
-@admin_required
-def admin_torneos_delete(tid):
-    t = get_or_404(Torneo, tid)
-    # Borrado ordenado (FKs blandas)
-    TorneoLlaveNodo.query.filter_by(torneo_id=t.id).delete()
-    TorneoPartido.query.filter_by(torneo_id=t.id).delete()
-    TorneoParticipante.query.filter_by(torneo_id=t.id).delete()
-    TorneoGrupo.query.filter(TorneoGrupo.fase_id.in_(
-        db.session.query(TorneoFase.id).filter_by(torneo_id=t.id)
-    )).delete(synchronize_session=False)
-    TorneoFase.query.filter_by(torneo_id=t.id).delete()
-    TorneoInscripcion.query.filter_by(torneo_id=t.id).delete()
-    db.session.delete(t)
-    db.session.commit()
-    flash('Torneo eliminado.', 'ok')
-    return redirect(url_for('admin_torneos_list'))
-
 @app.route('/admin/torneos/<int:tid>/abrir_inscripcion', methods=['POST'])
 @admin_required
 def admin_torneo_abrir_inscripcion(tid):
     t = get_or_404(Torneo, tid)
 
-    if t.estado not in ('BORRADOR', 'CANCELADO'):
+    # Usar constantes si están definidas; fallback a literales
+    EST_BORRADOR    = globals().get('EST_BORRADOR', 'BORRADOR')
+    EST_INSCRIPCION = globals().get('EST_INSCRIPCION', 'INSCRIPCION')
+    EST_CANCELADO   = globals().get('EST_CANCELADO', 'CANCELADO')
+
+    if t.estado not in (EST_BORRADOR, EST_CANCELADO):
         flash('Solo se puede abrir inscripción desde BORRADOR o CANCELADO.', 'error')
         return redirect(url_for('admin_torneos_view', tid=t.id))
 
-    t.estado = 'INSCRIPCION'
+    # Estado y flags coherentes con la vista pública
+    t.estado = EST_INSCRIPCION
+    # si manejás visibilidad/inscripción pública, asegurá la apertura
+    try:
+        # estos campos existen en tu modelo
+        t.inscripciones_abiertas = True
+        # no toco es_publico (respetamos lo que tenga)
+    except AttributeError:
+        # por si en otro entorno no existen estos campos
+        pass
+
     db.session.commit()
     flash('Inscripción abierta.', 'ok')
     return redirect(url_for('admin_torneos_view', tid=t.id))
+
 
 
 @app.route('/admin/torneos/<int:tid>/cerrar_inscripcion', methods=['POST'])
@@ -4922,15 +6961,58 @@ def admin_torneo_abrir_inscripcion(tid):
 def admin_torneo_cerrar_inscripcion(tid):
     t = get_or_404(Torneo, tid)
 
-    if t.estado != 'INSCRIPCION':
+    # Usar constantes si existen; fallback a literales
+    EST_INSCRIPCION         = globals().get('EST_INSCRIPCION', 'INSCRIPCION')
+    EST_INSCRIPCION_CERRADA = globals().get('EST_INSCRIPCION_CERRADA', 'INSCRIPCION_CERRADA')
+
+    if t.estado != EST_INSCRIPCION:
         flash('El torneo no está en inscripción.', 'error')
         return redirect(url_for('admin_torneos_view', tid=t.id))
 
-    # Volvemos a BORRADOR. Más adelante, cuando generemos fixture, pasará a EN_JUEGO.
-    t.estado = 'BORRADOR'
+    # Cerrar inscripción "de verdad": queda listo para generar fixture
+    t.estado = EST_INSCRIPCION_CERRADA
+    try:
+        # reflejar en la vista pública
+        t.inscripciones_abiertas = False
+    except AttributeError:
+        pass
+
     db.session.commit()
-    flash('Inscripción cerrada (vuelto a BORRADOR).', 'ok')
+    flash('Inscripción cerrada. Ya podés generar el fixture.', 'ok')
     return redirect(url_for('admin_torneos_view', tid=t.id))
+
+@app.route('/admin/torneos/<int:tid>/eliminar', methods=['POST'], endpoint='admin_torneo_eliminar')
+@admin_required
+def admin_torneo_eliminar(tid):
+    t = get_or_404(Torneo, tid)
+    try:
+        # 1) Partidos
+        db.session.query(TorneoPartido).filter_by(torneo_id=t.id).delete(synchronize_session=False)
+        # 2) Nodos de llave
+        db.session.query(TorneoLlaveNodo).filter_by(torneo_id=t.id).delete(synchronize_session=False)
+        # 3) Participantes
+        db.session.query(TorneoParticipante).filter_by(torneo_id=t.id).delete(synchronize_session=False)
+        # 4) Grupos (por fases del torneo)
+        sub_fases = db.session.query(TorneoFase.id).filter(TorneoFase.torneo_id == t.id).subquery()
+        db.session.query(TorneoGrupo).filter(TorneoGrupo.fase_id.in_(sub_fases)).delete(synchronize_session=False)
+        # 5) Fases
+        db.session.query(TorneoFase).filter_by(torneo_id=t.id).delete(synchronize_session=False)
+        # 6) Inscripciones
+        db.session.query(TorneoInscripcion).filter_by(torneo_id=t.id).delete(synchronize_session=False)
+        # 7) Torneo
+        db.session.delete(t)
+
+        db.session.commit()
+        flash('Torneo eliminado correctamente.', 'ok')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error eliminando torneo")
+        flash(f'No se pudo eliminar el torneo: {e}', 'error')
+
+    return redirect(url_for('admin_torneos_list'))
+
+
+
 
 @app.route('/torneos', methods=['GET'])
 def torneos_public_list():
@@ -5045,10 +7127,521 @@ def torneo_public_detail_legacy(torneo_id: int):
 @app.route('/torneos/<int:torneo_id>/fixture', methods=['GET'])
 def torneo_public_fixture(torneo_id: int):
     t = Torneo.query.get_or_404(torneo_id)
-    # Restringir si es privado y no sos admin
     if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
         abort(404)
-    return render_template('torneo_fixture.html', torneo=t)
+
+    # --- Fases ordenadas ---
+    fases = (db.session.query(TorneoFase)
+             .filter_by(torneo_id=t.id)
+             .order_by(TorneoFase.id.asc())
+             .all())
+
+    grupos_por_fase = {}
+    partidos_por_fase = {}
+    partidos_por_grupo = {}
+
+    # --- Todos los partidos del torneo (para el template) ---
+    q_partidos = (db.session.query(TorneoPartido)
+                  .filter(TorneoPartido.torneo_id == t.id)
+                  .order_by(
+                      TorneoPartido.ronda.asc(),
+                      TorneoPartido.orden.asc(),
+                      TorneoPartido.id.asc()
+                  ))
+    partidos = q_partidos.all()
+
+    # --- Estructuras por fase/grupo (lo que ya tenías) ---
+    for f in fases:
+        grupos = (db.session.query(TorneoGrupo)
+                  .filter_by(fase_id=f.id)
+                  .order_by(TorneoGrupo.id.asc())
+                  .all())
+        grupos_por_fase[f.id] = grupos
+
+        partidos_fase = (db.session.query(TorneoPartido)
+                         .filter(TorneoPartido.torneo_id == t.id)
+                         .filter(TorneoPartido.fase_id == f.id)
+                         .order_by(TorneoPartido.ronda.asc(), TorneoPartido.id.asc())
+                         .all())
+        partidos_por_fase[f.id] = partidos_fase
+
+        for g in grupos:
+            partidos_grupo = [m for m in partidos_fase if getattr(m, 'grupo_id', None) == g.id]
+            partidos_por_grupo[g.id] = partidos_grupo
+
+    # ---------- Resolver nombres DESDE INSCRIPTOS del torneo ----------
+    ids = set()
+    for m in partidos:
+        if m.participante_a_id: ids.add(m.participante_a_id)
+        if m.participante_b_id: ids.add(m.participante_b_id)
+
+    nombres_por_id = {}
+    if ids:
+        Jugador = globals().get('Jugador')
+        # 1) Intentar con el/los modelos de INSCRIPCIÓN del torneo
+        candidatos_insc = []
+        for nombre_modelo in ('TorneoInscripcion', 'TorneoParticipante', 'Inscripcion'):
+            M = globals().get(nombre_modelo)
+            if M is not None and hasattr(M, '__table__') and 'torneo_id' in M.__table__.c.keys():
+                candidatos_insc.append(M)
+
+        def cargar_desde_inscripciones(Model):
+            cols = set(Model.__table__.c.keys())
+            # Solo las inscripciones de ESTE torneo y cuyos IDs aparecen en el fixture
+            inscs = (db.session.query(Model)
+                     .filter(getattr(Model, 'torneo_id') == t.id)
+                     .filter(getattr(Model, 'id').in_(ids))
+                     .all())
+            if not inscs:
+                return False
+
+            # SINGLE: jugador_id
+            if 'jugador_id' in cols and Jugador is not None:
+                jids = [getattr(r, 'jugador_id') for r in inscs if getattr(r, 'jugador_id', None)]
+                jug_map = {}
+                if jids:
+                    for j in db.session.query(Jugador).filter(Jugador.id.in_(jids)).all():
+                        jug_map[j.id] = j.nombre_completo
+                for r in inscs:
+                    jid = getattr(r, 'jugador_id', None)
+                    if jid in jug_map:
+                        nombres_por_id[r.id] = jug_map[jid]
+
+            # DOBLES: jugador1_id + jugador2_id
+            if {'jugador1_id', 'jugador2_id'} <= cols and Jugador is not None:
+                all_j = set()
+                for r in inscs:
+                    if getattr(r, 'jugador1_id', None): all_j.add(r.jugador1_id)
+                    if getattr(r, 'jugador2_id', None): all_j.add(r.jugador2_id)
+                jug_map = {}
+                if all_j:
+                    for j in db.session.query(Jugador).filter(Jugador.id.in_(list(all_j))).all():
+                        jug_map[j.id] = j.nombre_completo
+                for r in inscs:
+                    j1 = jug_map.get(getattr(r, 'jugador1_id', None))
+                    j2 = jug_map.get(getattr(r, 'jugador2_id', None))
+                    if j1 and j2:
+                        nombres_por_id[r.id] = f"{j1} / {j2}"
+                    elif j1:
+                        nombres_por_id[r.id] = j1
+                    elif j2:
+                        nombres_por_id[r.id] = j2
+
+            # Si el propio modelo tiene 'nombre' o 'nombre_completo'
+            for r in inscs:
+                if r.id not in nombres_por_id:
+                    nom = getattr(r, 'nombre_completo', None) or getattr(r, 'nombre', None)
+                    if nom:
+                        nombres_por_id[r.id] = nom
+
+            return True
+
+        resolvio = False
+        for Model in candidatos_insc:
+            if cargar_desde_inscripciones(Model):
+                resolvio = True
+
+        # 2) Fallback (legacy): si no logramos resolver por inscripciones,
+        #    tal vez los IDs del fixture son Jugador.id
+        if not resolvio and Jugador is not None:
+            filas = db.session.query(Jugador).filter(Jugador.id.in_(ids)).all()
+            for j in filas:
+                nombres_por_id[j.id] = j.nombre_completo
+
+    # ---------- Nombres por PARTIDO y LADO (A/B) para AMERICANO INDIVIDUAL ----------
+    nombres_lado = {}  # (partido_id, 'A'|'B') -> "Nombre1 / Nombre2"
+
+    TorneoPartidoLado = globals().get('TorneoPartidoLado')
+    TorneoInscripcion = globals().get('TorneoInscripcion')
+    Jugador = globals().get('Jugador')
+
+    if TorneoPartidoLado and TorneoInscripcion and Jugador and partidos:
+        # 1) Lados de todos los partidos de este torneo
+        lados = (db.session.query(TorneoPartidoLado)
+                 .join(TorneoPartido, TorneoPartidoLado.partido_id == TorneoPartido.id)
+                 .filter(TorneoPartido.torneo_id == t.id)
+                 .all())
+
+        if lados:
+            # 2) Pre-cargar inscripciones y jugadores involucrados
+            insc_ids_lado = set()
+            for L in lados:
+                if getattr(L, 'insc1_id', None): insc_ids_lado.add(L.insc1_id)
+                if getattr(L, 'insc2_id', None): insc_ids_lado.add(L.insc2_id)
+
+            insc_rows = db.session.query(TorneoInscripcion).filter(TorneoInscripcion.id.in_(insc_ids_lado)).all()
+            insc_by_id = {r.id: r for r in insc_rows}
+
+            j_ids = set()
+            for r in insc_rows:
+                if getattr(r, 'jugador1_id', None): j_ids.add(r.jugador1_id)
+                if getattr(r, 'jugador2_id', None): j_ids.add(r.jugador2_id)
+
+            jug_map = {}
+            if j_ids:
+                for j in db.session.query(Jugador).filter(Jugador.id.in_(list(j_ids))).all():
+                    jug_map[j.id] = j.nombre_completo
+
+            # 3) Construir "J1 / J2" por lado
+            for L in lados:
+                insc1 = insc_by_id.get(getattr(L, 'insc1_id', None))
+                insc2 = insc_by_id.get(getattr(L, 'insc2_id', None))
+
+                n1 = jug_map.get(getattr(insc1, 'jugador1_id', None))
+                n2 = jug_map.get(getattr(insc2, 'jugador1_id', None))
+                # Por si alguna inscripción trae jugador2_id usado (no típico en singles)
+                if not n1 and insc1 and getattr(insc1, 'jugador2_id', None):
+                    n1 = jug_map.get(insc1.jugador2_id)
+                if not n2 and insc2 and getattr(insc2, 'jugador2_id', None):
+                    n2 = jug_map.get(insc2.jugador2_id)
+
+                if n1 and n2:
+                    lado_key = (L.partido_id, (L.lado or 'A').upper())
+                    nombres_lado[lado_key] = f"{n1} / {n2}"
+
+    return render_template(
+        'torneo_fixture.html',
+        torneo=t,
+        partidos=partidos,
+        fases=fases,
+        grupos_por_fase=grupos_por_fase,
+        partidos_por_fase=partidos_por_fase,
+        partidos_por_grupo=partidos_por_grupo,
+        nombres_por_id=nombres_por_id,   # lo que ya usabas
+        nombres_lado=nombres_lado,       # NUEVO: para americano individual
+    )
+
+
+def _require_participante(tp: TorneoPartido) -> tuple[int, str]:
+    """Valida que el usuario participa y devuelve (jugador_id, lado 'A'/'B')."""
+    jugador_id = _jugador_id_actual()
+    if not jugador_id:
+        abort(403)
+    lado = lado_de_jugador_en_partido(tp, jugador_id)
+    if lado not in ('A','B'):
+        abort(403)
+    return jugador_id, lado
+
+def _finalizar_partido(p: 'TorneoPartido',
+                       ganador_lado: str,
+                       sets_text: str | None,
+                       confirmado_por_jugador_id: int | None = None):
+    """
+    Crea TorneoPartidoResultado, marca el partido como JUGADO y aplica puntos de ranking.
+    Idempotente a nivel 'unique' (partido_id único en resultados de torneo).
+    """
+    ganador_lado = (ganador_lado or '').upper()
+    if ganador_lado not in ('A', 'B'):
+        raise ValueError("ganador_lado debe ser 'A' o 'B'")
+
+    # Resolver ganador_participante_id según el lado
+    ganador_participante_id = p.participante_a_id if ganador_lado == 'A' else p.participante_b_id
+
+    # Upsert-like: si ya existe resultado, lo actualizamos
+    res = TorneoPartidoResultado.query.filter_by(partido_id=p.id).one_or_none()
+    if res is None:
+        res = TorneoPartidoResultado(
+            partido_id=p.id,
+            ganador_lado=ganador_lado,
+            ganador_participante_id=ganador_participante_id,
+            sets_text=sets_text or None,
+            confirmado_por_jugador_id=confirmado_por_jugador_id
+        )
+        db.session.add(res)
+    else:
+        res.ganador_lado = ganador_lado
+        res.ganador_participante_id = ganador_participante_id
+        res.sets_text = sets_text or None
+        res.confirmado_por_jugador_id = confirmado_por_jugador_id
+
+    # Estado del partido
+    p.estado = 'JUGADO'
+    db.session.flush()  # aseguramos IDs por si hiciera falta
+
+    # 🔢 Ranking: aplicar puntos (mismo esquema que partidos)
+    try:
+        _aplicar_ranking_por_torneo(p, ganador_lado)
+    except Exception:
+        # no bloqueamos el cierre si la actualización de puntos falla
+        current_app.logger.exception("Fallo aplicando ranking para TorneoPartido %s", p.id)
+
+    db.session.commit()
+
+# --- helpers chiquitos de permiso ---
+def _es_admin_actual() -> bool:
+    try:
+        # si tu modelo de usuario ya tiene is_admin directo, también lo contemplamos
+        return bool(
+            getattr(getattr(current_user, "jugador", None), "is_admin", False) or
+            getattr(current_user, "is_admin", False)
+        )
+    except Exception:
+        return False
+
+
+def _jugador_id_actual() -> int | None:
+    """
+    Devuelve el ID del jugador autenticado.
+    Orden de resolución (sin dependencias externas):
+    1) _resolve_jugador_id() si existe en tu proyecto.
+    2) get_current_jugador() si existe (usa tu sesión).
+    3) session['jugador_id'] directamente.
+    """
+    # 1) Resolver por helper propio si existe
+    try:
+        return _resolve_jugador_id()  # si no existe, caerá en except
+    except Exception:
+        pass
+
+    # 2) Tu helper existente
+    try:
+        if 'get_current_jugador' in globals():
+            j = get_current_jugador()
+            return int(j.id) if j else None
+    except Exception:
+        pass
+
+    # 3) Fallback a la sesión
+    try:
+        jid = session.get('jugador_id')
+        return int(jid) if jid is not None else None
+    except Exception:
+        return None
+
+
+# ================ DETALLE =================
+@app.route('/torneos/partidos/<int:partido_id>', methods=['GET'])
+def torneo_partido_detalle(partido_id: int):
+    # Partido o 404 (usa tu helper 2.x-friendly)
+    p = get_or_404(TorneoPartido, partido_id)
+
+    # Usuario actual (obligatorio estar logueado)
+    j = get_current_jugador()
+    if not j:
+        abort(403)
+
+    # ¿en qué lado estoy? (A/B) — robusto: contempla A2/B2 desde la tabla LADOS
+    flags = _lado_flag_dict(p, j.id)   # {'A': True/False, 'B': True/False}
+    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+
+    es_admin = bool(getattr(j, 'is_admin', False))
+    es_participante = lado_user in ('A', 'B')
+
+    # Guard: sólo admin o participantes pueden ver el detalle
+    if not (es_admin or es_participante):
+        abort(403)
+
+    # Propuesta y resultado actuales (si existen)
+    prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=partido_id).one_or_none()
+    res  = TorneoPartidoResultado.query.filter_by(partido_id=partido_id).one_or_none()
+    hay_propuesta = prop is not None
+    hay_resultado = bool(res or getattr(p, 'resultado_json', None))
+
+    # Permisos de acción
+    # - Proponer: participa (o admin), partido no cerrado y sin propuesta abierta
+    puede_proponer = (
+        (es_participante or es_admin)
+        and (p.estado in ('PENDIENTE', 'PROGRAMADO', 'POR_CONFIRMAR'))
+        and not hay_propuesta
+        and not hay_resultado
+    )
+
+    # - Responder: participa (o admin) y existe propuesta abierta
+    puede_responder = (es_participante or es_admin) and hay_propuesta
+
+    return render_template(
+        'torneo_partido_detalle.html',
+        p=p,
+        prop=prop,
+        res=res,
+        lado_user=lado_user,
+        puede_proponer=puede_proponer,
+        puede_responder=puede_responder,
+    )
+
+
+
+# ================ PROPONER =================
+@app.route('/torneos/partidos/<int:partido_id>/proponer', methods=['GET', 'POST'])
+def torneo_partido_proponer(partido_id: int):
+    # Traer partido o 404
+    p = get_or_404(TorneoPartido, partido_id)
+
+    # Usuario actual (requiere login)
+    j = get_current_jugador()
+    if not j:
+        abort(403)
+
+    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
+    flags = _lado_flag_dict(p, j.id)            # {'A': True/False, 'B': True/False}
+    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+
+    es_admin = bool(getattr(j, 'is_admin', False))
+    es_participante = lado_user in ('A', 'B')
+
+    # Sólo admin o participantes pueden abrir/proponer
+    if not (es_admin or es_participante):
+        abort(403)
+
+    # Si ya está cerrado, no permitir nuevas propuestas
+    if p.estado == 'JUGADO' or getattr(p, 'resultado_def', None):
+        flash('El partido ya está cerrado.', 'warning')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    # Leer (si existe) propuesta actual para prellenar el form
+    prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
+
+    if request.method == 'GET':
+        # Mostrar form (permite ver/editar la propuesta existente si la hay)
+        return render_template('torneo_partido_proponer.html', p=p, lado_user=lado_user, prop=prop)
+
+    # ----------------
+    # POST (submit)
+    # ----------------
+    ganador_lado = (request.form.get('ganador_lado') or '').strip().upper()
+    # Normalización suave del texto de sets; si tenés un helper global, podés reemplazar esta línea por él
+    sets_text = (request.form.get('sets_text') or '').strip()
+
+    if ganador_lado not in ('A', 'B'):
+        flash('Seleccioná el lado ganador (A o B).', 'error')
+        return redirect(url_for('torneo_partido_proponer', partido_id=partido_id))
+
+    if prop is None:
+        # Crear propuesta
+        prop = TorneoPartidoResultadoPropuesto(
+            partido_id=p.id,
+            ganador_lado=ganador_lado,
+            sets_text=sets_text,
+            propuesto_por_jugador_id=j.id,
+            # auto-confirma SOLO el lado del proponente si es participante; admin no-participante no auto-confirma
+            confirma_ladoA=True if lado_user == 'A' else None,
+            confirma_ladoB=True if lado_user == 'B' else None,
+        )
+        db.session.add(prop)
+    else:
+        # Editar propuesta existente
+        prop.ganador_lado = ganador_lado
+        prop.sets_text = sets_text
+        prop.propuesto_por_jugador_id = j.id
+
+        # Si propone un participante, auto-confirma su lado y resetea el contrario a "pendiente" (si no estaba confirmado)
+        if lado_user == 'A':
+            prop.confirma_ladoA = True
+            if prop.confirma_ladoB is not True:
+                prop.confirma_ladoB = None
+        elif lado_user == 'B':
+            prop.confirma_ladoB = True
+            if prop.confirma_ladoA is not True:
+                prop.confirma_ladoA = None
+        # Si propone un admin que no participa, no se auto-confirma ningún lado
+
+    # Marcar estado del partido como PROPUESTO (si no está ya cerrado)
+    p.estado = 'PROPUESTO'
+    db.session.commit()
+
+    flash('Resultado propuesto enviado.', 'success')
+    return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+
+# ================ RESPONDER =================
+@app.route('/torneos/partidos/<int:partido_id>/responder', methods=['GET', 'POST'])
+def torneo_partido_responder(partido_id: int):
+    # Traer partido o 404
+    p = get_or_404(TorneoPartido, partido_id)
+
+    # Usuario actual (requiere login)
+    j = get_current_jugador()
+    if not j:
+        abort(403)
+
+    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
+    flags = _lado_flag_dict(p, j.id)            # {'A': True/False, 'B': True/False}
+    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+
+    es_admin = bool(getattr(j, 'is_admin', False))
+    es_participante = lado_user in ('A', 'B')
+
+    # Sólo admin o participantes pueden responder
+    if not (es_admin or es_participante):
+        abort(403)
+
+    # Si ya está cerrado, no permitir responder
+    if p.estado == 'JUGADO' or getattr(p, 'resultado_def', None):
+        flash('El partido ya está cerrado.', 'warning')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    # Debe existir una propuesta para poder responder
+    prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
+    if not prop:
+        flash('No hay propuesta para responder.', 'warning')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    if request.method == 'GET':
+        # Admin no participante puede elegir lado en el form
+        return render_template('torneo_partido_responder.html',
+                               p=p, prop=prop, lado_user=lado_user, es_admin=es_admin)
+
+    # ----------------
+    # POST (submit)
+    # ----------------
+    accion = (request.form.get('accion') or '').strip().lower()  # 'aceptar' | 'rechazar'
+
+    # Determinar qué lado responde:
+    # - Si el usuario participa, su lado queda fijado.
+    # - Si es admin y no participa, puede elegir 'lado' en el form.
+    working_lado = lado_user
+    if working_lado not in ('A', 'B') and es_admin:
+        lado_form = (request.form.get('lado') or '').strip().upper()
+        if lado_form in ('A', 'B'):
+            working_lado = lado_form
+
+    if working_lado not in ('A', 'B'):
+        flash('No se pudo determinar el lado que responde (A/B).', 'error')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    # Aplicar acción
+    if accion == 'aceptar':
+        if working_lado == 'A':
+            prop.confirma_ladoA = True
+        else:
+            prop.confirma_ladoB = True
+
+        # Si ambos confirmaron -> cerrar partido
+        if prop.confirma_ladoA is True and prop.confirma_ladoB is True:
+            _finalizar_partido(
+                p,
+                prop.ganador_lado,
+                prop.sets_text,
+                confirmado_por_jugador_id=j.id  # quien ejecutó la confirmación final
+            )
+            db.session.commit()
+            flash('Partido cerrado como JUGADO.', 'success')
+            return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+        # Aún falta la otra confirmación
+        p.estado = 'PROPUESTO'
+        db.session.commit()
+        flash('Aceptaste la propuesta. Falta confirmación del rival.', 'info')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    elif accion == 'rechazar':
+        if working_lado == 'A':
+            prop.confirma_ladoA = False
+        else:
+            prop.confirma_ladoB = False
+
+        # Queda para revisión manual
+        p.estado = 'EN_REVISION'
+        db.session.commit()
+        flash('Marcaste la propuesta como RECHAZADA. Se pasó a revisión.', 'warning')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    else:
+        flash('Acción inválida.', 'error')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+
+
 
 # --- Público: tabla (americano / zonas) ---
 @app.route('/torneos/<int:torneo_id>/tabla', methods=['GET'])
@@ -5058,6 +7651,971 @@ def torneo_public_tabla(torneo_id: int):
         abort(404)
     # Más adelante: calcular tabla. Por ahora, placeholder.
     return render_template('torneo_tabla.html', torneo=t)
+
+def calcular_tabla_americano(torneo_id: int):
+    """
+    Calcula standings por grupo para formato AMERICANO.
+    - Puntos: 2 por victoria, 0 por derrota.
+    - Si hay resultado_json.sets=[[a,b], ...] (a=lado participante1, b=lado participante2),
+      acumula 'sets_fav' / 'sets_contra' para desempates.
+    - Soporta que no haya grupos: todo va a un grupo 'GENERAL' (clave 0).
+    Retorna: {
+      group_id: {
+         'grupo': TorneoGrupo | None,
+         'rows': [ {'participante': TorneoParticipante, 'pj':..,'pg':..,'pp':..,'pts':..,'sets_fav':..,'sets_contra':..,'diff_sets':..}, ...]
+      }, ...
+    }
+    """
+    # Traer todos los partidos del torneo (jugados o con ganador seteado)
+    partidos = (db.session.query(TorneoPartido)
+                .filter(TorneoPartido.torneo_id == torneo_id)
+                .all())
+
+    # Recolectar todos los participante_ids que aparezcan
+    participante_ids = set()
+    for m in partidos:
+        p1 = getattr(m, 'participante1_id', None)
+        p2 = getattr(m, 'participante2_id', None)
+        if p1: participante_ids.add(p1)
+        if p2: participante_ids.add(p2)
+
+    # Mapa de participantes
+    participantes_map = {}
+    if participante_ids:
+        participantes = (db.session.query(TorneoParticipante)
+                         .filter(TorneoParticipante.id.in_(participante_ids))
+                         .all())
+        participantes_map = {p.id: p for p in participantes}
+
+    # Mapa de grupos
+    # Si el modelo no tiene grupos, usaremos group_id = 0
+    grupos = (db.session.query(TorneoGrupo)
+              .filter(TorneoGrupo.fase_id.in_(
+                  db.session.query(TorneoFase.id).filter_by(torneo_id=torneo_id)
+              ))
+              .all())
+    grupos_map = {g.id: g for g in grupos}
+
+    # Estructura de acumulación
+    tablas = {}  # group_id -> pid -> stats
+    def ensure_row(gid, pid):
+        if gid not in tablas:
+            tablas[gid] = {}
+        if pid not in tablas[gid]:
+            tablas[gid][pid] = {
+                'pj': 0, 'pg': 0, 'pp': 0, 'pts': 0,
+                'sets_fav': 0, 'sets_contra': 0
+            }
+
+    # Recorremos partidos
+    for m in partidos:
+        p1 = getattr(m, 'participante1_id', None)
+        p2 = getattr(m, 'participante2_id', None)
+        if not (p1 and p2):
+            continue
+
+        # Determinar grupo (si el partido tiene grupo_id, usarlo; si no, 0)
+        gid = getattr(m, 'grupo_id', None) or 0
+
+        ganador = getattr(m, 'ganador_participante_id', None)
+        estado = getattr(m, 'estado', None)
+
+        # Consideramos “jugado” si estado == 'JUGADO' o si hay ganador seteado
+        if estado != 'JUGADO' and not ganador:
+            continue
+
+        ensure_row(gid, p1)
+        ensure_row(gid, p2)
+
+        # PJ
+        tablas[gid][p1]['pj'] += 1
+        tablas[gid][p2]['pj'] += 1
+
+        # PG/PP + puntos
+        if ganador == p1:
+            tablas[gid][p1]['pg'] += 1
+            tablas[gid][p2]['pp'] += 1
+            tablas[gid][p1]['pts'] += 2
+        elif ganador == p2:
+            tablas[gid][p2]['pg'] += 1
+            tablas[gid][p1]['pp'] += 1
+            tablas[gid][p2]['pts'] += 2
+        else:
+            # Si no hay ganador definido pero está JUGADO, podés asignar 1-1 o 0-0.
+            # Para no inventar, dejamos 0 puntos extra (solo PJ).
+            pass
+
+        # Sets a favor/en contra (si vienen en resultado_json.sets)
+        rj = getattr(m, 'resultado_json', None) or {}
+        sets = rj.get('sets') if isinstance(rj, dict) else None
+        # sets esperado como [[x,y], [x,y], ...] donde x=side participante1, y=side participante2
+        if isinstance(sets, list):
+            for parc in sets:
+                if (isinstance(parc, (list, tuple)) and len(parc) == 2
+                        and isinstance(parc[0], int) and isinstance(parc[1], int)):
+                    s1, s2 = parc
+                    tablas[gid][p1]['sets_fav'] += s1
+                    tablas[gid][p1]['sets_contra'] += s2
+                    tablas[gid][p2]['sets_fav'] += s2
+                    tablas[gid][p2]['sets_contra'] += s1
+
+    # Armar respuesta final por grupo
+    resultado = {}
+    for gid, filas in tablas.items():
+        rows = []
+        for pid, st in filas.items():
+            st['diff_sets'] = st['sets_fav'] - st['sets_contra']
+            rows.append({
+                'participante': participantes_map.get(pid),
+                **st
+            })
+
+        # Orden: Pts desc, diff_sets desc, PG desc, (opcional) sets_fav desc
+        rows.sort(key=lambda r: (r['pts'], r['diff_sets'], r['pg'], r['sets_fav']), reverse=True)
+
+        resultado[gid] = {
+            'grupo': grupos_map.get(gid) if gid != 0 else None,
+            'rows': rows
+        }
+
+    # Si no hubo grupos ni partidos, devolvemos estructura vacía 'GENERAL'
+    if not resultado:
+        resultado[0] = {'grupo': None, 'rows': []}
+
+    return resultado
+
+# ========= GENERADOR AMERICANO =========
+
+from itertools import combinations
+from math import ceil
+
+def _get_or_create_fase_unica(torneo: 'Torneo') -> 'TorneoFase':
+    """
+    Devuelve la fase única del torneo (creándola si no existe).
+    Normaliza 'tipo' si la columna existe.
+    """
+    fase = (db.session.query(TorneoFase)
+            .filter_by(torneo_id=torneo.id, nombre='FASE ÚNICA')
+            .first())
+    if fase:
+        # Normaliza tipo si la columna existe y está vacía
+        if 'tipo' in TorneoFase.__table__.c and (getattr(fase, 'tipo', None) in (None, '')):
+            fase.tipo = 'AMERICANO'   # todos contra todos / liga
+            db.session.flush()
+        # Normaliza orden si querés mantenerlo fijo
+        if getattr(fase, 'orden', None) in (None, 0):
+            try:
+                fase.orden = 1
+                db.session.flush()
+            except Exception:
+                pass
+        return fase
+
+    # Crear con campos canónicos
+    kwargs = dict(torneo_id=torneo.id, nombre='FASE ÚNICA', orden=1)
+    if 'tipo' in TorneoFase.__table__.c:
+        kwargs['tipo'] = 'AMERICANO'
+    fase = TorneoFase(**kwargs)
+    db.session.add(fase)
+    db.session.flush()
+    return fase
+
+
+def _get_or_create_fase_playoff(torneo: 'Torneo') -> 'TorneoFase':
+    """
+    Devuelve la fase de playoff del torneo (creándola si no existe).
+    Normaliza 'tipo' si la columna existe.
+    """
+    fase = (db.session.query(TorneoFase)
+            .filter_by(torneo_id=torneo.id, nombre='PLAYOFF')
+            .first())
+    if fase:
+        if 'tipo' in TorneoFase.__table__.c and (getattr(fase, 'tipo', None) in (None, '')):
+            fase.tipo = 'PLAYOFF'
+            db.session.flush()
+        if getattr(fase, 'orden', None) in (None, 0):
+            try:
+                fase.orden = 99
+                db.session.flush()
+            except Exception:
+                pass
+        return fase
+
+    kwargs = dict(torneo_id=torneo.id, nombre='PLAYOFF', orden=99)
+    if 'tipo' in TorneoFase.__table__.c:
+        kwargs['tipo'] = 'PLAYOFF'
+    fase = TorneoFase(**kwargs)
+    db.session.add(fase)
+    db.session.flush()
+    return fase
+
+
+def _get_or_create_grupo(torneo: 'Torneo', fase: 'TorneoFase', nombre: str, orden: int) -> 'TorneoGrupo':
+    g = (
+        db.session.query(TorneoGrupo)
+        .filter_by(fase_id=fase.id, nombre=nombre)
+        .first()
+    )
+    if not g:
+        g = TorneoGrupo(fase_id=fase.id, nombre=nombre, orden=orden)
+        db.session.add(g)
+        db.session.flush()
+    return g
+
+
+
+def _tp_cols():
+    """
+    Descubre nombres de columnas en TorneoPartido y devuelve un mapping canónico:
+    - p1/p2 → participantes (acepta participante_a_id / participante_b_id o variantes 1/2)
+    - ganador, estado, ronda, grupo, torneo
+    """
+    cols = set(TorneoPartido.__table__.c.keys())
+
+    def pick(*cands):
+        for c in cands:
+            if c in cols:
+                return c
+        return None
+
+    return {
+        'torneo': pick('torneo_id'),
+        'fase':   pick('fase_id'),
+        'grupo':  pick('grupo_id'),
+        'p1':     pick('participante_a_id', 'participante1_id', 'p1_id', 'inscripcion1_id', 'jugador1_id'),
+        'p2':     pick('participante_b_id', 'participante2_id', 'p2_id', 'inscripcion2_id', 'jugador2_id'),
+        'ganador':pick('ganador_participante_id', 'ganador_id'),
+        'estado': pick('estado', 'status'),
+        'ronda':  pick('ronda', 'jornada'),
+        'orden':  pick('orden'),
+    }
+
+
+def _inscripcion_to_participante(torneo: 'Torneo', insc) -> 'TorneoParticipante':
+    # Permitir id o objeto
+    if isinstance(insc, int):
+        insc_obj = TorneoInscripcion.query.get(insc)
+        if not insc_obj:
+            raise RuntimeError(f"Inscripción id={insc} inexistente.")
+        insc = insc_obj
+
+    if not isinstance(insc, TorneoInscripcion):
+        raise RuntimeError(f"Objeto insc inválido: {type(insc)}. Se espera TorneoInscripcion.")
+
+    # Asegurar que la inscripción tenga ID materializado
+    if not getattr(insc, "id", None):
+        db.session.flush()
+    if not getattr(insc, "id", None):
+        raise RuntimeError(
+            f"Inscripción sin ID (torneo_id={getattr(insc,'torneo_id',None)}, "
+            f"jug1={getattr(insc,'jugador1_id',None)}, jug2={getattr(insc,'jugador2_id',None)})."
+        )
+
+    if insc.torneo_id != torneo.id:
+        raise RuntimeError(
+            f"La inscripción {insc.id} pertenece a torneo {insc.torneo_id}, no al torneo {torneo.id}."
+        )
+
+    # Reusar si ya existe (mismo torneo + misma inscripción)
+    existente = (db.session.query(TorneoParticipante)
+                 .filter_by(torneo_id=torneo.id, inscripcion_id=insc.id)
+                 .one_or_none())
+    if existente:
+        return existente
+
+    # Crear participante SIEMPRE seteando inscripcion_id
+    p = TorneoParticipante(
+        torneo_id=torneo.id,
+        inscripcion_id=insc.id,
+    )
+    db.session.add(p)
+    db.session.flush()  # garantiza p.id
+    return p
+
+
+
+
+def _repartir_en_zonas(lista, cant_zonas):
+    """Devuelve una lista de listas: zonas balanceadas (1..cant_zonas)."""
+    if cant_zonas <= 1:
+        return [list(lista)]
+    zonas = [[] for _ in range(cant_zonas)]
+    # snake draft simple
+    idx = 0
+    forward = True
+    for x in lista:
+        zonas[idx].append(x)
+        if forward:
+            idx += 1
+            if idx == cant_zonas:
+                forward = False
+                idx = cant_zonas - 1
+        else:
+            idx -= 1
+            if idx < 0:
+                forward = True
+                idx = 0
+    return zonas
+
+def _round_robin_pairs(ids):
+    """
+    Método del círculo.
+    Retorna rounds = [[(a,b), (c,d), ...], ...]
+    Maneja impar agregando 'BYE' (no genera partido cuando hay BYE).
+    """
+    ids = list(ids)
+    bye = None
+    if len(ids) % 2 == 1:
+        bye = '_BYE_'
+        ids.append(bye)
+    n = len(ids)
+    half = n // 2
+    rounds = []
+    arr = ids[:]
+    for r in range(n - 1):
+        pares = []
+        for i in range(half):
+            a = arr[i]
+            b = arr[-(i+1)]
+            if a != bye and b != bye:
+                pares.append((a, b))
+        # rotación
+        arr = [arr[0]] + [arr[-1]] + arr[1:-1]
+        rounds.append(pares)
+    return rounds
+
+
+def _crear_partido_rr(t: 'Torneo', grupo: 'TorneoGrupo', a: int, b: int, jornada: int, orden: int | None = None):
+    """
+    Crea un partido (round-robin) para el esquema fijo:
+      torneo_id, grupo_id, participante_a_id, participante_b_id, ronda, estado, orden, fase_id
+    Evita duplicados aunque los participantes vengan invertidos (A-B o B-A).
+    """
+
+    T = TorneoPartido
+
+    # 1) Evitar duplicados A-B o B-A dentro del mismo torneo y (si aplica) grupo
+    filtros_base = [T.torneo_id == t.id]
+    if hasattr(T, 'grupo_id'):
+        filtros_base.append(T.grupo_id == (grupo.id if grupo else None))
+
+    ya = (db.session.query(T)
+          .filter(
+              and_(*filtros_base),
+              or_(
+                  and_(T.participante_a_id == a, T.participante_b_id == b),
+                  and_(T.participante_a_id == b, T.participante_b_id == a),
+              )
+          )
+          .first())
+    if ya:
+        return ya
+
+    # 2) Crear el partido con el esquema conocido
+    m = T(
+        torneo_id=t.id,
+        grupo_id=(grupo.id if grupo else None),
+        participante_a_id=a,
+        participante_b_id=b,
+        estado='PENDIENTE',
+        ronda=jornada,
+    )
+
+    # 3) Campos opcionales si existen/querés setear
+    if hasattr(T, 'orden') and (orden is not None):
+        m.orden = orden
+    if hasattr(T, 'fase_id') and getattr(grupo, 'fase_id', None):
+        m.fase_id = grupo.fase_id
+
+    db.session.add(m)
+    return m
+
+def _has_col(model, name: str) -> bool:
+    return name in model.__table__.c
+
+def _kwargs_ronda_o_jornada(model, valor):
+    """Devuelve kwargs con 'jornada' o 'ronda' según exista en el modelo."""
+    if _has_col(model, 'jornada'):
+        return {'jornada': valor}
+    if _has_col(model, 'ronda'):
+        return {'ronda': valor}
+    raise RuntimeError("TorneoPartido no tiene ni 'jornada' ni 'ronda'.")
+
+
+# ========= GENERADOR PLAYOFF (ELIMINACIÓN DIRECTA) =========
+
+from math import log2, ceil
+
+
+def _get_or_create_grupo_llaves(torneo: 'Torneo', fase: 'TorneoFase') -> 'TorneoGrupo':
+    g = (db.session.query(TorneoGrupo)
+         .filter_by(fase_id=fase.id, nombre='LLAVES')
+         .first())
+    if not g:
+        g = TorneoGrupo(torneo_id=torneo.id, fase_id=fase.id, nombre='LLAVES', orden=1)
+        db.session.add(g)
+        db.session.flush()
+    return g
+
+def _listar_participantes_desde_inscripciones(t: 'Torneo') -> list['TorneoParticipante']:
+    insc = (db.session.query(TorneoInscripcion)
+            .filter_by(torneo_id=t.id, estado='ACTIVA')
+            .order_by(
+                TorneoInscripcion.seed.asc().nulls_last(),
+                (TorneoInscripcion.created_at.asc()
+                 if hasattr(TorneoInscripcion, 'created_at')
+                 else TorneoInscripcion.id.asc())
+            )
+            .all())
+    if not insc:
+        raise ValueError("No hay inscripciones activas para generar playoff.")
+
+    participantes: list[TorneoParticipante] = []
+    for i in insc:
+        p = (db.session.query(TorneoParticipante)
+             .filter_by(torneo_id=t.id, inscripcion_id=i.id)
+             .one_or_none())
+        if not p:
+            p = TorneoParticipante(
+                torneo_id=t.id,
+                inscripcion_id=i.id,          # << CLAVE: nunca NULL
+            )
+            db.session.add(p)
+            db.session.flush()
+        participantes.append(p)
+
+    participantes.sort(
+        key=lambda x: (getattr(x, 'seed', None) is None,
+                       getattr(x, 'seed', 10**9),
+                       x.id)
+    )
+    return participantes
+
+
+
+
+def _next_power_of_two(n: int) -> int:
+    if n <= 1:
+        return 1
+    return 1 << ceil(log2(n))
+
+def _primer_round_ya_generado(t: 'Torneo', grupo: 'TorneoGrupo') -> bool:
+    q = (db.session.query(TorneoPartido)
+         .filter_by(torneo_id=t.id, grupo_id=grupo.id))
+    # si hay partidos con ronda==1 (si ese campo existe) o cualquiera en LLAVES, asumimos R1 ya creado
+    if q.count() > 0:
+        # Si el modelo tiene 'ronda', validar explícitamente
+        if hasattr(TorneoPartido, 'ronda'):
+            return q.filter(TorneoPartido.ronda == 1).count() > 0
+        return True
+    return False
+
+def generar_playoff_directo(torneo_id: int) -> int:
+    """
+    Genera la 1ª ronda de eliminación directa, crea BYEs como partidos ganados automáticamente.
+    Retorna la cantidad de partidos creados (incluye BYEs autoganados).
+    """
+    t = get_or_404(Torneo, torneo_id)
+
+    # Participantes
+    participantes = _listar_participantes_desde_inscripciones(t)
+    n = len(participantes)
+    if n < 2:
+        raise ValueError("Se necesitan al menos 2 participantes para playoff.")
+
+    # Fase/Grupo
+    fase = _get_or_create_fase_playoff(t)
+    grupo = _get_or_create_grupo_llaves(t, fase)
+
+    # Evitar duplicados
+    if _primer_round_ya_generado(t, grupo):
+        return 0  # ya estaba armado
+
+    # Calcular tamaño de llave y BYEs
+    M = _next_power_of_two(n)      # 2,4,8,16,...
+    byes = M - n                   # cuántos avanzan directo
+
+    # Emparejar por seed: 1 vs n, 2 vs (n-1), ...
+    # Y asignar BYEs a los mejores seeds (avanzan sin jugar).
+    partidos_creados = 0
+    left = 0
+    right = n - 1
+    ronda_num = 1
+
+    # Primero, marcar BYEs (top seeds avanzan solos)
+    # Por convención simple, damos BYE a las primeras 'byes' seeds.
+    auto_winners_ids = set()
+    for idx in range(byes):
+        ganador = participantes[idx]
+        # Crear partido de BYE para dejar registro (y para visualización)
+        m = TorneoPartido(
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante1_id=ganador.id,
+            participante2_id=None,
+            estado='JUGADO',
+            ganador_participante_id=ganador.id,
+            resultado_json={'walkover': 'BYE'}
+        )
+        if hasattr(m, 'ronda'):
+            m.ronda = ronda_num
+        db.session.add(m)
+        partidos_creados += 1
+        auto_winners_ids.add(ganador.id)
+
+    # Ahora, emparejar el resto (sin BYE)
+    # Participantes disponibles para jugar R1 (excluyendo quienes ya avanzaron por BYE)
+    vivos = [p for p in participantes if p.id not in auto_winners_ids]
+    i, j = 0, len(vivos) - 1
+    while i < j:
+        a = vivos[i]
+        b = vivos[j]
+        m = TorneoPartido(
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante1_id=a.id,   # seed más alto como "local"
+            participante2_id=b.id,
+            estado='PENDIENTE'
+        )
+        if hasattr(m, 'ronda'):
+            m.ronda = ronda_num
+        db.session.add(m)
+        partidos_creados += 1
+        i += 1
+        j -= 1
+
+    db.session.commit()
+    return partidos_creados
+
+def _get_or_create_fase_unica(torneo: 'Torneo') -> 'TorneoFase':
+    # Buscamos por nombre dentro del torneo (reutiliza si ya existe)
+    fase = (db.session.query(TorneoFase)
+            .filter_by(torneo_id=torneo.id, nombre='FASE ÚNICA')
+            .first())
+    if fase:
+        # Si el modelo tiene 'tipo' y está NULL, lo normalizamos
+        if hasattr(fase, 'tipo') and (getattr(fase, 'tipo', None) in (None, '')):
+            fase.tipo = 'AMERICANO'  # fase de todos contra todos
+            db.session.flush()
+        return fase
+
+    # Crear con tipo obligatorio
+    kwargs = dict(torneo_id=torneo.id, nombre='FASE ÚNICA', orden=1)
+    if 'tipo' in TorneoFase.__table__.c:  # por si en otro entorno no existe la columna
+        kwargs['tipo'] = 'AMERICANO'
+    fase = TorneoFase(**kwargs)
+    db.session.add(fase)
+    db.session.flush()
+    return fase
+
+
+def _get_or_create_fase_playoff(torneo: 'Torneo') -> 'TorneoFase':
+    fase = (db.session.query(TorneoFase)
+            .filter_by(torneo_id=torneo.id, nombre='PLAYOFF')
+            .first())
+    if fase:
+        if hasattr(fase, 'tipo') and (getattr(fase, 'tipo', None) in (None, '')):
+            fase.tipo = 'PLAYOFF'
+            db.session.flush()
+        return fase
+
+    kwargs = dict(torneo_id=torneo.id, nombre='PLAYOFF', orden=99)
+    if 'tipo' in TorneoFase.__table__.c:
+        kwargs['tipo'] = 'PLAYOFF'
+    fase = TorneoFase(**kwargs)
+    db.session.add(fase)
+    db.session.flush()
+    return fase
+
+
+# ========= SIGUIENTE RONDA PLAYOFF =========
+
+def _obtener_ultima_ronda(t: 'Torneo', grupo: 'TorneoGrupo') -> int:
+    q = (db.session.query(TorneoPartido)
+         .filter_by(torneo_id=t.id, grupo_id=grupo.id))
+    # Si el modelo tiene columna 'ronda', usarla
+    if hasattr(TorneoPartido, 'ronda'):
+        val = q.with_entities(sa.func.max(TorneoPartido.ronda)).scalar()
+        return int(val or 0)
+    # Sin 'ronda': si no hay partidos -> 0; si hay, asumimos la “última capa”
+    # la calculamos agrupando por bloques de emparejamiento de tamaño creciente
+    # Para MVP: consideramos que cada “llamada” crea una ronda nueva; así, si hay partidos, la última es >=1
+    return 1 if q.count() > 0 else 0
+
+def _partidos_de_ronda(t: 'Torneo', grupo: 'TorneoGrupo', ronda: str) -> list['TorneoPartido']:
+    base = (db.session.query(TorneoPartido)
+            .filter_by(torneo_id=t.id, grupo_id=grupo.id))
+    if hasattr(TorneoPartido, 'ronda'):
+        base = base.filter(TorneoPartido.ronda == str(ronda))
+    base = base.order_by(TorneoPartido.id.asc())
+    return base.all()
+
+
+def generar_playoff_siguiente_ronda(torneo_id: int) -> int:
+    t = get_or_404(Torneo, torneo_id)
+    fase = _get_or_create_fase_playoff(t)
+    grupo = _get_or_create_grupo_llaves(t, fase)
+
+    # última ronda como string numérica
+    ult = _obtener_ultima_ronda(t, grupo)
+    if ult == 0:
+        raise ValueError("No existe una ronda previa. Primero generá la 1ª ronda del playoff.")
+
+    partidos_prev = _partidos_de_ronda(t, grupo, str(ult))
+    if not partidos_prev:
+        raise ValueError("No se encontraron partidos en la ronda previa.")
+    if any(m.ganador_participante_id is None for m in partidos_prev):
+        raise ValueError("Aún hay partidos sin ganador en la ronda anterior.")
+
+    ganadores_ids = [m.ganador_participante_id for m in partidos_prev]
+    ganadores = (db.session.query(TorneoParticipante)
+                 .filter(TorneoParticipante.id.in_(ganadores_ids))
+                 .all())
+    mapa = {p.id: p for p in ganadores}
+    ganadores = [mapa[g] for g in ganadores_ids if g in mapa]
+
+    if len(ganadores) <= 1:
+        return 0
+
+    nueva = str(int(ult) + 1)
+    creados = 0
+
+    impar = (len(ganadores) % 2 == 1)
+    limite = len(ganadores) - 1 if impar else len(ganadores)
+
+    i = 0
+    while i < limite:
+        a = ganadores[i]
+        b = ganadores[i + 1]
+        m = TorneoPartido(
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante_a_id=a.id,
+            participante_b_id=b.id,
+            estado='PENDIENTE',
+            ronda=nueva
+        )
+        db.session.add(m)
+        creados += 1
+        i += 2
+
+    if impar:
+        bye_winner = ganadores[-1]
+        m = TorneoPartido(
+            torneo_id=t.id,
+            grupo_id=grupo.id,
+            participante_a_id=bye_winner.id,
+            participante_b_id=bye_winner.id,  # ver nota arriba
+            estado='JUGADO',
+            ganador_participante_id=bye_winner.id,
+            resultado_json={'walkover': 'BYE'},
+            ronda=nueva
+        )
+        db.session.add(m)
+        creados += 1
+
+    db.session.commit()
+    return creados
+
+
+def normalizar_sets_text(raw: str | None) -> str | None:
+    """
+    Deja el texto de sets en formato limpio: "6-3, 4-6, 10-8".
+    Acepta cosas como "6-3,4-6 , 10 -8".
+    """
+    if not raw:
+        return None
+    # reemplaza separadores varios por coma
+    s = re.sub(r'[;|]+', ',', raw)
+    # compacta espacios
+    s = re.sub(r'\s+', '', s)
+    # asegura formato N-N con comas y luego inserta espacio post coma
+    s = s.replace('-', '-')
+    s = ', '.join([p for p in s.split(',') if p])
+    return s
+
+def _recalcular_puntos_partido(partido: 'Partido') -> None:
+    """
+    Intenta recalcular puntos/elo tras cerrar o reabrir un partido.
+    - Si existe una función app-level (recalcular_puntos_partido(partido_id) o
+      recalcular_elo_para_partido(partido_id)), la llama.
+    - Si no existe, loguea y no rompe.
+    """
+    try:
+        fn = (globals().get('recalcular_puntos_partido')
+              or globals().get('recalcular_elo_para_partido'))
+        if callable(fn):
+            fn(partido.id)
+        else:
+            current_app.logger.info("No hay función de recálculo definida; omito.")
+    except Exception as e:
+        current_app.logger.exception("Fallo recálculo de puntos para partido_id=%s: %s",
+                                     getattr(partido, 'id', None), e)
+
+
+def lado_de_jugador_en_partido(tp: 'TorneoPartido', jugador_id: int) -> str | None:
+    """
+    Devuelve 'A', 'B' o None según pertenencia del jugador al lado A/B del TorneoPartido.
+
+    Robusta a distintos esquemas de modelo:
+    - Si existe tp._extraer_ids_de_participante, lo usa (compatibilidad).
+    - Si hay inscripcion_id en el participante, consulta TorneoInscripcion y toma
+      jugador1_id/jugador2_id/jugador_id.
+    - Si no, intenta campos directos en el participante.
+    - Soporta nombres participante_a/participante_b y participante1/participante2,
+      y también *_id si las relaciones no están cargadas.
+    """
+    try:
+        jugador_id = int(jugador_id) if jugador_id is not None else None
+    except Exception:
+        return None
+    if not jugador_id:
+        return None
+
+    TorneoInscripcion   = globals().get('TorneoInscripcion')
+    TorneoParticipante  = globals().get('TorneoParticipante')
+
+    # --- 1) Compat: usar helper si existe y funciona ---
+    extraer = getattr(tp, '_extraer_ids_de_participante', None)
+    if callable(extraer):
+        try:
+            idsA = set(extraer(getattr(tp, 'participante_a', None)))
+            idsB = set(extraer(getattr(tp, 'participante_b', None)))
+            if jugador_id in idsA:
+                return 'A'
+            if jugador_id in idsB:
+                return 'B'
+        except Exception:
+            # si falla, seguimos con el camino robusto
+            pass
+
+    # --- helpers internos robustos ---
+    def _to_int_or_none(x):
+        try:
+            return int(x) if x is not None else None
+        except Exception:
+            return None
+
+    def _cargar_participante_por_id(pid):
+        if pid and TorneoParticipante is not None:
+            try:
+                return db.session.get(TorneoParticipante, int(pid))
+            except Exception:
+                return None
+        return None
+
+    def _ids_desde_inscripcion(inscripcion_id) -> set[int]:
+        ids = set()
+        if not inscripcion_id or TorneoInscripcion is None:
+            return ids
+        try:
+            insc = db.session.get(TorneoInscripcion, int(inscripcion_id))
+        except Exception:
+            insc = None
+        if not insc:
+            return ids
+        for attr in ('jugador1_id', 'jugador2_id', 'jugador_id'):
+            v = _to_int_or_none(getattr(insc, attr, None))
+            if v:
+                ids.add(v)
+        return ids
+
+    def _ids_directos_en_participante(p) -> set[int]:
+        ids = set()
+        if not p:
+            return ids
+        # Campos directos comunes
+        for attr in ('jugador1_id', 'jugador2_id', 'jugador_id'):
+            v = _to_int_or_none(getattr(p, attr, None))
+            if v:
+                ids.add(v)
+        # Por si el participante tiene relación 'jugadores' iterable
+        try:
+            js = getattr(p, 'jugadores', None)
+            if js:
+                for j in js:
+                    v = _to_int_or_none(getattr(j, 'id', None))
+                    if v:
+                        ids.add(v)
+        except Exception:
+            pass
+        return ids
+
+    def _colectar_ids_de_lado(side_obj, side_id_attr_candidates: tuple[str, ...]) -> set[int]:
+        """
+        Devuelve el set de jugador_ids que conforman ese lado del partido.
+        Intenta en este orden:
+        1) participante (objeto) -> inscripcion_id -> TorneoInscripcion
+        2) participante (objeto) -> campos directos
+        3) participante_id numérico -> cargar participante -> pasos 1/2
+        """
+        ids = set()
+
+        # 1) Objeto participante si está disponible
+        p = side_obj
+        if not p:
+            # 2) Intentar por *_id en el propio partido si no hay relación cargada
+            pid = None
+            for attr in side_id_attr_candidates:
+                pid = _to_int_or_none(getattr(tp, attr, None))
+                if pid:
+                    break
+            if pid:
+                p = _cargar_participante_por_id(pid)
+
+        if not p:
+            return ids
+
+        # Preferir inscripcion_id si existe
+        insc_id = _to_int_or_none(getattr(p, 'inscripcion_id', None))
+        if insc_id:
+            ids |= _ids_desde_inscripcion(insc_id)
+
+        # Luego, campos directos en el participante
+        ids |= _ids_directos_en_participante(p)
+        return ids
+
+    # Intentar nombres habituales
+    participante_a = getattr(tp, 'participante_a', None) or getattr(tp, 'participante1', None)
+    participante_b = getattr(tp, 'participante_b', None) or getattr(tp, 'participante2', None)
+
+    idsA = _colectar_ids_de_lado(
+        participante_a,
+        side_id_attr_candidates=('participante_a_id', 'participante1_id', 'p1_id')
+    )
+    idsB = _colectar_ids_de_lado(
+        participante_b,
+        side_id_attr_candidates=('participante_b_id', 'participante2_id', 'p2_id')
+    )
+
+    if jugador_id in idsA:
+        return 'A'
+    if jugador_id in idsB:
+        return 'B'
+    return None
+
+def _jugadores_del_lado_torneo(p: 'TorneoPartido', lado: str) -> list[int]:
+    """
+    Devuelve los IDs de jugador del lado 'A' o 'B' para un TorneoPartido.
+    Prioriza la tabla torneos_partidos_lados (insc1/insc2 -> inscripciones -> jugador1/jugador2).
+    Si no hay filas en LADOS, cae al participante_a / participante_b.
+    """
+    lado = (lado or '').upper()
+    if lado not in ('A', 'B'):
+        return []
+
+    # 1) Intento por tabla de lados
+    try:
+        Ins = globals().get('TorneoInscripcion')
+        if Ins:
+            for l in getattr(p, 'lados', []) or []:
+                if getattr(l, 'lado', '').upper() != lado:
+                    continue
+                out = []
+                for insc_id in (getattr(l, 'insc1_id', None), getattr(l, 'insc2_id', None)):
+                    if not insc_id:
+                        continue
+                    insc = db.session.get(Ins, insc_id)
+                    if not insc:
+                        continue
+                    for jid in (getattr(insc, 'jugador1_id', None), getattr(insc, 'jugador2_id', None)):
+                        if jid:
+                            out.append(int(jid))
+                if out:
+                    return out
+    except Exception:
+        pass
+
+    # 2) Fallback a participante_a / participante_b
+    tp = p.participante_a if lado == 'A' else p.participante_b
+    try:
+        return p._extraer_ids_de_participante(tp)  # usamos el helper robusto del modelo
+    except Exception:
+        return []
+
+def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
+    """
+    Aplica el mismo esquema de puntos que en los partidos 'normales':
+    - Ganadores:  DELTA_WIN
+    - Perdedores: DELTA_LOSS
+    - (Opcional) Bonus de victoria con compañero repetido desde la 3ra (DELTA_WIN_BONUS)
+      Solo se intenta si podemos detectar exactamente la dupla en ambos lados.
+    """
+    ganador_lado = (ganador_lado or '').upper()
+    if ganador_lado not in ('A', 'B'):
+        return
+
+    perdedor_lado = 'B' if ganador_lado == 'A' else 'A'
+
+    win_ids = _jugadores_del_lado_torneo(p, ganador_lado)
+    lose_ids = _jugadores_del_lado_torneo(p, perdedor_lado)
+
+    if not win_ids and not lose_ids:
+        return  # nada que hacer
+
+    Jug = globals().get('Jugador')
+    if not Jug:
+        return
+
+    # 1) aplicar win/loss
+    for jid in win_ids:
+        j = db.session.get(Jug, int(jid))
+        if j and j.puntos is not None:
+            j.puntos = int(j.puntos) + int(DELTA_WIN)
+    for jid in lose_ids:
+        j = db.session.get(Jug, int(jid))
+        if j and j.puntos is not None:
+            j.puntos = int(j.puntos) + int(DELTA_LOSS)
+
+    # 2) (opcional) bonus por compañero repetido desde la 3ra victoria conjunta
+    #    Solo si el lado ganador es dupla (2 jugadores).
+    try:
+        if DELTA_WIN_BONUS and BONUS_APLICA_DESDE and len(win_ids) == 2:
+            a, b = sorted(win_ids)
+            # Contar cuántas veces esta dupla ganó junta en torneos (según LADOS)
+            # Nota: Contamos SOLO en torneos para evitar consultas complejas multi-tabla.
+            sql = """
+            SELECT COUNT(1)
+            FROM torneos_partidos_resultados r
+            JOIN torneos_partidos tp ON tp.id = r.partido_id
+            JOIN torneos_partidos_lados la ON la.partido_id = tp.id AND la.lado = r.ganador_lado
+            JOIN torneos_inscripciones i1 ON i1.id = la.insc1_id
+            JOIN torneos_inscripciones i2 ON i2.id = la.insc2_id
+            WHERE (
+                (i1.jugador1_id IN (?, ?) OR i1.jugador2_id IN (?, ?))
+                AND
+                (i2.jugador1_id IN (?, ?) OR i2.jugador2_id IN (?, ?))
+            )
+            """
+            # el criterio "IN (?,?)" es un mejor-esfuerzo; asume que la dupla a-b está distribuida en insc1/insc2
+            count_prev = db.session.execute(
+                db.text(sql), {'param_1': a, 'param_2': b, 'param_3': a, 'param_4': b,
+                               'param_5': a, 'param_6': b, 'param_7': a, 'param_8': b}
+            ).scalar_one_or_none()
+            count_prev = int(count_prev or 0)
+
+            # si esta es la N-ésima victoria (>= BONUS_APLICA_DESDE) entonces aplicar bonus
+            if count_prev + 1 >= int(BONUS_APLICA_DESDE):
+                for jid in win_ids:
+                    j = db.session.get(Jug, int(jid))
+                    if j and j.puntos is not None:
+                        j.puntos = int(j.puntos) + int(DELTA_WIN_BONUS)
+    except Exception:
+        # Si algo falla en el bonus, no frenamos el flujo principal
+        pass
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    # Mensaje amable y sin filtrar razones internas
+    flash('Sesión expirada o formulario inválido. Volvé a intentar.', 'error')
+    # Volver a la página anterior o al home
+    return redirect(request.referrer or url_for('home')), 400
+
+@app.context_processor
+def inject_csrf_token():
+    # csrf_token() usable en cualquier template
+    return dict(csrf_token=lambda: generate_csrf())
 
 
 

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Responder propuesta — Partido #{{ p.id }}{% endblock %}
+{% block content %}
+  <h2>Responder propuesta</h2>
+  <div class="card">
+    <div><strong>Ganador propuesto:</strong> {{ 'Lado A' if prop.ganador_lado == 'A' else 'Lado B' }}</div>
+    <div><strong>Sets:</strong> {{ prop.sets_text or '-' }}</div>
+    <div><strong>Confirmaciones:</strong> A={{ prop.confirma_ladoA if prop.confirma_ladoA is not none else 'pend.' }},
+         B={{ prop.confirma_ladoB if prop.confirma_ladoB is not none else 'pend.' }}</div>
+  </div>
+
+  <form method="post" style="margin-top:10px; display:flex; gap:8px;">
+    <button name="accion" value="aceptar" class="btn">Aceptar</button>
+    <button name="accion" value="rechazar" class="btn btn-danger">Rechazar</button>
+    <a class="btn btn-ghost" href="{{ url_for('torneo_partido_detalle', partido_id=p.id) }}">Volver</a>
+  </form>
+{% endblock %}

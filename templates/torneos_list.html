@@ -25,8 +25,8 @@
         <thead>
           <tr>
             <th>Nombre</th>
-            <th>Modalidad</th>  {# t.formato (ej: SINGLES/DOBLES) #}
-            <th>Formato</th>    {# t.tipo (ej: AMERICANO) #}
+            <th>Modalidad</th>  {# Individual / Parejas (SINGLES/DOBLES) #}
+            <th>Formato</th>    {# Tipo: AMERICANO / ZONAS + PLAYOFF / PLAYOFF #}
             <th>Categoría</th>
             <th>Estado</th>
             <th>Inicio</th>
@@ -36,10 +36,24 @@
         </thead>
         <tbody>
           {% for t in torneos %}
+            {# Modalidad humana: prioriza t.modalidad; si está vacío, usa t.formato como fallback #}
+            {% set raw_mod = (t.modalidad or t.formato or '') %}
+            {% set mod_up = raw_mod.upper() %}
+            {% set modalidad_humana = 'INDIVIDUAL' if mod_up == 'SINGLES'
+                                      else 'PAREJAS' if mod_up == 'DOBLES'
+                                      else (raw_mod or '-') %}
+
+            {# Formato humano desde t.tipo #}
+            {% set tipo_up = (t.tipo or '')|upper %}
+            {% set formato_humano = 'AMERICANO' if tipo_up == 'AMERICANO'
+                                   else 'ZONAS Y PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
+                                   else 'PLAYOFF' if tipo_up == 'PLAYOFF'
+                                   else (t.tipo or '-') %}
+
             <tr>
               <td>{{ t.nombre }}</td>
-              <td>{{ t.formato or '-' }}</td>
-              <td>{{ t.tipo or '-' }}</td>
+              <td>{{ modalidad_humana }}</td>
+              <td>{{ formato_humano }}</td>
               <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
               <td><span class="badge">{{ t.estado }}</span></td>
               <td>{{ t.fecha_inicio or '-' }}</td>
