@@ -1,0 +1,23 @@
+{% macro hero(title, tag=None, right=None) -%}
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">{{ title }}</h1>
+      {% if tag %}<p class="hero-tag">{{ tag }}</p>{% endif %}
+    </div>
+    {% if right %}<div class="hero-actions">{{ right|safe }}</div>{% endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro cta_card(title, desc, url=None, btn_text=None, form_html=None) -%}
+<div class="card card-cta">
+  <h3>{{ title }}</h3>
+  <p>{{ desc }}</p>
+  {% if url %}
+    <a href="{{ url }}" class="btn">{{ btn_text }}</a>
+  {% elif form_html %}
+    {{ form_html|safe }}
+  {% endif %}
+</div>
+{%- endmacro %}

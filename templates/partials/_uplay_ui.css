@@ -1,0 +1,84 @@
+<style>
+:root{
+  --card-h: 200px;
+  --cta-btn-w: 200px;
+  --cta-btn-h: 44px;
+}
+
+/* GRID de tarjetas */
+.grid-cards{
+  display:grid; gap:10px; margin-top:12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items:start;
+}
+.grid-cards .card{ margin:0 !important; }
+
+/* Card CTA base */
+.card-cta{
+  display:grid; grid-template-rows:auto 1fr auto;
+  min-height:var(--card-h); padding:12px; box-sizing:border-box;
+}
+.card-cta h3{ margin:0 0 6px; }
+.card-cta p{
+  margin:0 0 8px; color:var(--muted);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+
+/* Botón parejo y centrado (sirve para <a> y <button>) */
+.card-cta a.btn, .card-cta button.btn, .card-cta button{
+  box-sizing:border-box; width:var(--cta-btn-w); max-width:90%;
+  height:var(--cta-btn-h); padding:0 16px; border-radius:12px;
+  font:inherit; font-weight:700; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center;
+  justify-self:center;
+}
+.card-cta form{ display:flex; justify-content:center; align-items:flex-end; margin:0; }
+.card-cta > *:last-child{ align-self:end; justify-self:center; }
+
+/* Hero compacto (por si alguna página lo usa) */
+.hero{
+  position:relative; overflow:hidden; border-radius:16px; padding:14px;
+  background:
+   radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+   radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+   linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+  border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.28);
+}
+.hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+.hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+.hero-tag{ margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+  font-size:clamp(.78rem, 1.6vw, .92rem);
+  background: linear-gradient(90deg, var(--yellow), var(--neon));
+  -webkit-background-clip:text; background-clip:text; color:transparent; filter: drop-shadow(0 0 .15em rgba(0,0,0,.25));
+}
+
+/* Tabla “neumórfica” */
+.table{
+  width:100%; border-collapse:separate; border-spacing:0 8px; margin-top:12px;
+}
+.table thead th{
+  text-align:left; font-weight:800; font-size:.95rem; padding:10px 12px; color:var(--muted);
+}
+.table tbody tr{
+  background:linear-gradient(180deg, var(--panel), var(--panel-2));
+  border:1px solid rgba(255,255,255,.10);
+  box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.table tbody td{ padding:10px 12px; }
+.table tbody tr:hover{ transform:translateY(-1px); transition:.15s ease; }
+
+/* Inputs / forms */
+.form{ display:grid; gap:10px; margin-top:12px; }
+.form .row{ display:grid; gap:8px; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); }
+.input, .select{
+  width:100%; height:42px; padding:8px 10px; border-radius:10px;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text);
+}
+.label{ font-weight:700; font-size:.9rem; }
+.form-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+
+/* Botones generales */
+.btn{ cursor:pointer; }
+.btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+.btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+</style>

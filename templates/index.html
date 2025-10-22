@@ -1,128 +1,292 @@
 {% extends "base.html" %}
 {% block title %}Inicio{% endblock %}
+
 {% block content %}
+<style>
+  /* ===== Hero / cabecera ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  <style>
-    /* ===== Marca UPLAY + tagline ===== */
-    .hero-head{
-      display:flex; align-items:flex-end; justify-content:space-between;
-      gap:10px; margin-bottom:8px; flex-wrap:wrap;
-    }
-    .brand{
-      display:flex; flex-direction:column; gap:2px; min-width:220px;
-    }
-    .brand-title{
-      margin:0;
-      font-weight:800;
-      letter-spacing:.3px;
-      font-size:clamp(1.15rem, 3.2vw, 1.6rem);
-      line-height:1.1;
-      display:flex; align-items:center; gap:8px;
-    }
-    .brand-tag{
-      margin:0;
-      text-transform:uppercase;
-      font-weight:800;
-      letter-spacing:.14em;
-      line-height:1;
-      font-size:clamp(.78rem, 1.6vw, .92rem);
-      background: linear-gradient(90deg, #6EA8FF, #22C55E);
-      -webkit-background-clip:text;
-      background-clip:text;
-      color:transparent;
-      filter: drop-shadow(0 0 0.15em rgba(0,0,0,.25));
-      opacity:.95;
-    }
-    @media (max-width:520px){
-      .hero-head{ align-items:flex-start; }
-    }
-  </style>
+  /* ===== Chips / stats ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
+  .dot-blue{background:#6EA8FF;}
 
-  <div class="hero-head">
+  /* ===== Variables de tarjetas/botones ===== */
+  :root{
+    --card-h: 200px;   /* altura uniforme de las cards */
+    --cta-btn-w: 200px;/* ancho fijo del botón en cards */
+    --cta-btn-h: 44px; /* alto fijo del botón en cards */
+  }
+
+  /* ===== Grid de tarjetas ===== */
+  .grid-cards{
+    display:grid; gap:10px;
+    margin-top:12px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items:start; /* prolijidad */
+  }
+  /* FIX: eliminar márgenes heredados en items dentro del grid (causa de la 1ª card “más arriba”) */
+  .grid-cards .card,
+  .grid-cards .card + .card{
+    margin:0 !important;
+  }
+
+  /* Tarjeta CTA: título / descripción / botón */
+  .card-cta{
+    display:grid;
+    grid-template-rows:auto 1fr auto; /* título / texto / botón */
+    min-height:var(--card-h);
+    padding:12px;
+    box-sizing:border-box;
+  }
+  .card-cta h3{ margin:0 0 6px; }
+  .card-cta p{
+    margin:0 0 8px; color:var(--muted);
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+
+  /* ==== Botones consistentes (chicos y centrados) ==== */
+  .card-cta a.btn,
+  .card-cta button.btn,
+  .card-cta button{
+    box-sizing:border-box;
+    width:var(--cta-btn-w);
+    max-width:90%;
+    height:var(--cta-btn-h);
+    padding:0 16px;                /* altura controlada por height */
+    border-radius:12px;
+    font:inherit; font-weight:700; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    justify-self:center;           /* centrado horizontal en la grilla */
+  }
+  /* Botón dentro de <form> centrado y pegado abajo igual que un <a> */
+  .card-cta form{
+    display:flex;
+    justify-content:center;
+    align-items:flex-end;
+    margin:0;
+  }
+  .card-cta > *:last-child{
+    align-self:end;    /* pegado al borde inferior de la card */
+    justify-self:center;
+  }
+
+  /* ===== Modal confirmación (abrir partido) ===== */
+  .backdrop{position:fixed; inset:0; display:none; z-index:1001; background:rgba(1,18,34,.65);}
+  .dialog{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    color:var(--text);
+    width:min(560px, 94vw); margin:8vh auto; border-radius:14px;
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+  }
+  .dialog-header{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);}
+  .dialog-title{margin:0; font-size:1.02rem; font-weight:800;}
+  .dialog-body{padding:14px;}
+  .dialog-footer{padding:12px 14px; border-top:1px solid rgba(255,255,255,.10); display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);}
+  .close-btn{background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);}
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">UPLAY</h1>
+      <p class="hero-tag">Vos jugás, Vos ascendés!</p>
+    </div>
+
     {% if current_jugador %}
-      <a href="{{ url_for('mi_panel') }}" class="btn btn-ghost">Ir a Mi panel</a>
+      <div class="hero-actions">
+        <a class="btn-ghost btn-slim" href="{{ url_for('mi_panel') }}">Ir a Mi panel</a>
+        <a class="btn-ghost btn-slim" href="{{ url_for('ranking') }}">Ver ranking</a>
+      </div>
+    {% else %}
+      <div class="hero-actions">
+        <a class="btn" href="{{ url_for('login') }}">Iniciar sesión</a>
+        <a class="btn-ghost btn-slim" href="{{ url_for('alta_publica') }}">Pedir el alta</a>
+      </div>
     {% endif %}
   </div>
 
   {% if current_jugador %}
-    <div class="card" style="max-width:980px;">
-      <p style="margin:0;">
-        Hola, <strong>{{ current_jugador.nombre_completo }}</strong>.
-        Categoría: <strong>{{ current_jugador.categoria.nombre if current_jugador.categoria else '-' }}</strong>,
-        Puntos: <strong>{{ current_jugador.puntos }}</strong>.
-        {% if en_zona %}
-          <span class="badge badge-ok">En zona de ascenso</span>
-        {% endif %}
-      </p>
+    <div class="chips">
+      <span class="chip"><span class="dot dot-blue"></span>{{ current_jugador.nombre_completo }}</span>
+      <span class="chip"><span class="dot dot-yellow"></span>Cat: {{ current_jugador.categoria.nombre if current_jugador.categoria else '-' }}</span>
+      <span class="chip"><span class="dot dot-green"></span>Puntos: {{ current_jugador.puntos }}</span>
+      {% if en_zona %}<span class="chip badge-ok" style="border:none;">En zona de ascenso</span>{% endif %}
     </div>
-
-    <div class="grid-cards" style="margin-top:10px;">
-      <div class="card">
-        <h3 style="margin:0 0 6px;">Mi panel</h3>
-        <p class="muted">Acciones rápidas y próximos partidos.</p>
-        <a href="{{ url_for('mi_panel') }}" class="btn">Abrir Mi panel</a>
-      </div>
-
-      <div class="card">
-        <h3 style="margin:0 0 6px;">Crear partido abierto</h3>
-        <p class="muted">Armá un partido en tu categoría y compartí el link.</p>
-        <form method="post" action="{{ url_for('abiertos_new') }}" style="display:grid; gap:8px;">
-          <input type="hidden" name="categoria_id" value="{{ current_jugador.categoria_id }}">
-          <input type="hidden" name="creador_id" value="{{ current_jugador.id }}">
-          <input name="nota" placeholder="Ej: hoy 20:00 en Club X">
-          <button type="submit" class="btn">Crear</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h3 style="margin:0 0 6px;">Unirme a un partido</h3>
-        <p class="muted">Ver partidos abiertos en tu categoría.</p>
-        <a href="{{ url_for('abiertos_list') }}" class="btn">Ver abiertos</a>
-      </div>
-
-      <div class="card">
-        <h3 style="margin:0 0 6px;">Ranking</h3>
-        <p class="muted">Jugadores ordenados por nivel.</p>
-        <a href="{{ url_for('ranking') }}" class="btn">Ver ranking</a>
-      </div>
-    </div>
-
   {% else %}
-    <div class="card" style="max-width:980px;">
-      <p style="margin:0;">
-        Podés <strong>iniciar sesión</strong> para crear o unirte a partidos, o ver el <strong>ranking</strong>.
-      </p>
-      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
-        <a href="{{ url_for('login') }}" class="btn">Iniciar sesión</a>
-        <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost">Pedir el alta</a>
-        <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Ver ranking</a>
-        <a href="{{ url_for('categorias_list') }}" class="btn btn-ghost">Categorías</a>
-        {# Se quitaron "Jugadores" y "Partidos abiertos" solo en Home #}
-      </div>
-    </div>
-
-    <div class="card" style="border-style:dashed; margin-top:10px; max-width:980px;">
-      <h3 style="margin:0 0 6px;">¿Primera vez?</h3>
-      <ol style="margin:0; padding-left:18px;">
-        <li>Pedí el <strong>alta</strong> al organizador.</li>
-        <li>Entrá por <em>Iniciar sesión</em> con tu nombre y PIN.</li>
-        <li>Creá un <strong>partido abierto</strong> en tu categoría o unite a uno existente.</li>
-        <li>Jugá y luego cargá el resultado para sumar al ranking.</li>
-      </ol>
-    </div>
+    <p class="muted" style="margin:10px 0 0;">Iniciá sesión para crear o unirte a partidos, y sumar puntos al ranking.</p>
   {% endif %}
+</div>
 
-  <div style="margin-top:12px;">
-    <h3 style="margin:0 0 6px;">Atajos útiles</h3>
-    <div style="display:flex; flex-wrap:wrap; gap:10px;">
-      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Partidos</a>
-      <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost">Desafíos</a>
+<!-- ===== CONTENIDO PRINCIPAL ===== -->
+{% if current_jugador %}
+  <div class="grid-cards">
+
+    <!-- 1) Partido nuevo -->
+    <div class="card card-cta">
+      <h3>Partido nuevo</h3>
+      <p>Armá el partido con tu compañero y rivales.</p>
+      <a href="{{ url_for('partidos_new') }}" class="btn">Crear partido</a>
+    </div>
+
+    <!-- 2) Abrir partido (con confirmación) -->
+    <div class="card card-cta">
+      <h3>Abrir partido</h3>
+      <p>Creá un abierto para que se sumen jugadores de tu categoría.</p>
+      <form id="formAbrirPartido" method="post" action="{{ url_for('abiertos_new') }}">
+        <input type="hidden" name="categoria_id" value="{{ current_jugador.categoria_id }}">
+        <input type="hidden" name="creador_id" value="{{ current_jugador.id }}">
+        <button type="button" id="btnAbrirPartido" class="btn">Abrir partido</button>
+      </form>
+    </div>
+
+    <!-- 3) Unirme a un partido -->
+    <div class="card card-cta">
+      <h3>Unirme a un partido</h3>
+      <p>Ver partidos abiertos de tu categoría.</p>
+      <a href="{{ url_for('abiertos_list') }}" class="btn">Ver abiertos</a>
+    </div>
+
+    <!-- 4) Ranking -->
+    <div class="card card-cta">
+      <h3>Ranking</h3>
+      <p>Jugadores ordenados por nivel.</p>
+      <a href="{{ url_for('ranking') }}" class="btn">Ver ranking</a>
+    </div>
+
+  </div>
+{% else %}
+  <!-- Primera vez / público -->
+  <div class="card" style="margin-top:12px;">
+    <p style="margin:0;">
+      Podés <strong>iniciar sesión</strong> para crear o unirte a partidos, o ver el <strong>ranking</strong>.
+    </p>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+      <a href="{{ url_for('login') }}" class="btn">Iniciar sesión</a>
+      <a href="{{ url_for('alta_publica') }}" class="btn-ghost">Pedir el alta</a>
+      <a href="{{ url_for('ranking') }}" class="btn-ghost">Ver ranking</a>
+      <a href="{{ url_for('categorias_list') }}" class="btn-ghost">Categorías</a>
     </div>
   </div>
 
+  <div class="card" style="border-style:dashed; margin-top:10px;">
+    <h3 style="margin:0 0 6px;">¿Primera vez?</h3>
+    <ol style="margin:0; padding-left:18px;">
+      <li>Pedí el <strong>alta</strong> al organizador.</li>
+      <li>Entrá por <em>Iniciar sesión</em> con tu nombre y PIN.</li>
+      <li>Creá un <strong>partido abierto</strong> o unite a uno existente.</li>
+      <li>Jugá y cargá el resultado para sumar al ranking.</li>
+    </ol>
+  </div>
+{% endif %}
+
+<!-- Atajos -->
+<div class="shortcuts">
+  <h3>Atajos útiles</h3>
+  <div class="links">
+    <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Partidos</a>
+    <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost">Desafíos</a>
+    <a href="{{ url_for('torneos_public_list') }}" class="btn btn-ghost">Torneos</a>
+  </div>
+</div>
+
+<!-- ===== Modal Confirmación: Abrir partido ===== -->
+<div class="backdrop" id="backdropOpen" aria-hidden="true">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="openTitle">
+    <div class="dialog-header">
+      <h3 class="dialog-title" id="openTitle">Confirmar: Abrir partido</h3>
+      <button type="button" class="close-btn" id="openClose">Cerrar</button>
+    </div>
+    <div class="dialog-body">
+      <p style="margin:0 0 8px;">Estás por <strong>crear un partido abierto</strong> en tu categoría.</p>
+      <ul style="margin:0 0 8px 18px; padding:0;">
+        <li>Se abre un cupo para completar jugadores.</li>
+        <li>Se suman <strong>3 jugadores</strong> de tu categoría además de vos.</li>
+        <li>Compartí el link para que se sumen.</li>
+      </ul>
+      <p class="muted" style="margin:0;">Si ya tenés compañero y rivales definidos, usá <strong>Partido nuevo</strong>.</p>
+    </div>
+    <div class="dialog-footer">
+      <button type="button" class="btn-ghost" id="openCancel">Cancelar</button>
+      <button type="button" class="btn" id="openConfirm">Crear partido abierto</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    // Confirmación al "Abrir partido"
+    const btn = document.getElementById('btnAbrirPartido');
+    const form = document.getElementById('formAbrirPartido');
+    const backdrop = document.getElementById('backdropOpen');
+    const closeBtn = document.getElementById('openClose');
+    const cancelBtn = document.getElementById('openCancel');
+    const confirmBtn = document.getElementById('openConfirm');
+
+    function openDialog(){
+      backdrop.style.display='block';
+      backdrop.setAttribute('aria-hidden','false');
+      setTimeout(()=> confirmBtn.focus(), 10);
+    }
+    function closeDialog(){
+      backdrop.style.display='none';
+      backdrop.setAttribute('aria-hidden','true');
+      btn && btn.focus();
+    }
+
+    if(btn){ btn.addEventListener('click', (e)=>{ e.preventDefault(); openDialog(); }); }
+    closeBtn.addEventListener('click', closeDialog);
+    cancelBtn.addEventListener('click', closeDialog);
+    backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeDialog(); });
+    window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeDialog(); });
+
+    confirmBtn.addEventListener('click', ()=>{
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      if(meta && !form.querySelector('input[name="csrf_token"]')){
+        const i=document.createElement('input');
+        i.type='hidden'; i.name='csrf_token'; i.value=meta.content;
+        form.appendChild(i);
+      }
+      form.submit();
+    });
+  })();
+</script>
 {% endblock %}
 
 {% block help_content %}
-<!-- (se mantiene tal cual lo tenías) -->
+<section class="help-section">
+  <h4>Partidos: ¿Abrir partido o Partido nuevo?</h4>
+  <p><strong>Abrir partido:</strong> crea un partido abierto en tu categoría para que otros se sumen. Se suman <strong>3 jugadores</strong> de tu misma categoría.</p>
+  <p style="margin-top:6px;"><strong>Partido nuevo:</strong> cargás tu compañero y los rivales directamente; el partido queda armado desde el inicio.</p>
+</section>
 {{ super() }}
 {% endblock %}
