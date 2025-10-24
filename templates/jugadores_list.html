@@ -240,9 +240,9 @@
                     {% endif %}
 
                     <form method="post"
-                          action="{{ url_for('jugadores_eliminar_fisico', jug_id=j.id) }}"
+                          action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
                           onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE a {{ j.nombre_completo }}? Esta acción no se puede deshacer.');">
-    {{ csrf_token() }}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button type="submit" class="btn-ghost btn-slim">Eliminar</button>
                     </form>
                   {% endif %}
