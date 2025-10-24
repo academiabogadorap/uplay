@@ -7,3 +7,4 @@ instance/
 *.sqlite
 *.db
 ar parámetro 'to' en send_mail (reemplaza to_addrs)*
+templates/jugadores_list.html.bak

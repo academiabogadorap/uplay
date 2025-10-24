@@ -2,13 +2,14 @@ services:
   - type: web
     name: uplay
     env: python
-    plan: free
+    plan: starter
     buildCommand: |
       pip install -r requirements.txt
-    preDeployCommand: |
+    postDeployCommand: |
       flask db upgrade
     startCommand: |
-      gunicorn app:app --workers 2 --threads 4 --timeout 120
+      gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --worker-tmp-dir /dev/shm
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.6
@@ -26,7 +27,7 @@ services:
         value: admin
       - key: ADMIN_PIN
         value: "1234"
-    disk:
-      name: db
-      mountPath: /opt/render/project/src/instance
-      sizeGB: 1
+    disks:
+      - name: db
+        mountPath: /opt/render/project/src/instance
+        sizeGB: 1
