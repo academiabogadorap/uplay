@@ -47,6 +47,71 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
+# --- Interceptor: si jugador está inactivo y se accede a /jugadores/<id>/eliminar (o /jugadores/eliminar/<id>), intenta borrado real ---
+@app.before_request
+def _hard_delete_inactive_player():
+    try:
+        from flask import request, redirect, url_for, flash
+        import re
+
+        path = (request.path or "")
+        method = (request.method or "GET").upper()
+
+        # soportar:
+        #   .../jugadores/<id>/eliminar
+        #   .../jugadores/eliminar/<id>
+        # con o sin prefijos (p.ej. /admin) y con/sin barra final
+        m = re.search(r"/jugadores/(?:eliminar/(d+)|(d+)/eliminar)/?$", path)
+        jug_id = None
+        if m:
+            jug_id = m.group(1) or m.group(2)
+
+        # Fallback: ?id= en query/form
+        if not jug_id:
+            jug_id = request.args.get("id") or request.form.get("id")
+        if not jug_id:
+            return None
+
+        # Aceptar GET o POST (si tu botón usa GET, evitamos el CSRF del POST)
+        if method not in ("GET", "POST"):
+            return None
+
+        try:
+            jug_id = int(jug_id)
+        except Exception:
+            return None
+
+        # import local para evitar ciclos
+        from app import db, Jugador, eliminar_jugador_si_posible
+
+        j = db.session.get(Jugador, jug_id)
+        if not j:
+            try: flash("Jugador no encontrado.", "danger")
+            except Exception: pass
+            return redirect(url_for("jugadores_listar"))
+
+        inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
+
+        # Si está ACTIVO, dejamos que tu endpoint haga el soft-delete como siempre
+        if not inactivo:
+            return None
+
+        # Si está INACTIVO, intentamos borrado físico
+        if eliminar_jugador_si_posible(j):
+            try: flash("Jugador eliminado definitivamente.", "success")
+            except Exception: pass
+        else:
+            # No se pudo por dependencias -> garantizar inactivo y avisar
+            if hasattr(j, "activo"): j.activo = False
+            if hasattr(j, "inactivo"): j.inactivo = True
+            db.session.commit()
+            try: flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
+            except Exception: pass
+
+        return redirect(url_for("jugadores_listar"))
+    except Exception:
+        # si algo falla, no frenamos el flujo normal
+        return None
 # --- Interceptor: si jugador está inactivo y se POSTea /jugadores/<id>/eliminar, intenta borrado real ---
 @app.before_request
 def _hard_delete_inactive_player():
