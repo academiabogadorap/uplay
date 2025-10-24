@@ -2,169 +2,229 @@
 {% block title %}Iniciar sesión{% endblock %}
 
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Iniciar sesión</h2>
-    <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost btn-slim">Pedir alta</a>
+<style>
+  /* ===== Hero / cabecera (igual que index) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ===== Chips / info ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-blue{background:#6EA8FF;}
+  .muted{ color:var(--muted,#98a2b3); }
+
+  /* ===== Card y controles ===== */
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* Accesibilidad de estado del buscador */
+  #buscar-estado{ min-height:1.2em; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Iniciar sesión</h1>
+      <p class="hero-tag">Accedé para jugar y sumar puntos</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost btn-slim">Pedir alta</a>
+      <a href="{{ url_for('ranking') }}" class="btn btn-ghost btn-slim">Ver ranking</a>
+    </div>
   </div>
-
-  <div class="card" style="max-width:560px;">
-    <form method="post" style="display:grid; gap:10px;" novalidate>
-      <!-- Buscador rápido de jugador -->
-      <div>
-        <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>
-        <input id="buscar" type="text" placeholder="Escribí para filtrar por nombre…" autocomplete="off" style="width:100%;" aria-describedby="buscar-estado">
-        <div id="buscar-estado" class="muted" style="margin:.35rem 0 0; font-size:.9rem;"></div>
-      </div>
-
-      <div>
-        <label for="jugador_id" class="muted" style="display:block; margin-bottom:4px;">Tu nombre</label>
-        <select id="jugador_id" name="jugador_id" required style="width:100%;" aria-describedby="ayuda-jugador">
-          <option value="">-- Elegí tu nombre --</option>
-          {% for j in jugadores %}
-            <option value="{{ j.id }}">
-              {{ j.nombre_completo }} — {{ j.categoria.nombre if j.categoria else '-' }}
-            </option>
-          {% endfor %}
-        </select>
-        <p id="ayuda-jugador" class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
-          Si no aparecés, pedí el alta al organizador.
-        </p>
-
-        {% if jugadores|length == 0 %}
-          <p class="muted" style="margin:.35rem 0 0;">
-            No hay jugadores activos cargados. <a href="{{ url_for('alta_publica') }}">Pedí alta</a> o contactá a un admin.
-          </p>
-        {% endif %}
-      </div>
-
-      <div>
-        <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN</label>
-        <div style="display:flex; gap:8px;">
-          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
-                 required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
-          <button type="button" id="togglePin" class="btn btn-ghost btn-slim" aria-pressed="false" aria-controls="pin">👁</button>
-        </div>
-        <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
-          El PIN lo define el organizador. Podrás cambiarlo luego desde <em>Editar jugador</em>.
-        </p>
-        <p style="margin:.35rem 0 0;">
-          <a href="{{ url_for('olvide_pin') }}" class="btn btn-ghost btn-slim">Olvidé mi PIN</a>
-        </p>
-      </div>
-
-      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
-        <button type="submit" class="btn">Entrar</button>
-        <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost">No figuro, pedir alta</a>
-        <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Ver ranking</a>
-      </div>
-    </form>
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Seleccioná tu nombre y PIN</span>
   </div>
+</div>
 
-  <div class="card" style="border-style:dashed; margin-top:10px; max-width:560px;">
-    <p style="margin:0;">
-      ¿Problemas para ingresar? Verificá que tu nombre esté en la lista y que el PIN sea correcto.
-    </p>
-  </div>
+<!-- ===== FORMULARIO ===== -->
+<div class="card" style="max-width:560px;">
+  <form method="post" style="display:grid; gap:10px;" novalidate>
+    <!-- Buscador rápido de jugador -->
+    <div>
+      <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>
+      <input id="buscar" type="text" placeholder="Escribí para filtrar por nombre…" autocomplete="off" style="width:100%;" aria-describedby="buscar-estado">
+      <div id="buscar-estado" class="muted" style="margin:.35rem 0 0; font-size:.9rem;"></div>
+    </div>
 
-  <script>
-    // --- Utilidades
-    const normalizar = (s) => (s || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .trim();
+    <div>
+      <label for="jugador_id" class="muted" style="display:block; margin-bottom:4px;">Tu nombre</label>
+      <select id="jugador_id" name="jugador_id" required style="width:100%;" aria-describedby="ayuda-jugador">
+        <option value="">-- Elegí tu nombre --</option>
+        {% for j in jugadores %}
+          <option value="{{ j.id }}">
+            {{ j.nombre_completo }} — {{ j.categoria.nombre if j.categoria else '-' }}
+          </option>
+        {% endfor %}
+      </select>
+      <p id="ayuda-jugador" class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+        Si no aparecés, pedí el alta al organizador.
+      </p>
 
-    const buscar = document.getElementById('buscar');
-    const select = document.getElementById('jugador_id');
-    const estado = document.getElementById('buscar-estado');
-    const pin = document.getElementById('pin');
-    const toggle = document.getElementById('togglePin');
+      {% if jugadores|length == 0 %}
+        <p class="muted" style="margin:.35rem 0 0;">
+          No hay jugadores activos cargados. <a href="{{ url_for('alta_publica') }}">Pedí alta</a> o contactá a un admin.
+        </p>
+      {% endif %}
+    </div>
 
-    if (buscar && select) {
-      // Clonamos opciones originales para rearmar la lista rápido
-      const optsOriginales = Array.from(select.options).map(o => o.cloneNode(true));
-      const optBase = optsOriginales[0];           // "-- Elegí tu nombre --"
-      const optResto = optsOriginales.slice(1);    // jugadores
+    <div>
+      <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN</label>
+      <div style="display:flex; gap:8px;">
+        <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
+               required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
+        <button type="button" id="togglePin" class="btn btn-ghost btn-slim" aria-pressed="false" aria-controls="pin" title="Mostrar/ocultar PIN">👁</button>
+      </div>
+      <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+        El PIN lo define el organizador. Podrás cambiarlo luego desde <em>Editar jugador</em>.
+      </p>
+      <p style="margin:.35rem 0 0;">
+        <a href="{{ url_for('olvide_pin') }}" class="btn btn-ghost btn-slim">Olvidé mi PIN</a>
+      </p>
+    </div>
 
-      // Render helper
-      function renderLista(coincidentes) {
-        // Limpio y vuelvo a poner la base
-        select.innerHTML = '';
-        select.appendChild(optBase.cloneNode(true));
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+      <button type="submit" class="btn">Entrar</button>
+      <a href="{{ url_for('alta_publica') }}" class="btn btn-ghost">No figuro, pedir alta</a>
+      <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Ver ranking</a>
+    </div>
+  </form>
+</div>
 
-        if (coincidentes.length === 0) {
-          const vacio = document.createElement('option');
-          vacio.disabled = true;
-          vacio.textContent = '— Sin resultados —';
-          select.appendChild(vacio);
-          estado.textContent = 'Sin resultados.';
-          select.selectedIndex = 0;
-          return;
-        }
+<div class="card" style="border-style:dashed; margin-top:10px; max-width:560px;">
+  <p style="margin:0;">
+    ¿Problemas para ingresar? Verificá que tu nombre esté en la lista y que el PIN sea correcto.
+  </p>
+</div>
 
-        // Agrego coincidencias
-        coincidentes.forEach(o => select.appendChild(o.cloneNode(true)));
+<script>
+  // --- Utilidades
+  const normalizar = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
 
-        // Auto-seleccionar primera coincidencia
-        select.selectedIndex = 1;
+  const buscar = document.getElementById('buscar');
+  const select = document.getElementById('jugador_id');
+  const estado = document.getElementById('buscar-estado');
+  const pin = document.getElementById('pin');
+  const toggle = document.getElementById('togglePin');
 
-        // Estado accesible
-        estado.textContent = `${coincidentes.length} resultado${coincidentes.length === 1 ? '' : 's'}.`;
+  if (buscar && select) {
+    // Clonamos opciones originales para rearmar la lista rápido
+    const optsOriginales = Array.from(select.options).map(o => o.cloneNode(true));
+    const optBase = optsOriginales[0];           // "-- Elegí tu nombre --"
+    const optResto = optsOriginales.slice(1);    // jugadores
+
+    // Render helper
+    function renderLista(coincidentes) {
+      // Limpio y vuelvo a poner la base
+      select.innerHTML = '';
+      select.appendChild(optBase.cloneNode(true));
+
+      if (coincidentes.length === 0) {
+        const vacio = document.createElement('option');
+        vacio.disabled = true;
+        vacio.textContent = '— Sin resultados —';
+        select.appendChild(vacio);
+        estado.textContent = 'Sin resultados.';
+        select.selectedIndex = 0;
+        return;
       }
 
-      // Filtro (tokeniza para búsquedas "nombre apellido")
-      function filtrar(qRaw) {
-        const q = normalizar(qRaw);
-        if (!q) {
-          // Reset
-          renderLista(optResto);
-          estado.textContent = '';
-          select.selectedIndex = 0;
-          return;
-        }
-        const tokens = q.split(/\s+/).filter(Boolean);
-        const coincide = (texto) => {
-          const t = normalizar(texto);
-          return tokens.every(tok => t.includes(tok));
-        };
-        const match = optResto.filter(o => coincide(o.textContent || o.innerText || ''));
-        renderLista(match);
+      // Agrego coincidencias
+      coincidentes.forEach(o => select.appendChild(o.cloneNode(true)));
+
+      // Auto-seleccionar primera coincidencia
+      select.selectedIndex = 1;
+
+      // Estado accesible
+      estado.textContent = `${coincidentes.length} resultado${coincidentes.length === 1 ? '' : 's'}.`;
+    }
+
+    // Filtro (tokeniza para búsquedas "nombre apellido")
+    function filtrar(qRaw) {
+      const q = normalizar(qRaw);
+      if (!q) {
+        // Reset
+        renderLista(optResto);
+        estado.textContent = '';
+        select.selectedIndex = 0;
+        return;
       }
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const coincide = (texto) => {
+        const t = normalizar(texto);
+        return tokens.every(tok => t.includes(tok));
+      };
+      const match = optResto.filter(o => coincide(o.textContent || o.innerText || ''));
+      renderLista(match);
+    }
 
-      // Eventos
-      buscar.addEventListener('input', () => filtrar(buscar.value));
+    // Eventos
+    buscar.addEventListener('input', () => filtrar(buscar.value));
 
-      // Enter desde el buscador: si hay UNA coincidencia, confirmo y voy a PIN
-      buscar.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') {
-          ev.preventDefault();
-          const total = select.options.length;
-          // Base + (1) única coincidencia = 2 opciones totales
-          if (total === 2 && !select.options[1].disabled) {
+    // Enter desde el buscador: si hay UNA coincidencia, confirmo y voy a PIN
+    buscar.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const total = select.options.length;
+        // Base + (1) única coincidencia = 2 opciones totales
+        if (total === 2 && !select.options[1].disabled) {
+          select.selectedIndex = 1;
+          pin && pin.focus();
+        } else {
+          if (total > 1) {
             select.selectedIndex = 1;
             pin && pin.focus();
-          } else {
-            // Si hay varias, mantengo la auto-selección en la primera
-            if (total > 1) {
-              select.selectedIndex = 1;
-              pin && pin.focus();
-            }
           }
         }
-      });
-    }
+      }
+    });
+  }
 
-    // --- Mostrar/Ocultar PIN
-    if (pin && toggle){
-      toggle.addEventListener('click', () => {
-        const isPass = pin.type === 'password';
-        pin.type = isPass ? 'text' : 'password';
-        toggle.setAttribute('aria-pressed', String(isPass));
-      });
-    }
-  </script>
+  // --- Mostrar/Ocultar PIN
+  if (pin && toggle){
+    toggle.addEventListener('click', () => {
+      const isPass = pin.type === 'password';
+      pin.type = isPass ? 'text' : 'password';
+      toggle.setAttribute('aria-pressed', String(isPass));
+    });
+  }
+</script>
 {% endblock %}
 
 {% block help_content %}
-<!-- (sin cambios) -->
+{{ super() }}
 {% endblock %}

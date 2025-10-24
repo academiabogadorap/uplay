@@ -1,37 +1,169 @@
 {% extends "base.html" %}
 {% block title %}Torneos{% endblock %}
+
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
-    <h2 style="margin:0;">Torneos</h2>
-    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      {# helper para clase activa #}
+<style>
+  /* ===== Hero ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:8px; flex-wrap:wrap;}
+
+  /* Pills de estado */
+  .pill{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 12px; border-radius:999px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
+    text-decoration:none; font-weight:800;
+  }
+  .pill.active{ background:rgba(138,232,12,.14); border-color:rgba(138,232,12,.45); box-shadow:0 0 0 2px rgba(138,232,12,.15) inset; }
+
+  /* Fix contraste en filtros (Todos / Inscripción / En juego / Finalizados) */
+.hero .pill,
+.hero .pill:link,
+.hero .pill:visited{
+  color:#f2f7ff !important;        /* texto claro siempre */
+  text-shadow:0 1px 0 rgba(0,0,0,.35);
+}
+.hero .pill:hover{                  /* mejor hover */
+  background:rgba(255,255,255,.14);
+  border-color:rgba(255,255,255,.28);
+  color:#ffffff !important;
+}
+.hero .pill.active{                 /* activa con alto contraste */
+  background:rgba(138,232,12,.18);
+  border-color:rgba(138,232,12,.55);
+  box-shadow:0 0 0 2px rgba(138,232,12,.15) inset;
+  color:#ffffff !important;
+}
+.hero .pill:focus-visible{          /* accesibilidad */
+  outline:2px solid rgba(138,232,12,.8);
+  outline-offset:2px;
+  border-radius:999px;
+}
+
+
+  /* Chips */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
+
+  /* Botones & badges */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+  .muted{ color:var(--muted,#98a2b3); }
+
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; }
+  .badge-info{ background:#1b2f3b; border-color:#1a4d70; }
+
+  /* Card + tabla */
+  .card{
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    padding:10px;
+  }
+  .card.pad-0{ padding:0; }
+
+  .table-wrap{
+    --thead-h: 44px;
+    max-height:70vh; overflow:auto; border-radius:12px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0));
+  }
+  table.torneos{ width:100%; border-collapse:separate; border-spacing:0; margin:0; }
+  .torneos thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  .torneos tbody td{ padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:middle; }
+  .torneos tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  .torneos tbody tr:hover{ background:rgba(138,232,12,.05); }
+
+  /* Responsive: ocultar menos críticas */
+  @media (max-width:960px){
+    .torneos thead th:nth-child(3), .torneos tbody td:nth-child(3){ display:none; } /* Formato */
+    .torneos thead th:nth-child(7), .torneos tbody td:nth-child(7){ display:none; } /* Público */
+  }
+  @media (max-width:720px){
+    .torneos thead th:nth-child(2), .torneos tbody td:nth-child(2){ display:none; } /* Modalidad */
+    .torneos thead th:nth-child(6), .torneos tbody td:nth-child(6){ display:none; } /* Inicio */
+  }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Torneos</h1>
+      <p class="hero-tag">Competí por categoría · formatos variados</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('torneos_public_list') }}"
+         class="pill {% if not (estado or '') %}active{% endif %}">Todos</a>
       {% set est = (estado or '')|upper %}
-      <a class="btn btn-ghost btn-slim {% if not est %}active{% endif %}"
-         href="{{ url_for('torneos_public_list') }}">Todos</a>
-      <a class="btn btn-ghost btn-slim {% if est == 'INSCRIPCION' %}active{% endif %}"
+      <a class="pill {% if est == 'INSCRIPCION' %}active{% endif %}"
          href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}">Inscripción</a>
-      <a class="btn btn-ghost btn-slim {% if est == 'EN_JUEGO' %}active{% endif %}"
+      <a class="pill {% if est == 'EN_JUEGO' %}active{% endif %}"
          href="{{ url_for('torneos_public_list', estado='EN_JUEGO') }}">En juego</a>
-      <a class="btn btn-ghost btn-slim {% if est == 'FINALIZADO' %}active{% endif %}"
+      <a class="pill {% if est == 'FINALIZADO' %}active{% endif %}"
          href="{{ url_for('torneos_public_list', estado='FINALIZADO') }}">Finalizados</a>
     </div>
   </div>
 
-  {% if torneos|length == 0 %}
-    <div class="card"><p style="margin:0;">No hay torneos{{ ' en estado ' + estado if estado else '' }}.</p></div>
-  {% else %}
-    <div class="card" style="padding:0;">
-      <table class="table">
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Total: {{ torneos|length }}</span>
+    {% if est %}
+      <span class="chip"><span class="dot dot-yellow"></span>Filtro: {{ est|title }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if torneos|length == 0 %}
+  <div class="card"><p class="muted" style="margin:0;">No hay torneos{{ ' en estado ' + estado if estado else '' }}.</p></div>
+{% else %}
+  <div class="card pad-0">
+    <div class="table-wrap">
+      <table class="torneos">
         <thead>
           <tr>
             <th>Nombre</th>
-            <th>Modalidad</th>  {# Individual / Parejas (SINGLES/DOBLES) #}
-            <th>Formato</th>    {# Tipo: AMERICANO / ZONAS + PLAYOFF / PLAYOFF #}
+            <th>Modalidad</th>
+            <th>Formato</th>
             <th>Categoría</th>
             <th>Estado</th>
             <th>Inicio</th>
             <th>Público</th>
-            <th></th>
+            <th style="width:120px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -55,11 +187,19 @@
               <td>{{ modalidad_humana }}</td>
               <td>{{ formato_humano }}</td>
               <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
-              <td><span class="badge">{{ t.estado }}</span></td>
+              <td>
+                <span class="badge
+                  {% if (t.estado or '')|upper in ['INSCRIPCION','INSCRIPCIÓN'] %}badge-info
+                  {% elif (t.estado or '')|upper in ['EN_JUEGO','EN JUEGO'] %}badge-warn
+                  {% elif (t.estado or '')|upper in ['FINALIZADO','CERRADO'] %}badge-ok
+                  {% endif %}">
+                  {{ t.estado }}
+                </span>
+              </td>
               <td>{{ t.fecha_inicio or '-' }}</td>
               <td>
                 {% if t.es_publico %}
-                  <span class="badge">Público</span>
+                  <span class="badge badge-ok">Público</span>
                 {% else %}
                   <span class="badge">Privado</span>
                 {% endif %}
@@ -75,5 +215,10 @@
         </tbody>
       </table>
     </div>
-  {% endif %}
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block help_content %}
+{{ super() }}
 {% endblock %}

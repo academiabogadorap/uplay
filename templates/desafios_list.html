@@ -2,317 +2,229 @@
 {% block title %}Desafíos{% endblock %}
 
 {% block content %}
-  <h2>Desafíos</h2>
-  <p><a href="{{ url_for('desafios_new') }}"><button>Nuevo desafío</button></a></p>
-
-  {% if desafios and desafios|length > 0 %}
-    <table>
-      <thead>
-        <tr>
-          <th>Origen</th>
-          <th>Desafiante + Compañero</th>
-          <th>Superior</th>
-          <th>Rivales</th>
-          <th>Partido</th>
-          <th>Estado</th>
-          <th>Resultado</th>
-          <th>Creado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in desafios %}
-          {% set aceptos = (1 if d.rival1_acepto else 0) + (1 if d.rival2_acepto else 0) %}
-          {% set soy_r1 = (current_jugador and current_jugador.id == d.rival1_id) %}
-          {% set soy_r2 = (current_jugador and current_jugador.id == d.rival2_id) %}
-          {% set yo_acepte = (d.rival1_acepto if soy_r1 else (d.rival2_acepto if soy_r2 else False)) %}
-          {% set es_rival = (current_jugador and current_jugador.id in [d.rival1_id, d.rival2_id]) %}
-          {% set es_desafiante = (current_jugador and current_jugador.id == d.desafiante_id) %}
-          {% set es_admin = (current_jugador and current_jugador.is_admin) %}
-
-          <tr
-            data-desafio-id="{{ d.id }}"
-            data-estado="{{ d.estado or '' }}"
-            data-aceptos="{{ aceptos }}"
-            data-es-rival="{{ '1' if es_rival else '0' }}"
-            data-yo-acepte="{{ '1' if yo_acepte else '0' }}"
-            data-es-desafiante="{{ '1' if es_desafiante else '0' }}"
-            data-es-admin="{{ '1' if es_admin else '0' }}"
-            data-hay-partido="{{ '1' if d.partido else '0' }}"
-            data-partido-estado="{{ d.partido.estado if d.partido else '' }}"
-          >
-            <td>{{ d.categoria_origen.nombre if d.categoria_origen else '-' }}</td>
-            <td>{{ d.desafiante.nombre_completo }} + {{ d.companero.nombre_completo }}</td>
-            <td>{{ d.categoria_superior.nombre if d.categoria_superior else '-' }}</td>
-            <td>{{ d.rival1.nombre_completo }} + {{ d.rival2.nombre_completo }}</td>
-            <td>
-              {% if d.partido %}
-                #{{ d.partido.id }} ({{ d.partido.estado }})
-              {% else %}
-                —
-              {% endif %}
-            </td>
-            <td>
-              {{ d.estado }}
-              {% if d.estado in ['PENDIENTE','ACEPTADO_PARCIAL'] %}
-                — aceptaron {{ aceptos }}/2
-              {% endif %}
-            </td>
-            <td>
-              {% if d.partido and d.partido.estado == 'JUGADO' and d.partido.resultado %}
-                {% set g = d.partido.resultado.ganador_pareja_id %}
-                {% if g == d.pareja1_id %}
-                  Ganó: {{ d.partido.pareja1.jugador1.nombre_completo }} + {{ d.partido.pareja1.jugador2.nombre_completo }}
-                {% elif g == d.pareja2_id %}
-                  Ganó: {{ d.partido.pareja2.jugador1.nombre_completo }} + {{ d.partido.pareja2.jugador2.nombre_completo }}
-                {% else %}
-                  Ganador no identificado
-                {% endif %}
-                {% if d.partido.resultado.sets_text %} — {{ d.partido.resultado.sets_text }}{% endif %}
-              {% else %}
-                —
-              {% endif %}
-            </td>
-            <td>{{ d.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
-            <td>
-              {# --- Acciones --- #}
-
-              {# Rivales: mostrar "Responder" si está PENDIENTE o si está ACEPTADO_PARCIAL y ese rival aún no aceptó #}
-              {% if es_rival %}
-                {% if d.estado == 'PENDIENTE' or (d.estado == 'ACEPTADO_PARCIAL' and not yo_acepte) %}
-                  <a href="{{ url_for('desafios_responder', desafio_id=d.id) }}"><button>Responder</button></a>
-                {% endif %}
-              {% endif %}
-
-              {# Desafiante: aviso mientras espera #}
-              {% if es_desafiante and d.estado in ['PENDIENTE','ACEPTADO_PARCIAL'] %}
-                <span style="color:#777; margin-left:6px;">Esperando aceptación de los rivales… ({{ aceptos }}/2)</span>
-              {% endif %}
-
-              {# Programar partido: solo si ya está ACEPTADO (ambos aceptaron) y aún no hay partido #}
-              {% if not d.partido and d.estado == 'ACEPTADO' %}
-                <form method="post" action="{{ url_for('desafios_programar', desafio_id=d.id) }}" style="display:inline;">
-                  <button type="submit">Programar partido</button>
-                </form>
-              {% endif %}
-
-              {# Si ya hay partido pendiente → cargar resultado #}
-              {% if d.partido and d.partido.estado == 'PENDIENTE' %}
-                <a href="{{ url_for('partidos_resultado', partido_id=d.partido.id) }}"><button>Cargar resultado</button></a>
-              {% endif %}
-
-              {# Admin: eliminar desafío #}
-              {% if es_admin %}
-                <form method="post" action="{{ url_for('admin_desafios_eliminar', desafio_id=d.id) }}" style="display:inline; margin-left:6px;">
-                  <button type="submit" onclick="return confirm('¿Eliminar este desafío?')">Eliminar</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>Esta página está funcionando. Todavía no hay desafíos para mostrar.</p>
-  {% endif %}
-{% endblock %}
-
-{% block help_content %}
 <style>
-  /* ==== Modal de ayuda: contenedor BAJO y scroll en el contenedor (alineado con index/partidos/categorías) ==== */
-  .help-container{ display:flex; justify-content:center; width:100%; }
-  .help-wrap{
-    width: min(800px, 90vw);
-    margin: 0 auto;
-
-    /* Altura reducida + scroll único */
-    max-height: 62dvh;   /* si el modal padre ocupa más, bajar a 60dvh/58dvh */
-    max-height: 62vh;    /* fallback */
-    overflow: auto;
-    overscroll-behavior: contain;
-
-    position: relative;
-    background: transparent;
+  /* ===== Hero / cabecera (igual que Inicio) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
   }
-
-  /* Encabezado compacto y sticky */
-  .help-head{
-    position: sticky; top: 0; z-index: 2;
-    display:flex; align-items:center; gap:6px;
-    padding:6px 6px; margin-bottom:4px;
-    background: var(--bg, rgba(10,12,20,.96));
-    border-bottom:1px solid rgba(255,255,255,.06);
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
   }
-  .help-title{ margin:0; font-size: clamp(.92rem, 2vw, 1.02rem); }
-  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.78rem, 1.7vw, .88rem); }
-
-  /* Grilla sin desbordes */
-  .help-grid{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
-    gap:8px;
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
   }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  /* Tarjetas y texto compactos */
-  .help-card{
-    background: rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:10px;
-    padding:6px;
+  /* Chips */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
   }
-  .help-card h4{
-    display:flex; align-items:center; gap:6px;
-    margin:0 0 4px;
-    font-size: clamp(.88rem, 1.9vw, .96rem);
-  }
-  .help-card p, .help-card li{
-    margin:3px 0;
-    font-size: clamp(.78rem, 1.6vw, .86rem);
-    line-height:1.3;
-  }
-  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
 
-  .help-badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
-  .chip{ display:inline-block; padding:2px 7px; border-radius:999px; font-size:.76rem; border:1px solid #2a2f45; background:#1b2138;}
-  .chip.warn { background:#3b2f1b; border-color:#704d1a; }
-  .chip.info { background:#1b2f3b; border-color:#1a4d70; }
-  .chip.good { background:#1b3b2a; border-color:#1a704d; }
-  .chip.bad  { background:#3b1b1b; border-color:#701a1a; }
+  /* Botones coherentes */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+  .btn-danger{ background:#6d1a1a; color:#fff; }
 
-  .help-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
-  .help-actions a, .help-actions button {
-    padding:6px 10px; border-radius:8px; border:1px solid rgba(255,255,255,.12);
-    background: rgba(255,255,255,.04); color:inherit; text-decoration:none; font-size:.9rem;
+  /* ===== Tabla en card ===== */
+  .card{
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
   }
-  .help-actions a:hover, .help-actions button:hover { background: rgba(255,255,255,.08); }
+  .card.pad-0{ padding:0; }
+  .muted{ color:var(--muted,#98a2b3); }
 
-  .help-visual{
-    display:flex; align-items:center; justify-content:center;
-    background: rgba(255,255,255,.03);
-    border:1px dashed rgba(255,255,255,.12);
-    border-radius:10px; padding:6px;
+  .table-wrap{
+    --thead-h: 44px;
+    max-height:70vh; overflow:auto; border-radius:12px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0));
   }
-  .help-visual svg, .help-card img{ max-width:100%; height:auto; display:block; }
+  table.list{
+    width:100%; border-collapse:separate; border-spacing:0; margin:0;
+  }
+  thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  tbody td{ padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:middle; }
+  tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  tbody tr:hover{ background:rgba(138,232,12,.05); }
 
-  @media (max-width:540px){
-    .help-grid{ grid-template-columns: 1fr; }
-    .help-card h4 svg{ display:none; }
+  /* Badges */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; }
+  .badge-danger{ background:#6d1a1a; border-color:#9c2a2a; }
+
+  /* Responsive: ocultar columnas menos críticas */
+  @media (max-width:980px){
+    thead th:nth-child(5), tbody td:nth-child(5){ display:none; } /* Partido */
+    thead th:nth-child(7), tbody td:nth-child(7){ display:none; } /* Resultado */
+    thead th:nth-child(8), tbody td:nth-child(8){ display:none; } /* Creado */
+  }
+  @media (max-width:720px){
+    thead th:nth-child(3), tbody td:nth-child(3){ display:none; } /* Superior */
+    thead th:nth-child(6), tbody td:nth-child(6){ display:none; } /* Estado */
   }
 </style>
 
-<div class="help-container">
-  <div class="help-wrap">
-    <div class="help-head">
-      <h3 class="help-title">¿Cómo usar UPLAY en “Desafíos”?</h3>
-      <p class="help-sub">Guía rápida y visual</p>
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Desafíos</h1>
+      <p class="hero-tag">Reta a la categoría superior</p>
     </div>
-
-    <div class="help-grid">
-      <!-- ¿Qué estás viendo? -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" stroke="currentColor" opacity=".9"/>
-            <circle cx="12" cy="12" r="2" fill="currentColor" opacity=".9"/>
-          </svg>
-          ¿Qué estás viendo?
-        </h4>
-        <p>Listado de <strong>desafíos</strong> activos e históricos. Cada fila es un reto entre dos parejas y su estado.</p>
-        <div class="help-badges">
-          <span class="chip warn">PENDIENTE</span>
-          <span class="chip info">ACEPTADO_PARCIAL</span>
-          <span class="chip good">ACEPTADO</span>
-          <span class="chip good">PROGRAMADO</span>
-          <span class="chip bad">RECHAZADO / CANCELADO</span>
-          <span class="chip">JUGADO / FINALIZADO</span>
-        </div>
-      </section>
-
-      <!-- Columnas clave -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"/></svg>
-        Columnas clave
-      </h4>
-      <ul class="help-ul">
-        <li><strong>Origen</strong>: categoría del desafiante.</li>
-        <li><strong>Desafiante + Compañero</strong>: pareja que inicia.</li>
-        <li><strong>Superior</strong>: categoría objetivo.</li>
-        <li><strong>Rivales</strong>: en <em>PENDIENTE</em>/<em>ACEPTADO_PARCIAL</em> verás “aceptaron X/2”.</li>
-        <li><strong>Partido</strong>: ID + estado (si existe).</li>
-        <li><strong>Resultado</strong>: ganador y sets cuando está jugado.</li>
-      </ul>
-      </section>
-
-      <!-- Acciones según rol -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
-          Acciones según tu rol
-        </h4>
-        <ul class="help-ul">
-          <li><strong>Rival</strong>: si está <em>PENDIENTE</em> / <em>ACEPTADO_PARCIAL</em> y aún no respondiste → <strong>Responder</strong>.</li>
-          <li><strong>Desafiante</strong>: con 2/2 aceptaciones → <strong>Programar partido</strong>.</li>
-          <li><strong>Partido PENDIENTE</strong>: tras jugar → <strong>Cargar resultado</strong>.</li>
-          <li><strong>Admin</strong>: puede <strong>Eliminar</strong> si corresponde.</li>
-        </ul>
-        <div class="help-actions">
-          <a href="{{ url_for('desafios_new') }}">➕ Crear desafío</a>
-          <a href="{{ url_for('mi_panel') }}">🏠 Mi Panel</a>
-        </div>
-      </section>
-
-      <!-- Flujo en 4 pasos -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12h6l2-3 2 6 2-3h4" stroke="currentColor"/></svg>
-          Flujo en 4 pasos
-        </h4>
-        <ol class="help-ol">
-          <li>Crear desafío (pareja vs pareja de nivel superior).</li>
-          <li>Rivales aceptan (necesitás <strong>2/2</strong>).</li>
-          <li>Estado pasa a <strong>ACEPTADO</strong> → <em>Programar partido</em>.</li>
-          <li>Se juega → <em>Cargar resultado</em> (ganador y sets).</li>
-        </ol>
-      </section>
-
-      <!-- Ejemplo visual -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
-          Ejemplo visual
-        </h4>
-        <div class="help-visual">
-          <svg width="260" height="110" viewBox="0 0 280 120" aria-hidden="true">
-            <rect x="1" y="1" width="278" height="118" rx="10" fill="#0f172a" stroke="rgba(255,255,255,.12)"/>
-            <line x1="140" y1="6" x2="140" y2="114" stroke="rgba(255,255,255,.12)"/>
-            <circle cx="60" cy="40" r="12" fill="#22c55e"/>
-            <circle cx="100" cy="40" r="12" fill="#22c55e" opacity=".8"/>
-            <circle cx="180" cy="80" r="12" fill="#60a5fa"/>
-            <circle cx="220" cy="80" r="12" fill="#60a5fa" opacity=".8"/>
-            <path d="M110 40h40" stroke="#eab308" stroke-width="3"/>
-            <path d="M150 40l-8-6v12l8-6z" fill="#eab308"/>
-            <rect x="12" y="8" rx="6" ry="6" width="76" height="18" fill="#3b2f1b"/><text x="50" y="21" fill="#fff" font-size="10" text-anchor="middle">PENDIENTE</text>
-            <rect x="100" y="8" rx="6" ry="6" width="92" height="18" fill="#1b2f3b"/><text x="146" y="21" fill="#fff" font-size="10" text-anchor="middle">ACEPTADO_PARCIAL</text>
-            <rect x="204" y="8" rx="6" ry="6" width="64" height="18" fill="#1b3b2a"/><text x="236" y="21" fill="#fff" font-size="10" text-anchor="middle">ACEPTADO</text>
-          </svg>
-        </div>
-        <p class="muted" style="margin-top:4px;">Verde: desafiante + compañero · Celeste: rivales · Amarillo: desafío enviado</p>
-      </section>
-
-      <!-- Tips rápidos -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5 20l2-7L1 9h7l4-7z" stroke="currentColor"/></svg>
-          Tips rápidos
-        </h4>
-        <ul class="help-ul">
-          <li>¿No ves “Programar partido”? Falta una aceptación o ya existe un partido.</li>
-          <li>¿No ves “Responder”? Puede que no seas rival o ya respondiste.</li>
-          <li>Para seguir el progreso mirá “aceptaron X/2” en <em>Estado</em>.</li>
-        </ul>
-      </section>
+    <div class="hero-actions">
+      <a href="{{ url_for('desafios_new') }}" class="btn">Nuevo desafío</a>
+      <a href="{{ url_for('ranking') }}" class="btn-ghost btn-slim">Ver ranking</a>
     </div>
   </div>
+
+  <!-- Chips de contexto -->
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Total: {{ desafios|length if desafios else 0 }}</span>
+    {% if current_jugador %}
+      <span class="chip"><span class="dot dot-yellow"></span>Yo: {{ current_jugador.nombre_completo }}</span>
+      {% if current_jugador.categoria %}<span class="chip">Cat: {{ current_jugador.categoria.nombre }}</span>{% endif %}
+    {% endif %}
+  </div>
 </div>
+
+{% if desafios and desafios|length > 0 %}
+  <div class="card pad-0">
+    <div class="table-wrap">
+      <table class="list">
+        <thead>
+          <tr>
+            <th>Origen</th>
+            <th>Desafiante + Compañero</th>
+            <th>Superior</th>
+            <th>Rivales</th>
+            <th>Partido</th>
+            <th>Estado</th>
+            <th>Resultado</th>
+            <th>Creado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in desafios %}
+            {% set aceptos = (1 if d.rival1_acepto else 0) + (1 if d.rival2_acepto else 0) %}
+            {% set soy_r1 = (current_jugador and current_jugador.id == d.rival1_id) %}
+            {% set soy_r2 = (current_jugador and current_jugador.id == d.rival2_id) %}
+            {% set yo_acepte = (d.rival1_acepto if soy_r1 else (d.rival2_acepto if soy_r2 else False)) %}
+            {% set es_rival = (current_jugador and current_jugador.id in [d.rival1_id, d.rival2_id]) %}
+            {% set es_desafiante = (current_jugador and current_jugador.id == d.desafiante_id) %}
+            {% set es_admin = (current_jugador and current_jugador.is_admin) %}
+
+            <tr
+              data-desafio-id="{{ d.id }}"
+              data-estado="{{ d.estado or '' }}"
+              data-aceptos="{{ aceptos }}"
+              data-es-rival="{{ '1' if es_rival else '0' }}"
+              data-yo-acepte="{{ '1' if yo_acepte else '0' }}"
+              data-es-desafiante="{{ '1' if es_desafiante else '0' }}"
+              data-es-admin="{{ '1' if es_admin else '0' }}"
+              data-hay-partido="{{ '1' if d.partido else '0' }}"
+              data-partido-estado="{{ d.partido.estado if d.partido else '' }}"
+            >
+              <td>{{ d.categoria_origen.nombre if d.categoria_origen else '-' }}</td>
+              <td>{{ d.desafiante.nombre_completo }} + {{ d.companero.nombre_completo }}</td>
+              <td>{{ d.categoria_superior.nombre if d.categoria_superior else '-' }}</td>
+              <td>{{ d.rival1.nombre_completo }} + {{ d.rival2.nombre_completo }}</td>
+              <td>
+                {% if d.partido %}
+                  #{{ d.partido.id }} ({{ d.partido.estado }})
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                {{ d.estado }}
+                {% if d.estado in ['PENDIENTE','ACEPTADO_PARCIAL'] %}
+                  — aceptaron {{ aceptos }}/2
+                {% endif %}
+              </td>
+              <td>
+                {% if d.partido and d.partido.estado == 'JUGADO' and d.partido.resultado %}
+                  {% set g = d.partido.resultado.ganador_pareja_id %}
+                  {% if g == d.pareja1_id %}
+                    Ganó: {{ d.partido.pareja1.jugador1.nombre_completo }} + {{ d.partido.pareja1.jugador2.nombre_completo }}
+                  {% elif g == d.pareja2_id %}
+                    Ganó: {{ d.partido.pareja2.jugador1.nombre_completo }} + {{ d.partido.pareja2.jugador2.nombre_completo }}
+                  {% else %}
+                    Ganador no identificado
+                  {% endif %}
+                  {% if d.partido.resultado.sets_text %} — {{ d.partido.resultado.sets_text }}{% endif %}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>{{ d.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td style="white-space:nowrap;">
+                {# Rivales: Responder si corresponde #}
+                {% if es_rival and (d.estado == 'PENDIENTE' or (d.estado == 'ACEPTADO_PARCIAL' and not yo_acepte)) %}
+                  <a href="{{ url_for('desafios_responder', desafio_id=d.id) }}" class="btn btn-slim">Responder</a>
+                {% endif %}
+
+                {# Desafiante: aviso #}
+                {% if es_desafiante and d.estado in ['PENDIENTE','ACEPTADO_PARCIAL'] %}
+                  <span class="muted" style="margin-left:6px;">Esperando aceptación… ({{ aceptos }}/2)</span>
+                {% endif %}
+
+                {# Programar partido al quedar ACEPTADO (2/2) #}
+                {% if not d.partido and d.estado == 'ACEPTADO' %}
+                  <form method="post" action="{{ url_for('desafios_programar', desafio_id=d.id) }}" style="display:inline;">
+                    <button type="submit" class="btn btn-slim" style="margin-left:6px;">Programar partido</button>
+                  </form>
+                {% endif %}
+
+                {# Si ya hay partido PENDIENTE → cargar resultado #}
+                {% if d.partido and d.partido.estado == 'PENDIENTE' %}
+                  <a href="{{ url_for('partidos_resultado', partido_id=d.partido.id) }}" class="btn btn-ghost btn-slim" style="margin-left:6px;">Cargar resultado</a>
+                {% endif %}
+
+                {# Admin: eliminar #}
+                {% if es_admin %}
+                  <form method="post" action="{{ url_for('admin_desafios_eliminar', desafio_id=d.id) }}" style="display:inline; margin-left:6px;">
+                    <button type="submit" class="btn btn-danger btn-slim" onclick="return confirm('¿Eliminar este desafío?')">Eliminar</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="card"><p class="muted" style="margin:10px;">Esta página está funcionando. Todavía no hay desafíos para mostrar.</p></div>
+{% endif %}
+{% endblock %}
+
+{% block help_content %}
+{{ super() }}
 {% endblock %}

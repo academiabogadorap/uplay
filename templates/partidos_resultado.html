@@ -1,44 +1,142 @@
 {% extends "base.html" %}
 {% block title %}Proponer resultado{% endblock %}
+
 {% block content %}
-  <h2>Proponer resultado</h2>
+<style>
+  /* ===== Encabezado ===== */
+  .page-head{
+    display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    margin: 4px 0 10px;
+  }
+  .page-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.2px; }
+  .page-sub{ margin:0; color:var(--muted,#9fb3c8); }
 
-  <p><strong>Categoría:</strong> {{ partido.categoria.nombre if partido.categoria else '-' }}</p>
-  <p>
-    <strong>Pareja 1:</strong> {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}<br>
-    <strong>Pareja 2:</strong> {{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}
-  </p>
+  /* ===== Card contenido ===== */
+  .card-body{ display:grid; gap:10px; }
 
-  <form method="post">
-    <label>Pareja ganadora</label>
-    <div>
-      <label>
-        <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja1.id }}" required>
-        {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
-      </label>
-    </div>
-    <div>
-      <label>
-        <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja2.id }}" required>
-        {{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}
-      </label>
-    </div>
+  .row{
+    display:grid; gap:8px;
+    grid-template-columns: 1fr;
+  }
 
-    <label>Marcador (opcional)</label>
-    <input type="text" name="sets_text" placeholder="Ej: 6-4 3-6 10-7">
+  .field label{
+    display:block; margin-bottom:4px; color:var(--muted,#9fb3c8); font-weight:700; font-size:.92rem;
+  }
 
-    <button type="submit">Proponer resultado</button>
-  </form>
+  .radio-list{
+    display:grid; gap:8px;
+    padding:8px; border-radius:10px;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+  }
+  .radio-item{
+    display:flex; align-items:flex-start; gap:8px;
+    padding:6px 8px; border-radius:8px;
+    background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06);
+  }
+  .radio-item:hover{ background:rgba(138,232,12,.05); }
 
-  <div style="margin-top:10px; font-size:.95em; color:#444;">
-    <p>
-      <em>* Esto es una propuesta.</em> El partido quedará <strong>PENDIENTE</strong> con
-      <strong>resultado propuesto</strong> hasta que la otra pareja lo <strong>confirme</strong>.
-    </p>
-    <p>
-      Al confirmarse por ambas parejas, se actualizan los <strong>puntos individuales</strong>:
-      ganadores −10, perdedores +5, limitados al rango de la categoría
-      (no bajan de {{ partido.categoria.puntos_min }} ni suben de {{ partido.categoria.puntos_max }}).
-    </p>
+  .hint{ color:var(--muted,#9fb3c8); font-size:.92rem; margin:4px 0 0; }
+
+  /* Badges */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#e6edf3; }
+  .badge-info{ background:#1b2f3b; border-color:#1a4d70; color:#d6eaff; }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; color:#d7ffe9; }
+
+  /* Inputs */
+  input[type="text"]{
+    width:100%; height:38px; padding:6px 10px; border-radius:10px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text);
+  }
+
+  /* Footer informativo */
+  .note{
+    border:1px dashed rgba(255,255,255,.18);
+    background:rgba(255,255,255,.04);
+    border-radius:10px; padding:10px; color:var(--muted,#9fb3c8);
+  }
+</style>
+
+<!-- ===== Encabezado ===== -->
+<div class="page-head">
+  <div>
+    <h2 class="page-title">Proponer resultado</h2>
+    <p class="page-sub">Enviá una propuesta de ganador y (opcional) el marcador.</p>
   </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">Volver a partidos</a>
+  </div>
+</div>
+
+<!-- ===== Resumen del partido ===== -->
+<div class="card" style="margin-bottom:10px;">
+  <div class="card-body">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      {% if partido.categoria %}
+        <span class="badge badge-info">Categoría: {{ partido.categoria.nombre }}</span>
+      {% endif %}
+      <span class="badge">ID: #{{ partido.id }}</span>
+    </div>
+
+    <div class="row" style="margin-top:2px;">
+      <div class="field">
+        <label>Pareja 1</label>
+        <div><strong>{{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}</strong></div>
+      </div>
+      <div class="field">
+        <label>Pareja 2</label>
+        <div><strong>{{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}</strong></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Formulario ===== -->
+<div class="card">
+  {# IMPORTANTE: acotar el POST a este partido #}
+  <form method="post"
+        action="{{ url_for('partidos_resultado', partido_id=partido.id) }}"
+        class="card-body" novalidate>
+    {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <input type="hidden" name="partido_id" value="{{ partido.id }}">
+
+    <div class="field">
+      <label>Pareja ganadora</label>
+      <div class="radio-list" role="radiogroup" aria-label="Pareja ganadora">
+        <label class="radio-item">
+          <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja1.id }}" required>
+          <span>{{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}</span>
+        </label>
+        <label class="radio-item">
+          <input type="radio" name="ganador_pareja_id" value="{{ partido.pareja2.id }}" required>
+          <span>{{ partido.pareja2.jugador1.nombre_completo }} + {{ partido.pareja2.jugador2.nombre_completo }}</span>
+        </label>
+      </div>
+      <p class="hint">Elegí la pareja ganadora. La otra pareja podrá confirmar o rechazar la propuesta.</p>
+    </div>
+
+    <div class="field">
+      <label for="sets_text">Marcador (opcional)</label>
+      <input type="text" id="sets_text" name="sets_text" placeholder="Ej: 6-4 3-6 10-7" inputmode="text" autocomplete="off">
+      <p class="hint">Formato libre. Podés cargar sets tradicionales o super tie-break.</p>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+      <button type="submit" class="btn">Proponer resultado</button>
+      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Nota / reglas ===== -->
+<div class="note" style="margin-top:10px;">
+  <p style="margin:0 0 6px;">
+    <em>* Esto es una propuesta.</em> El partido quedará <strong>PENDIENTE</strong> con <strong>resultado propuesto</strong> hasta que la otra pareja lo <strong>confirme</strong>.
+  </p>
+  <p style="margin:0;">
+    Al confirmarse por ambas parejas, se actualizan los <strong>puntos individuales</strong>:
+    ganadores −10, perdedores +5, limitados al rango de la categoría
+    {% if partido.categoria %}(no bajan de {{ partido.categoria.puntos_min }} ni suben de {{ partido.categoria.puntos_max }}){% else %}(según el rango definido de la categoría){% endif %}.
+  </p>
+</div>
 {% endblock %}

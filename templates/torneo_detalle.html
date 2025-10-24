@@ -2,91 +2,179 @@
 {% block title %}{{ torneo.nombre }} — Detalle{% endblock %}
 
 {% block content %}
+<style>
+  /* ===== Hero / cabecera (igual que Inicio) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-<div class="container my-4">
-  <div class="d-flex align-items-center gap-3 mb-3">
-    <a href="{{ url_for('torneos_public_list') }}" class="btn btn-sm btn-outline-secondary">Volver a torneos</a>
-    <h1 class="h3 mb-0">{{ torneo.nombre }}</h1>
-    {% if torneo.categoria %}<span class="badge text-bg-secondary">{{ torneo.categoria.nombre }}</span>{% endif %}
-    {% if torneo.formato %}<span class="badge text-bg-info">{{ torneo.formato }}</span>{% endif %}
-    {% if torneo.tipo %}<span class="badge text-bg-light border">{{ torneo.tipo }}</span>{% endif %}
-    {% if torneo.es_publico %}<span class="badge text-bg-success">Público</span>{% else %}<span class="badge text-bg-dark">Privado</span>{% endif %}
-    {% if session.get('is_admin') %}
-      <a class="btn btn-sm btn-outline-primary ms-auto" href="{{ url_for('admin_torneos_view', tid=torneo.id) }}">Ver en admin</a>
-    {% endif %}
+  /* ===== Chips (mismas que Inicio) ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
+  .chip-ok{ background:rgba(26,173,90,.18); border-color:rgba(26,173,90,.32); }
+  .chip-warn{ background:rgba(255,199,0,.16); border-color:rgba(255,199,0,.28); }
+  .chip-dark{ background:rgba(0,0,0,.42); border-color:rgba(255,255,255,.14); }
+
+  /* ===== Tabs minimalistas (pills) ===== */
+  .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 12px; }
+  .tab{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:8px 12px; border-radius:10px; font-weight:800; letter-spacing:.02em; text-decoration:none;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); color:var(--text);
+  }
+  .tab:hover{ background:rgba(255,255,255,.12); }
+  .tab.active{ background:#111315; color:#fff; border-color:#111315; }
+
+  /* ===== Cards y tipografías ===== */
+  .section{ margin-top:12px; }
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12); background:linear-gradient(180deg, var(--panel), var(--panel-2)); }
+  .card-header{ padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.10); }
+  .card-body{ padding:12px; }
+  .muted{ color:var(--muted); }
+
+  /* ===== Definición en grilla para los datos ===== */
+  .dl-grid{ display:grid; grid-template-columns:180px 1fr; gap:10px 14px; }
+  @media (max-width: 680px){ .dl-grid{ grid-template-columns:1fr; } }
+
+  /* ===== Barra de progreso cupo ===== */
+  .progress{ height:8px; background:rgba(255,255,255,.12); border-radius:999px; overflow:hidden; }
+  .progress-bar{ height:100%; background:linear-gradient(90deg,#2f80ed,#56ccf2); }
+
+  /* ===== Botones (compatibles con tus clases globales) ===== */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">{{ torneo.nombre }}</h1>
+      <p class="hero-tag">Detalle del torneo</p>
+    </div>
+
+    <div class="hero-actions">
+      <a href="{{ url_for('torneos_public_list') }}" class="btn-ghost btn-slim">Volver a torneos</a>
+      {% if session.get('is_admin') %}
+        <a class="btn-ghost btn-slim" href="{{ url_for('admin_torneos_view', tid=torneo.id) }}">Ver en admin</a>
+      {% endif %}
+    </div>
   </div>
 
-  <!-- Nav de secciones del torneo (sin la pestaña "Inscripción") -->
-  <ul class="nav nav-tabs mb-3">
-    <li class="nav-item">
-      <a class="nav-link"
-         href="{{ url_for('torneo_public_fixture', torneo_id=torneo.id) }}">Fixture</a>
-    </li>
-    <li class="nav-item">
-      <a class="nav-link"
-         href="{{ url_for('torneo_public_tabla', torneo_id=torneo.id) }}">Tabla</a>
-    </li>
-  </ul>
+  <!-- Chips contextuales -->
+  <div class="chips">
+    {% if torneo.categoria %}
+      <span class="chip"><span class="dot dot-blue"></span>{{ torneo.categoria.nombre }}</span>
+    {% endif %}
+    {% if torneo.formato %}
+      <span class="chip"><span class="dot dot-yellow"></span>{{ torneo.formato }}</span>
+    {% endif %}
+    {% if torneo.tipo %}
+      <span class="chip">{{ torneo.tipo }}</span>
+    {% endif %}
+    {% if torneo.es_publico %}
+      <span class="chip chip-ok">Público</span>
+    {% else %}
+      <span class="chip chip-dark">Privado</span>
+    {% endif %}
+    {% if torneo.inscripciones_abiertas %}
+      <span class="chip chip-ok"><span class="dot dot-green"></span>Inscripciones abiertas</span>
+    {% else %}
+      <span class="chip"><span class="dot dot-blue"></span>Inscripciones cerradas</span>
+    {% endif %}
+    {% if torneo.inscripcion_libre %}
+      <span class="chip">Auto-inscripción</span>
+    {% else %}
+      <span class="chip chip-warn">Con aprobación</span>
+    {% endif %}
+  </div>
+</div>
 
-  <div class="row g-4">
-    <div class="col-lg-8">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <dl class="row mb-0">
-            <dt class="col-sm-4">Estado</dt>
-            <dd class="col-sm-8">
-              {{ torneo.estado }}
-              {% if torneo.inscripciones_abiertas %}
-                <span class="badge rounded-pill text-bg-success ms-2">Inscripciones abiertas</span>
-              {% else %}
-                <span class="badge rounded-pill text-bg-secondary ms-2">Inscripciones cerradas</span>
+<!-- ===== TABS ===== -->
+<nav class="tabs" aria-label="Secciones del torneo">
+  <a class="tab" href="{{ url_for('torneo_public_fixture', torneo_id=torneo.id) }}">Fixture</a>
+  <a class="tab" href="{{ url_for('torneo_public_tabla', torneo_id=torneo.id) }}">Tabla</a>
+  <span class="tab active" aria-current="page">Detalle</span>
+</nav>
+
+<!-- ===== CONTENIDO ===== -->
+<div class="row g-4">
+  <div class="col-lg-8">
+    <!-- Información general -->
+    <section class="card">
+      <div class="card-header"><strong>Información general</strong></div>
+      <div class="card-body">
+        <div class="dl-grid">
+          <div class="muted">Estado</div>
+          <div><strong>{{ torneo.estado }}</strong></div>
+
+          <div class="muted">Fecha de inicio</div>
+          <div>{{ torneo.fecha_inicio or 'A confirmar' }}</div>
+
+          <div class="muted">Sede</div>
+          <div>{{ torneo.sede or '-' }}</div>
+
+          <div class="muted">Inscripciones</div>
+          <div>
+            {% if torneo.inscripciones_abiertas %}Abiertas{% else %}Cerradas{% endif %}
+            {% if torneo.cupo_max %}
+              — Cupo: {{ total_inscriptos }}/{{ torneo.cupo_max }}
+              {% if cupo_disponible is not none %}
+                <small class="muted">(quedan {{ cupo_disponible }})</small>
               {% endif %}
-              {% if torneo.inscripcion_libre %}
-                <span class="badge rounded-pill text-bg-primary ms-1">Auto-inscripción</span>
-              {% else %}
-                <span class="badge rounded-pill text-bg-warning ms-1">Con aprobación</span>
-              {% endif %}
-            </dd>
+              {% set cupo = torneo.cupo_max|int if torneo.cupo_max else 0 %}
+              {% set pct = (total_inscriptos * 100 // cupo) if cupo > 0 else 0 %}
+              <div class="progress" role="progressbar" aria-label="Cupo ocupado" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100" style="margin-top:8px;">
+                <div class="progress-bar" style="width: {{ pct }}%"></div>
+              </div>
+              <small class="muted">{{ pct }}% del cupo utilizado</small>
+            {% endif %}
+          </div>
 
-            <dt class="col-sm-4">Fecha de inicio</dt>
-            <dd class="col-sm-8">{{ torneo.fecha_inicio or 'A confirmar' }}</dd>
-
-            <dt class="col-sm-4">Sede</dt>
-            <dd class="col-sm-8">{{ torneo.sede or '-' }}</dd>
-
-            <dt class="col-sm-4">Inscripciones</dt>
-            <dd class="col-sm-8">
-              {% if torneo.inscripciones_abiertas %}Abiertas{% else %}Cerradas{% endif %}
-              {% if torneo.cupo_max %}
-                — Cupo: {{ total_inscriptos }}/{{ torneo.cupo_max }}
-                {% if cupo_disponible is not none %}
-                  <small class="text-muted">(quedan {{ cupo_disponible }})</small>
-                {% endif %}
-                {% set cupo = torneo.cupo_max|int if torneo.cupo_max else 0 %}
-                {% set pct = (total_inscriptos * 100 // cupo) if cupo > 0 else 0 %}
-                <div class="progress mt-2" role="progressbar" aria-label="Cupo ocupado" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
-                  <div class="progress-bar" style="width: {{ pct }}%">{{ pct }}%</div>
-                </div>
-              {% endif %}
-            </dd>
-
-            <dt class="col-sm-4">Notas</dt>
-            <dd class="col-sm-8">{{ torneo.notas or '-' }}</dd>
-          </dl>
+          <div class="muted">Notas</div>
+          <div>{{ torneo.notas or '-' }}</div>
         </div>
       </div>
+    </section>
 
-      <!-- === Lista de inscriptos === -->
-      <div class="card shadow-sm mt-4">
-        <div class="card-header bg-light d-flex align-items-center justify-content-between">
-          <strong>Inscriptos ({{ total_inscriptos }})</strong>
-          {% if torneo.cupo_max %}
-            <small class="text-muted">Cupo {{ total_inscriptos }}/{{ torneo.cupo_max }}</small>
-          {% endif %}
-        </div>
-        <div class="card-body p-0">
+    <!-- Inscriptos -->
+    <section class="card section">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <strong>Inscriptos ({{ total_inscriptos }})</strong>
+        {% if torneo.cupo_max %}
+          <small class="muted">Cupo {{ total_inscriptos }}/{{ torneo.cupo_max }}</small>
+        {% endif %}
+      </div>
+      <div class="card-body" style="padding:0;">
+        <div class="table-responsive">
           <table class="table table-sm mb-0 align-middle">
-            <thead>
+            <thead class="table-light">
               <tr>
                 <th style="width:48px;">#</th>
                 <th>Jugador/es</th>
@@ -100,7 +188,7 @@
                 {% set j1 = ins.jugador1 %}
                 {% set j2 = ins.jugador2 %}
                 <tr>
-                  <td class="text-muted">{{ loop.index }}</td>
+                  <td class="muted">{{ loop.index }}</td>
                   <td>
                     {% if torneo.es_dobles() and j2 %}
                       {{ j1.nombre_completo }} &amp; {{ j2.nombre_completo }}
@@ -110,101 +198,99 @@
                   </td>
                   <td>{{ ins.alias or '-' }}</td>
                   <td>{{ ins.club or '-' }}</td>
-                  <td class="text-muted">
+                  <td class="muted">
                     {% if ins.created_at %}{{ ins.created_at.strftime("%Y-%m-%d %H:%M") }}{% else %}-{% endif %}
                   </td>
                 </tr>
               {% else %}
-                <tr><td colspan="5" class="text-center py-3 text-muted">Aún no hay inscriptos.</td></tr>
+                <tr><td colspan="5" class="text-center py-3 muted">Aún no hay inscriptos.</td></tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
-    </div>
+    </section>
+  </div>
 
-    <div class="col-lg-4">
-      {% with msgs = get_flashed_messages(with_categories=true) %}
-        {% if msgs %}
-          {% for cat, msg in msgs %}
-            <div class="alert alert-{{ 'danger' if cat in ['error','danger'] else ('success' if cat in ['ok','success'] else 'info') }} mb-3">
-              {{ msg }}
-            </div>
-          {% endfor %}
-        {% endif %}
-      {% endwith %}
+  <!-- Lateral: mensajes + inscripción -->
+  <div class="col-lg-4">
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% if msgs %}
+        {% for cat, msg in msgs %}
+          <div class="alert alert-{{ 'danger' if cat in ['error','danger'] else ('success' if cat in ['ok','success'] else 'info') }} mb-3">
+            {{ msg }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
 
-      <section id="inscripcion" class="card shadow-sm">
-        <div class="card-header bg-primary text-white">
-          <strong>Inscribirme</strong>
-        </div>
-        <div class="card-body">
-          {% if not puede_inscribirse %}
-            <p class="text-muted mb-0">Este torneo no admite inscripciones en este momento.</p>
+    <section id="inscripcion" class="card">
+      <div class="card-header" style="background:#111315; color:#fff;">
+        <strong>Inscribirme</strong>
+      </div>
+      <div class="card-body">
+        {% if not puede_inscribirse %}
+          <p class="muted mb-0">Este torneo no admite inscripciones en este momento.</p>
+        {% else %}
+          {% if not current_jugador or not current_jugador.activo %}
+            <p class="mb-2">Para inscribirte necesitás <a href="{{ url_for('login') }}">iniciar sesión</a> con un jugador activo.</p>
           {% else %}
-            {% if not current_jugador or not current_jugador.activo %}
-              <p class="mb-2">Para inscribirte necesitás <a href="{{ url_for('login') }}">iniciar sesión</a> con un jugador activo.</p>
-            {% else %}
-              {% if torneo.es_dobles() and (not jugadores_activos or jugadores_activos|length == 0) %}
-                <div class="alert alert-warning">
-                  No hay compañeros disponibles para seleccionar. Pedile a tu compañero que se active/registre.
+            {% if torneo.es_dobles() and (not jugadores_activos or jugadores_activos|length == 0) %}
+              <div class="alert alert-warning">
+                No hay compañeros disponibles para seleccionar. Pedile a tu compañero que se active/registre.
+              </div>
+            {% endif %}
+
+            <form action="{{ url_for('torneo_inscribirme', tid=torneo.id) }}"
+                  method="post"
+                  class="vstack gap-3"
+                  onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+              {% if csrf_token is defined %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% endif %}
+
+              {% if torneo.es_dobles() %}
+                <div>
+                  <label class="form-label">Compañero</label>
+                  <select name="companero_id" class="form-select" {% if not jugadores_activos or jugadores_activos|length==0 %}disabled{% else %}required{% endif %}>
+                    <option value="">Seleccioná un jugador…</option>
+                    {% for jug in jugadores_activos %}
+                      <option value="{{ jug.id }}">{{ jug.nombre_completo }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="form-text">No podés elegirte a vos mismo.</div>
                 </div>
               {% endif %}
 
-              <form action="{{ url_for('torneo_inscribirme', tid=torneo.id) }}"
-                    method="post"
-                    class="vstack gap-3"
-                    onsubmit="this.querySelector('button[type=submit]').disabled=true;">
-                {% if csrf_token is defined %}
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                {% endif %}
+              <div>
+                <label class="form-label">Alias (opcional)</label>
+                <input type="text" name="alias" class="form-control" maxlength="80" placeholder="Equipo Los Pibes / Tu apodo" autocomplete="nickname">
+              </div>
 
-                {% if torneo.es_dobles() %}
-                  <div>
-                    <label class="form-label">Compañero</label>
-                    <select name="companero_id" class="form-select" {% if not jugadores_activos or jugadores_activos|length==0 %}disabled{% else %}required{% endif %}>
-                      <option value="">Seleccioná un jugador…</option>
-                      {% for jug in jugadores_activos %}
-                        <option value="{{ jug.id }}">{{ jug.nombre_completo }}</option>
-                      {% endfor %}
-                    </select>
-                    <div class="form-text">No podés elegirte a vos mismo.</div>
-                  </div>
-                {% endif %}
+              <div>
+                <label class="form-label">Club (opcional)</label>
+                <input type="text" name="club" class="form-control" maxlength="80" placeholder="Tu club" autocomplete="organization">
+              </div>
 
-                <div>
-                  <label class="form-label">Alias (opcional)</label>
-                  <input type="text" name="alias" class="form-control" maxlength="80" placeholder="Equipo Los Pibes / Tu apodo" autocomplete="nickname">
-                </div>
+              <div>
+                <label class="form-label">Disponibilidad (opcional)</label>
+                <input type="text" name="disponibilidad" class="form-control" maxlength="120" placeholder="Días/horarios preferidos" autocomplete="off">
+              </div>
 
-                <div>
-                  <label class="form-label">Club (opcional)</label>
-                  <input type="text" name="club" class="form-control" maxlength="80" placeholder="Tu club" autocomplete="organization">
-                </div>
+              <div class="d-flex gap-2">
+                <button type="submit" class="btn flex-fill"
+                        {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}disabled{% endif %}>
+                  {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}Sin cupo{% else %}Inscribirme{% endif %}
+                </button>
+                <a class="btn-ghost btn-slim" href="{{ url_for('torneos_public_list') }}">Volver</a>
+              </div>
 
-                <div>
-                  <label class="form-label">Disponibilidad (opcional)</label>
-                  <input type="text" name="disponibilidad" class="form-control" maxlength="120" placeholder="Días/horarios preferidos" autocomplete="off">
-                </div>
-
-                <div class="d-flex gap-2">
-                  <button type="submit" class="btn btn-primary flex-fill"
-                          {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}
-                            disabled
-                          {% endif %}>
-                    {% if torneo.cupo_max and cupo_disponible is not none and cupo_disponible <= 0 %}Sin cupo{% else %}Inscribirme{% endif %}
-                  </button>
-                  <a class="btn btn-outline-secondary" href="{{ url_for('torneos_public_list') }}">Volver</a>
-                </div>
-
-                <small class="text-muted">Inscripción sujeta a cupo y validaciones del torneo.</small>
-              </form>
-            {% endif %}
+              <small class="muted">Inscripción sujeta a cupo y validaciones del torneo.</small>
+            </form>
           {% endif %}
-        </div>
-      </section>
-    </div>
+        {% endif %}
+      </div>
+    </section>
   </div>
 </div>
-
 {% endblock %}

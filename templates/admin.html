@@ -1,95 +1,204 @@
 {% extends "base.html" %}
 {% block title %}Panel Admin{% endblock %}
 {% block content %}
-  <h2>Panel de administrador</h2>
+<style>
+  /* ===== Hero ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{ display:flex; gap:8px; flex-wrap:wrap; }
 
-  <div style="display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:12px 0;">
+  /* Pills útiles */
+  .pill{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 12px; border-radius:999px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
+    text-decoration:none; font-weight:800;
+    color:#f2f7ff !important; text-shadow:0 1px 0 rgba(0,0,0,.35);
+  }
+  .pill:hover{ background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.28); }
 
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Jugadores</h3>
-      <p>Activos: <strong>{{ counts.jugadores_activos }}</strong></p>
-      <p>Inactivos: <strong>{{ counts.jugadores_inactivos }}</strong></p>
-      <a href="{{ url_for('jugadores_list') }}"><button>Gestionar</button></a>
+  /* Chips */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
+
+  /* Cards */
+  .grid-cards{
+    display:grid; gap:10px; margin-top:12px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items:stretch;
+  }
+  .card{
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    padding:12px; box-sizing:border-box;
+  }
+  .card h3{ margin:0 0 6px; font-size:1.02rem; }
+  .stat{ font-size:clamp(1.1rem, 2.8vw, 1.4rem); font-weight:800; }
+  .muted{ color:var(--muted,#98a2b3); }
+
+  /* Botones */
+  .btn{ cursor:pointer; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* Listas recientes */
+  .split{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:760px){ .split{ grid-template-columns:1fr; } }
+  .list{ margin:0; padding-left:18px; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Panel de administrador</h1>
+      <p class="hero-tag">Gestión rápida · visión general</p>
     </div>
-
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Categorías</h3>
-      <p>Total: <strong>{{ counts.categorias }}</strong></p>
-      <a href="{{ url_for('categorias_list') }}"><button>Ver/Editar</button></a>
-    </div>
-
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Partidos</h3>
-      <p>Pendientes: <strong>{{ counts.partidos_pend }}</strong></p>
-      <p>Jugados: <strong>{{ counts.partidos_jug }}</strong></p>
-      <a href="{{ url_for('partidos_list') }}"><button>Ver todos</button></a>
-    </div>
-
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Partidos abiertos</h3>
-      <p>Abiertos/llenos: <strong>{{ counts.abiertos }}</strong></p>
-      <a href="{{ url_for('abiertos_list') }}"><button>Gestionar</button></a>
-    </div>
-
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Desafíos</h3>
-      <p>Pendientes/Aceptados: <strong>{{ counts.desafios_pend }}</strong></p>
-      <a href="{{ url_for('desafios_list') }}"><button>Ver lista</button></a>
-    </div>
-
-    <!-- NUEVO: Solicitudes de alta -->
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Solicitudes de alta</h3>
-      <p>Pendientes: <strong>{{ counts.solicitudes_pend }}</strong></p>
-      <a href="{{ url_for('admin_solicitudes_list') }}"><button>Revisar</button></a>
-    </div>
-
-    <!-- NUEVO: Torneos -->
-    <div style="border:1px solid #ddd; padding:10px; border-radius:8px;">
-      <h3 style="margin:0 0 6px;">Torneos</h3>
-      <p>Total: 
-        <strong>
-          {% if counts is defined and counts.torneos is defined %}
-            {{ counts.torneos }}
-          {% else %}
-            -
-          {% endif %}
-        </strong>
-      </p>
-      <a href="{{ url_for('admin_torneos_list') }}"><button>Gestionar</button></a>
-    </div>
-
-  </div>
-
-  <div style="border:1px solid #ddd; padding:10px; border-radius:8px; margin-top:8px;">
-    <h3 style="margin:0 0 6px;">Actividad reciente</h3>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-      <div>
-        <h4 style="margin:0 0 6px;">Últimos partidos</h4>
-        {% if recientes_partidos %}
-          <ul style="margin:0; padding-left:18px;">
-            {% for m in recientes_partidos %}
-              <li>#{{ m.id }} — {{ m.categoria.nombre if m.categoria else '-' }} — {{ m.estado }}
-                {% if m.fecha %} — {{ m.fecha.strftime('%Y-%m-%d %H:%M') }}{% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p>Sin partidos recientes.</p>
-        {% endif %}
-      </div>
-      <div>
-        <h4 style="margin:0 0 6px;">Últimos abiertos</h4>
-        {% if recientes_abiertos %}
-          <ul style="margin:0; padding-left:18px;">
-            {% for pa in recientes_abiertos %}
-              <li>#{{ pa.id }} — {{ pa.categoria.nombre if pa.categoria else '-' }} — {{ pa.estado }} — Inscriptos: {{ pa.inscriptos|length }}/4</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p>Sin abiertos recientes.</p>
-        {% endif %}
-      </div>
+    <div class="hero-actions">
+      <a class="pill" href="{{ url_for('mi_panel') }}">Volver a Mi panel</a>
+      <a class="pill" href="{{ url_for('admin_torneos_list') }}">Torneos</a>
+      <a class="pill" href="{{ url_for('jugadores_list') }}">Jugadores</a>
+      <a class="pill" href="{{ url_for('partidos_list') }}">Partidos</a>
     </div>
   </div>
+
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Admins: {{ 1 }}</span>
+    <span class="chip"><span class="dot dot-yellow"></span>Entidades activas</span>
+    <span class="chip"><span class="dot dot-green"></span>OK</span>
+  </div>
+</div>
+
+<!-- ===== TARJETAS PRINCIPALES ===== -->
+<div class="grid-cards">
+  <div class="card">
+    <h3>Jugadores</h3>
+    <p class="muted">Activos / Inactivos</p>
+    <div class="stat">{{ counts.jugadores_activos }} / {{ counts.jugadores_inactivos }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost btn-slim">Gestionar</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Categorías</h3>
+    <p class="muted">Total</p>
+    <div class="stat">{{ counts.categorias }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('categorias_list') }}" class="btn btn-ghost btn-slim">Ver / Editar</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Partidos</h3>
+    <p class="muted">Pendientes / Jugados</p>
+    <div class="stat">{{ counts.partidos_pend }} / {{ counts.partidos_jug }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">Ver todos</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Partidos abiertos</h3>
+    <p class="muted">Abiertos o llenos</p>
+    <div class="stat">{{ counts.abiertos }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('abiertos_list') }}" class="btn btn-ghost btn-slim">Gestionar</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Desafíos</h3>
+    <p class="muted">Pendientes / Aceptados</p>
+    <div class="stat">{{ counts.desafios_pend }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost btn-slim">Ver lista</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Solicitudes de alta</h3>
+    <p class="muted">Pendientes</p>
+    <div class="stat">{{ counts.solicitudes_pend }}</div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('admin_solicitudes_list') }}" class="btn btn-ghost btn-slim">Revisar</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Torneos</h3>
+    <p class="muted">Total</p>
+    <div class="stat">
+      {% if counts is defined and counts.torneos is defined %}
+        {{ counts.torneos }}
+      {% else %}-{% endif %}
+    </div>
+    <div style="margin-top:8px;">
+      <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Gestionar</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ACTIVIDAD RECIENTE ===== -->
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin:0 0 6px;">Actividad reciente</h3>
+  <div class="split">
+    <div>
+      <h4 style="margin:0 0 6px;">Últimos partidos</h4>
+      {% if recientes_partidos %}
+        <ul class="list">
+          {% for m in recientes_partidos %}
+            <li>
+              #{{ m.id }} — {{ m.categoria.nombre if m.categoria else '-' }} — {{ m.estado }}
+              {% if m.fecha %} — {{ m.fecha|localdt('%Y-%m-%d %H:%M') }}{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">Sin partidos recientes.</p>
+      {% endif %}
+    </div>
+
+    <div>
+      <h4 style="margin:0 0 6px;">Últimos abiertos</h4>
+      {% if recientes_abiertos %}
+        <ul class="list">
+          {% for pa in recientes_abiertos %}
+            <li>
+              #{{ pa.id }} — {{ pa.categoria.nombre if pa.categoria else '-' }} — {{ pa.estado }}
+              — Inscriptos: {{ pa.inscriptos|length }}/4
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">Sin abiertos recientes.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}

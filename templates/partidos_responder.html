@@ -2,155 +2,176 @@
 {% block title %}Responder invitación{% endblock %}
 {% block content %}
 
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Responder invitación</h2>
+<!-- ===== Encabezado compacto (alineado con el resto) ===== -->
+<div style="display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:4px 0 10px;">
+  <div>
+    <h2 style="margin:0; font-family:'Poppins',system-ui; font-weight:800; letter-spacing:.2px;">Responder invitación</h2>
+    <p class="muted" style="margin:0;">Revisá los detalles y elegí si aceptás o rechazás.</p>
   </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">Volver a partidos</a>
+  </div>
+</div>
 
-  {# --- Tooltip CSS mínimo, igual al de la lista --- #}
-  <style>
-    .hint-chip{position:relative; display:inline-block;}
-    .hint-chip .badge{cursor:help;}
-    .hint-chip::after{
-      content: attr(data-hint);
-      position:absolute; left:0; top:calc(100% + 6px);
-      background:#111; color:#fff; border-radius:8px; padding:8px 10px;
-      box-shadow:0 6px 18px rgba(0,0,0,.35);
-      font-size:.9em; white-space:pre-wrap; max-width:380px; line-height:1.25;
-      opacity:0; transform:translateY(-4px); pointer-events:none; transition:.15s ease;
-      z-index:20;
-    }
-    .hint-chip:hover::after,
-    .hint-chip:focus-within::after{ opacity:1; transform:translateY(0); }
-  </style>
+{# --- Tooltip y badges mínimos (mismos tonos que otras vistas) --- #}
+<style>
+  .hint-chip{position:relative; display:inline-block;}
+  .hint-chip .badge{cursor:help;}
+  .hint-chip::after{
+    content: attr(data-hint);
+    position:absolute; left:0; top:calc(100% + 6px);
+    background:#111; color:#fff; border-radius:8px; padding:8px 10px;
+    box-shadow:0 6px 18px rgba(0,0,0,.35);
+    font-size:.9em; white-space:pre-wrap; max-width:380px; line-height:1.25;
+    opacity:0; transform:translateY(-4px); pointer-events:none; transition:.15s ease;
+    z-index:20;
+  }
+  .hint-chip:hover::after,
+  .hint-chip:focus-within::after{ opacity:1; transform:translateY(0); }
 
-  {# ==== Helpers de estado/flags para tooltips ==== #}
-  {% set requiere_inv = (partido.rival1_id is not none and partido.rival2_id is not none) %}
-  {% set r1_ok = (partido.rival1_acepto in [True, 1, '1']) %}
-  {% set r2_ok = (partido.rival2_acepto in [True, 1, '1']) %}
-  {% set ambos_ok = r1_ok and r2_ok %}
+  /* Colores de badges consistentes y legibles en dark */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#e6edf3; }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; color:#d7ffe9; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; color:#ffecc7; }
+  .badge-danger{ background:#3b1b1b; border-color:#701a1a; color:#ffe1e1; }
+</style>
 
-  {% set faltan = [] %}
-  {% if requiere_inv and not ambos_ok %}
-    {% if (partido.rival1_acepto is none or partido.rival1_acepto in [False,0,'0']) and partido.rival1 %}
-      {% set _ = faltan.append(partido.rival1.nombre_completo) %}
-    {% endif %}
-    {% if (partido.rival2_acepto is none or partido.rival2_acepto in [False,0,'0']) and partido.rival2 %}
-      {% set _ = faltan.append(partido.rival2.nombre_completo) %}
-    {% endif %}
+{# ==== Helpers de estado/flags para tooltips ==== #}
+{% set requiere_inv = (partido.rival1_id is not none and partido.rival2_id is not none) %}
+{% set r1_ok = (partido.rival1_acepto in [True, 1, '1']) %}
+{% set r2_ok = (partido.rival2_acepto in [True, 1, '1']) %}
+{% set ambos_ok = r1_ok and r2_ok %}
+
+{% set faltan = [] %}
+{% if requiere_inv and not ambos_ok %}
+  {% if (partido.rival1_acepto is none or partido.rival1_acepto in [False,0,'0']) and partido.rival1 %}
+    {% set _ = faltan.append(partido.rival1.nombre_completo) %}
   {% endif %}
-  {% set faltan_str = faltan|join(', ') %}
-
-  {% set estado = partido.estado %}
-  {% set badge_cls = 'badge' %}
-  {% if estado == 'JUGADO' %}{% set badge_cls = 'badge badge-ok' %}
-  {% elif estado in ['PENDIENTE','PROPUESTO','POR_CONFIRMAR','ACEPTADO'] %}{% set badge_cls = 'badge badge-warn' %}
-  {% elif estado in ['CANCELADO','EN_REVISION'] %}{% set badge_cls = 'badge badge-danger' %}
+  {% if (partido.rival2_acepto is none or partido.rival2_acepto in [False,0,'0']) and partido.rival2 %}
+    {% set _ = faltan.append(partido.rival2.nombre_completo) %}
   {% endif %}
+{% endif %}
+{% set faltan_str = faltan|join(', ') %}
 
-  <!-- Resumen del partido -->
-  <div class="card" style="margin-bottom:10px;">
-    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-      <div>
-        <div class="muted">Rivales propuestos</div>
-        <strong>
-          {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
-        </strong>
-      </div>
+{% set estado = partido.estado %}
+{% set badge_cls = 'badge' %}
+{% if estado == 'JUGADO' %}{% set badge_cls = 'badge badge-ok' %}
+{% elif estado in ['PENDIENTE','PROPUESTO','POR_CONFIRMAR','ACEPTADO'] %}{% set badge_cls = 'badge badge-warn' %}
+{% elif estado in ['CANCELADO','EN_REVISION'] %}{% set badge_cls = 'badge badge-danger' %}
+{% endif %}
 
-      <div style="flex:1"></div>
-
-      <div>
-        {% if partido.categoria %}
-          <span class="badge" title="Categoría">{{ partido.categoria.nombre }}</span>
-        {% endif %}
-        {% if partido.fecha %}
-          {# si tenés el filtro localdt, usalo; si no, caé en strftime #}
-          {% if partido.fecha.__class__.__name__ == 'datetime' and partido.fecha|default(None) %}
-            <span class="badge" title="Fecha">
-              {{ partido.fecha|localdt('%Y-%m-%d %H:%M') if 'localdt' in globals() else partido.fecha.strftime('%Y-%m-%d %H:%M') }}
-            </span>
-          {% else %}
-            <span class="badge" title="Fecha">{{ partido.fecha }}</span>
-          {% endif %}
-        {% endif %}
-
-        <span class="{{ badge_cls }}" title="Estado">{{ estado }}</span>
-
-        {% if requiere_inv and not ambos_ok %}
-          <span class="hint-chip badge badge-warn" data-hint="{{ 'Faltan aceptar: ' ~ faltan_str }}">
-            falta aceptación
-          </span>
-        {% elif ambos_ok and estado in ['PENDIENTE','ACEPTADO'] %}
-          <span class="badge badge-ok">rivales aceptaron</span>
-        {% endif %}
-      </div>
+<!-- ===== Resumen del partido ===== -->
+<div class="card" style="margin-bottom:10px;">
+  <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+    <div>
+      <div class="muted">Rivales propuestos</div>
+      <strong>
+        {{ partido.pareja1.jugador1.nombre_completo }} + {{ partido.pareja1.jugador2.nombre_completo }}
+      </strong>
     </div>
-  </div>
 
-  <!-- Tu lado -->
-  <div class="card" style="max-width:720px;">
-    <div style="margin-bottom:8px;">
-      <div class="muted" style="margin-bottom:4px;">Tu lado</div>
-      {% if mi_compa %}
-        <div><strong>Vos + {{ mi_compa.nombre_completo }}</strong></div>
-      {% else %}
-        <div><strong>Vos</strong> + <span class="muted">(elegí un compañero)</span></div>
+    <div style="flex:1"></div>
+
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      {% if partido.categoria %}
+        <span class="badge" title="Categoría">{{ partido.categoria.nombre }}</span>
+      {% endif %}
+
+      {% if partido.fecha %}
+        {# si tenés el filtro localdt, usalo; si no, caé en strftime #}
+        {% if partido.fecha.__class__.__name__ == 'datetime' and partido.fecha|default(None) %}
+          <span class="badge" title="Fecha">
+            {{ partido.fecha|localdt('%Y-%m-%d %H:%M') if 'localdt' in globals() else partido.fecha.strftime('%Y-%m-%d %H:%M') }}
+          </span>
+        {% else %}
+          <span class="badge" title="Fecha">{{ partido.fecha }}</span>
+        {% endif %}
+      {% endif %}
+
+      <span class="{{ badge_cls }}" title="Estado">{{ estado }}</span>
+
+      {% if requiere_inv and not ambos_ok %}
+        <span class="hint-chip">
+          <span class="badge badge-warn">Falta aceptación</span>
+          <span class="sr-only">Faltan aceptar: {{ faltan_str }}</span>
+        </span>
+      {% elif ambos_ok and estado in ['PENDIENTE','ACEPTADO'] %}
+        <span class="badge badge-ok">Rivales aceptaron</span>
       {% endif %}
     </div>
+  </div>
+</div>
 
-    <form method="post">
-      {# --- Selector de compañero --- #}
-      {% if mi_compa %}
-        <div class="card" style="padding:8px; margin:8px 0;">
-          <label style="display:inline-flex; align-items:center; gap:6px;">
-            <input type="checkbox" id="toggle-cambiar"
-                   onclick="document.getElementById('cambiar-box').style.display=this.checked?'block':'none'">
-            Quiero cambiar de compañero
-          </label>
+<!-- ===== Tu lado / respuesta ===== -->
+<div class="card" style="max-width:720px;">
+  <div style="margin-bottom:8px;">
+    <div class="muted" style="margin-bottom:4px;">Tu lado</div>
+    {% if mi_compa %}
+      <div><strong>Vos + {{ mi_compa.nombre_completo }}</strong></div>
+    {% else %}
+      <div><strong>Vos</strong> + <span class="muted">(elegí un compañero)</span></div>
+    {% endif %}
+  </div>
 
-          <div id="cambiar-box" style="display:none; margin-top:8px;">
-            <label for="partner_id" class="muted">Elegí nuevo compañero (misma categoría):</label><br>
-            <select id="partner_id" name="partner_id" style="min-width:260px;">
-              <option value="{{ mi_compa.id }}">Mantener: {{ mi_compa.nombre_completo }}</option>
-              {% for it in opciones_companero %}
-                {% if it.id != mi_compa.id %}
-                  <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
-                {% endif %}
-              {% endfor %}
-            </select>
-            <p class="muted" style="margin:6px 0 0; font-size:.92em;">
-              Si cambiás, el nuevo compañero deberá aceptar la invitación.
-            </p>
-          </div>
-        </div>
-      {% else %}
-        <div style="margin:6px 0;">
-          <label for="partner_id" class="muted">Elegí compañero (misma categoría):</label><br>
-          <select id="partner_id" name="partner_id" required style="min-width:260px;">
-            <option value="">— Seleccionar —</option>
+  <form method="post">
+    {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+    {# --- Selector de compañero --- #}
+    {% if mi_compa %}
+      <div class="card" style="padding:8px; margin:8px 0;">
+        <label style="display:inline-flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="toggle-cambiar"
+                 onclick="document.getElementById('cambiar-box').style.display=this.checked?'block':'none'">
+          Quiero cambiar de compañero
+        </label>
+
+        <div id="cambiar-box" style="display:none; margin-top:8px;">
+          <label for="partner_id" class="muted">Elegí nuevo compañero (misma categoría):</label><br>
+          <select id="partner_id" name="partner_id" style="min-width:260px;">
+            <option value="{{ mi_compa.id }}">Mantener: {{ mi_compa.nombre_completo }}</option>
             {% for it in opciones_companero %}
-              <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
+              {% if it.id != mi_compa.id %}
+                <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
+              {% endif %}
             {% endfor %}
           </select>
+          <p class="muted" style="margin:6px 0 0; font-size:.92em;">
+            Si cambiás, el nuevo compañero deberá aceptar la invitación.
+          </p>
         </div>
-      {% endif %}
-
-      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button name="accion" value="aceptar" type="submit" class="btn btn-ok">Aceptar</button>
-        <button name="accion" value="rechazar" type="submit" class="btn btn-danger">Rechazar</button>
-        <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Cancelar</a>
       </div>
-    </form>
-  </div>
+    {% else %}
+      <div style="margin:6px 0;">
+        <label for="partner_id" class="muted">Elegí compañero (misma categoría):</label><br>
+        <select id="partner_id" name="partner_id" required style="min-width:260px;">
+          <option value="">— Seleccionar —</option>
+          {% for it in opciones_companero %}
+            <option value="{{ it.id }}">{{ it.nombre_completo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
 
-  {% if yo_acepto is true %}
-    <div class="card" style="margin-top:10px; border-color:#a5d8ff; background:#e7f5ff; color:#0b7285;">
-      Ya aceptaste esta invitación. Si cambiaste de compañero, quedará pendiente su aceptación.
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+      <!-- Botón primario: aceptar -->
+      <button name="accion" value="aceptar" type="submit" class="btn">Aceptar</button>
+      <!-- Peligro/negativo: rechazar -->
+      <button name="accion" value="rechazar" type="submit" class="btn btn-danger">Rechazar</button>
+      <!-- Secundario: cancelar (volver sin enviar) -->
+      <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost">Cancelar</a>
     </div>
-  {% elif yo_acepto is false %}
-    <div class="card" style="margin-top:10px; border-color:#ffe69c; background:#fff3cd; color:#664d03;">
-      Rechazaste esta invitación.
-    </div>
-  {% endif %}
+  </form>
+</div>
+
+{% if yo_acepto is true %}
+  <div class="card" style="margin-top:10px; border-color:#1a4d70; background:#0f2330; color:#d6eaff;">
+    Ya aceptaste esta invitación. Si cambiaste de compañero, quedará pendiente su aceptación.
+  </div>
+{% elif yo_acepto is false %}
+  <div class="card" style="margin-top:10px; border-color:#704d1a; background:#3b2f1b; color:#ffecc7;">
+    Rechazaste esta invitación.
+  </div>
+{% endif %}
 
 {% endblock %}

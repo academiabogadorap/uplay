@@ -1,160 +1,221 @@
 {% extends "base.html" %}
 {% block title %}{{ torneo.nombre }} — Fixture{% endblock %}
+
 {% block content %}
-<div class="container my-4">
-  <div class="d-flex align-items-center gap-2 mb-3">
-    <a href="{{ url_for('torneo_public_detail', torneo_id=torneo.id) }}" class="btn btn-sm btn-outline-secondary">Volver al torneo</a>
-    <h1 class="h4 mb-0">Fixture — {{ torneo.nombre }}</h1>
-    <div class="ms-auto d-none d-md-block">
-      <a href="{{ url_for('torneo_public_tabla', torneo_id=torneo.id) }}" class="btn btn-sm btn-primary">Ver tabla/posiciones</a>
-    </div>
-  </div>
+<style>
+  /* ===== Encabezado ===== */
+  .page-head{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin: 4px 0 10px;
+  }
+  .page-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.2px; }
+  .spacer{ flex:1; }
 
-  {% if partidos is not defined or partidos|length == 0 %}
-    <div class="alert alert-warning">
-      No hay partidos generados para este torneo todavía.
-    </div>
-  {% else %}
-    {# Agrupar por ronda (usar el objeto de groupby con .grouper y .list) #}
-    {% for group in partidos | sort(attribute='ronda') | groupby('ronda') %}
-      <div class="card mb-3">
-        <div class="card-header d-flex align-items-center">
-          <strong>Ronda {{ group.grouper if group.grouper is not none else 1 }}</strong>
-        </div>
-        <div class="list-group list-group-flush">
+  /* ===== Botones / badges coherentes ===== */
+  .btn{ cursor:pointer; }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+  .btn-primary{ background:linear-gradient(180deg,#2a7a33,#25662b); border:1px solid rgba(255,255,255,.18); }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .muted{ color:var(--muted,#9fb3c8); }
 
-          {# Dentro de cada ronda, ordenar por 'orden' si existe; si no, por id #}
-          {% set items = group.list %}
-          {% set tiene_orden = items|selectattr('orden', 'defined')|list|length > 0 %}
-          {% if tiene_orden %}
-            {% set items_ordenados = items | sort(attribute='orden') %}
-          {% else %}
-            {% set items_ordenados = items | sort(attribute='id') %}
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#e6edf3; }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; color:#d7ffe9; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; color:#ffecc7; }
+  .badge-info{ background:#1b2f3b; border-color:#1a4d70; color:#d6eaff; }
+  .badge-neutral{ background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.22); color:#e6edf3; }
+
+  /* ===== Cards y lista ===== */
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); }
+  .card.pad-0{ padding:0; }
+  .card-header{
+    padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08);
+    display:flex; align-items:center; gap:8px;
+    background:rgba(255,255,255,.02);
+    border-top-left-radius:14px; border-top-right-radius:14px;
+  }
+  .list{
+    display:flex; flex-direction:column;
+  }
+  .item{
+    display:flex; flex-direction:column; gap:8px;
+    padding:10px 12px; border-top:1px solid rgba(255,255,255,.06);
+  }
+  .item:first-child{ border-top:none; }
+  .item:hover{ background:rgba(138,232,12,.05); }
+  .row{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+  .names{ font-weight:700; }
+  .meta{ font-size:.9rem; color:var(--muted,#9fb3c8); display:flex; gap:10px; flex-wrap:wrap; }
+  .right{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+
+  /* ===== Alert coherente ===== */
+  .alert{
+    border:1px dashed rgba(255,255,255,.2); background:rgba(255,255,255,.04);
+    padding:10px 12px; border-radius:12px; color:#ffecc7;
+  }
+
+  code{
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    padding:.1rem .35rem; border-radius:6px;
+  }
+</style>
+
+<!-- ===== Encabezado ===== -->
+<div class="page-head">
+  <a href="{{ url_for('torneo_public_detail', torneo_id=torneo.id) }}" class="btn btn-ghost btn-slim">Volver al torneo</a>
+  <h1 class="page-title">Fixture — {{ torneo.nombre }}</h1>
+  <div class="spacer"></div>
+  <a href="{{ url_for('torneo_public_tabla', torneo_id=torneo.id) }}" class="btn btn-primary btn-slim">Ver tabla / posiciones</a>
+</div>
+
+{% if partidos is not defined or partidos|length == 0 %}
+  <div class="alert">No hay partidos generados para este torneo todavía.</div>
+{% else %}
+  {# ===========================
+     AGRUPAR POR RONDA (torneo)
+     =========================== #}
+  {% for group in partidos | sort(attribute='ronda') | groupby('ronda') %}
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header">
+        <strong>Ronda {{ group.grouper if group.grouper is not none else 1 }}</strong>
+      </div>
+
+      <div class="list">
+        {# Orden dentro de la ronda por 'orden' si existe; si no, por id #}
+        {% set items = group.list %}
+        {% set tiene_orden = items|selectattr('orden', 'defined')|list|length > 0 %}
+        {% if tiene_orden %}
+          {% set items_ordenados = items | sort(attribute='orden') %}
+        {% else %}
+          {% set items_ordenados = items | sort(attribute='id') %}
+        {% endif %}
+
+        {% for m in items_ordenados %}
+          {# ==================================
+             Resolución de nombres (AISLADA)
+             - NO usa modelos de partidos normales
+             - Prioriza mapeos de torneo provistos
+             ================================== #}
+          {% set nombre_a = None %}
+          {% set nombre_b = None %}
+
+          {# 1) Prioridad: nombres_lado (Americano individual rotativo) #}
+          {% if nombres_lado is defined %}
+            {% set ladoA = nombres_lado.get((m.id, 'A')) %}
+            {% set ladoB = nombres_lado.get((m.id, 'B')) %}
+            {% if ladoA and ladoB %}
+              {% set nombre_a = ladoA %}
+              {% set nombre_b = ladoB %}
+            {% endif %}
           {% endif %}
 
-          {% for m in items_ordenados %}
-            {# ===================== NOMBRES (PRIORIDAD: nombres_lado -> fallback actual) ===================== #}
-            {% set nombre_a = None %}
-            {% set nombre_b = None %}
-
-            {# 1) Si tenemos duplas por lado (Americano individual rotativo), usarlas #}
-            {% if nombres_lado is defined %}
-              {% set ladoA = nombres_lado.get((m.id, 'A')) %}
-              {% set ladoB = nombres_lado.get((m.id, 'B')) %}
-              {% if ladoA and ladoB %}
-                {% set nombre_a = ladoA %}
-                {% set nombre_b = ladoB %}
+          {# 2) Fallbacks por participante / nombres_por_id (torneo) #}
+          {% if not nombre_a %}
+            {% if nombres_por_id is defined and m.participante_a_id in nombres_por_id %}
+              {% set nombre_a = nombres_por_id[m.participante_a_id] %}
+            {% elif m.participante_a is defined and m.participante_a %}
+              {% if m.participante_a.nombre_completo is defined and m.participante_a.nombre_completo %}
+                {% set nombre_a = m.participante_a.nombre_completo %}
+              {% elif m.participante_a.jugador1 is defined and m.participante_a.jugador2 is defined
+                      and m.participante_a.jugador1 and m.participante_a.jugador2 %}
+                {% set nombre_a = (m.participante_a.jugador1.nombre_completo ~ ' / ' ~ m.participante_a.jugador2.nombre_completo) %}
+              {% elif m.participante_a.jugador is defined and m.participante_a.jugador %}
+                {% set nombre_a = m.participante_a.jugador.nombre_completo %}
+              {% elif m.participante_a.inscripcion is defined and m.participante_a.inscripcion and m.participante_a.inscripcion.jugador1 is defined and m.participante_a.inscripcion.jugador1 %}
+                {% set nombre_a = m.participante_a.inscripcion.jugador1.nombre_completo ~
+                                  ((' / ' ~ m.participante_a.inscripcion.jugador2.nombre_completo)
+                                    if m.participante_a.inscripcion.jugador2 is not none else '') %}
               {% endif %}
             {% endif %}
-
-            {# 2) Fallback: tu resolución actual por participante / nombres_por_id #}
             {% if not nombre_a %}
-              {% if nombres_por_id is defined and m.participante_a_id in nombres_por_id %}
-                {% set nombre_a = nombres_por_id[m.participante_a_id] %}
-              {% elif m.participante_a is defined and m.participante_a %}
-                {% if m.participante_a.nombre_completo is defined and m.participante_a.nombre_completo %}
-                  {% set nombre_a = m.participante_a.nombre_completo %}
-                {% elif m.participante_a.jugador1 is defined and m.participante_a.jugador2 is defined
-                        and m.participante_a.jugador1 and m.participante_a.jugador2 %}
-                  {% set nombre_a = (m.participante_a.jugador1.nombre_completo ~ ' / ' ~ m.participante_a.jugador2.nombre_completo) %}
-                {% elif m.participante_a.jugador is defined and m.participante_a.jugador %}
-                  {% set nombre_a = m.participante_a.jugador.nombre_completo %}
-                {% elif m.participante_a.inscripcion is defined and m.participante_a.inscripcion and m.participante_a.inscripcion.jugador1 is defined and m.participante_a.inscripcion.jugador1 %}
-                  {# Soporte cuando el nombre viene desde la inscripción #}
-                  {% set nombre_a = m.participante_a.inscripcion.jugador1.nombre_completo ~
-                                    ((' / ' ~ m.participante_a.inscripcion.jugador2.nombre_completo)
-                                      if m.participante_a.inscripcion.jugador2 is not none else '') %}
-                {% endif %}
-              {% endif %}
-              {% if not nombre_a %}
-                {% set nombre_a = 'ID ' ~ m.participante_a_id %}
+              {% set nombre_a = 'ID ' ~ m.participante_a_id %}
+            {% endif %}
+          {% endif %}
+
+          {% if not nombre_b %}
+            {% if nombres_por_id is defined and m.participante_b_id in nombres_por_id %}
+              {% set nombre_b = nombres_por_id[m.participante_b_id] %}
+            {% elif m.participante_b is defined and m.participante_b %}
+              {% if m.participante_b.nombre_completo is defined and m.participante_b.nombre_completo %}
+                {% set nombre_b = m.participante_b.nombre_completo %}
+              {% elif m.participante_b.jugador1 is defined and m.participante_b.jugador2 is defined
+                      and m.participante_b.jugador1 and m.participante_b.jugador2 %}
+                {% set nombre_b = (m.participante_b.jugador1.nombre_completo ~ ' / ' ~ m.participante_b.jugador2.nombre_completo) %}
+              {% elif m.participante_b.jugador is defined and m.participante_b.jugador %}
+                {% set nombre_b = m.participante_b.jugador.nombre_completo %}
+              {% elif m.participante_b.inscripcion is defined and m.participante_b.inscripcion and m.participante_b.inscripcion.jugador1 is defined and m.participante_b.inscripcion.jugador1 %}
+                {% set nombre_b = m.participante_b.inscripcion.jugador1.nombre_completo ~
+                                  ((' / ' ~ m.participante_b.inscripcion.jugador2.nombre_completo)
+                                    if m.participante_b.inscripcion.jugador2 is not none else '') %}
               {% endif %}
             {% endif %}
-
             {% if not nombre_b %}
-              {% if nombres_por_id is defined and m.participante_b_id in nombres_por_id %}
-                {% set nombre_b = nombres_por_id[m.participante_b_id] %}
-              {% elif m.participante_b is defined and m.participante_b %}
-                {% if m.participante_b.nombre_completo is defined and m.participante_b.nombre_completo %}
-                  {% set nombre_b = m.participante_b.nombre_completo %}
-                {% elif m.participante_b.jugador1 is defined and m.participante_b.jugador2 is defined
-                        and m.participante_b.jugador1 and m.participante_b.jugador2 %}
-                  {% set nombre_b = (m.participante_b.jugador1.nombre_completo ~ ' / ' ~ m.participante_b.jugador2.nombre_completo) %}
-                {% elif m.participante_b.jugador is defined and m.participante_b.jugador %}
-                  {% set nombre_b = m.participante_b.jugador.nombre_completo %}
-                {% elif m.participante_b.inscripcion is defined and m.participante_b.inscripcion and m.participante_b.inscripcion.jugador1 is defined and m.participante_b.inscripcion.jugador1 %}
-                  {% set nombre_b = m.participante_b.inscripcion.jugador1.nombre_completo ~
-                                    ((' / ' ~ m.participante_b.inscripcion.jugador2.nombre_completo)
-                                      if m.participante_b.inscripcion.jugador2 is not none else '') %}
-                {% endif %}
-              {% endif %}
-              {% if not nombre_b %}
-                {% set nombre_b = 'ID ' ~ m.participante_b_id %}
-              {% endif %}
+              {% set nombre_b = 'ID ' ~ m.participante_b_id %}
             {% endif %}
+          {% endif %}
 
-            <div class="list-group-item">
-              <div class="d-flex flex-column flex-md-row align-items-md-center gap-2">
-                <div class="flex-grow-1">
-                  <div class="fw-semibold">
-                    {{ nombre_a }} <span class="text-muted">vs</span> {{ nombre_b }}
-                  </div>
+          {# ===========================
+             Estado y resultado (torneo)
+             =========================== #}
+          {% set estado = (m.estado or '')|upper %}
 
-                  <div class="small text-muted">
-                    {% if m.programado_en %}
-                      <span class="me-2">
-                        <i class="bi bi-calendar-event"></i>
-                        {{ m.programado_en }}
-                      </span>
-                    {% endif %}
-                    {% if m.cancha %}
-                      <span class="me-2">
-                        <i class="bi bi-geo-alt"></i>
-                        Cancha {{ m.cancha }}
-                      </span>
-                    {% endif %}
-                    {% if m.orden is not none %}
-                      <span class="me-2">
-                        <i class="bi bi-list-ol"></i>
-                        Orden {{ m.orden }}
-                      </span>
-                    {% endif %}
-                    <span class="me-2">
-                      <i class="bi bi-collection"></i>
-                      Grupo {{ m.grupo_id }}
-                    </span>
-                    <span class="me-2">
-                      <i class="bi bi-hash"></i>
-                      ID {{ m.id }}
-                    </span>
-                  </div>
-                </div>
+          {# Resultado del torneo:
+             - Prioriza campos explícitos si existen (ej: m.resultado, m.resultado_sets, m.ganador_participante_id)
+             - Fallback a m.resultado_json si lo traés así del generador #}
+          {% set resultado_str = None %}
+          {% if m.resultado is defined and m.resultado %}
+            {% set resultado_str = m.resultado %}
+          {% elif m.resultado_sets is defined and m.resultado_sets %}
+            {% set resultado_str = m.resultado_sets %}
+          {% elif m.resultado_json %}
+            {% set resultado_str = m.resultado_json %}
+          {% endif %}
 
-                <div class="text-nowrap">
-                  {% set estado = (m.estado or '').upper() %}
-                  {% if estado == 'PENDIENTE' %}
-                    <span class="badge bg-secondary">Pendiente</span>
-                  {% elif estado == 'JUGADO' or estado == 'FINALIZADO' %}
-                    <span class="badge bg-success">Finalizado</span>
-                  {% elif estado == 'PROGRAMADO' %}
-                    <span class="badge bg-info text-dark">Programado</span>
-                  {% else %}
-                    <span class="badge bg-light text-dark">{{ m.estado }}</span>
-                  {% endif %}
-                </div>
+          <div class="item">
+            <div class="row">
+              <div class="names">
+                {{ nombre_a }} <span class="muted">vs</span> {{ nombre_b }}
               </div>
-
-              {% if m.resultado_json %}
-                <div class="mt-2 small">
-                  <span class="text-muted">Resultado:</span>
-                  <code>{{ m.resultado_json }}</code>
-                </div>
-              {% endif %}
+              <div class="right">
+                {% if estado == 'PENDIENTE' %}
+                  <span class="badge badge-neutral">Pendiente</span>
+                {% elif estado in ['JUGADO','FINALIZADO'] %}
+                  <span class="badge badge-ok">Finalizado</span>
+                {% elif estado == 'PROGRAMADO' %}
+                  <span class="badge badge-info">Programado</span>
+                {% else %}
+                  <span class="badge">{{ m.estado or '—' }}</span>
+                {% endif %}
+              </div>
             </div>
-          {% endfor %}
-        </div>
+
+            <div class="meta">
+              {% if m.programado_en %}
+                <span>📅 {{ m.programado_en }}</span>
+              {% endif %}
+              {% if m.cancha %}
+                <span>📍 Cancha {{ m.cancha }}</span>
+              {% endif %}
+              {% if m.orden is not none %}
+                <span>🔢 Orden {{ m.orden }}</span>
+              {% endif %}
+              <span>🧩 Grupo {{ m.grupo_id }}</span>
+              <span>#{{ m.id }}</span>
+            </div>
+
+            {% if resultado_str %}
+              <div class="muted" style="margin-top:4px;">
+                Resultado: <code>{{ resultado_str }}</code>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
       </div>
-    {% endfor %}
-  {% endif %}
-</div>
+    </div>
+  {% endfor %}
+{% endif %}
 {% endblock %}

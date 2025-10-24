@@ -2,231 +2,148 @@
 {% block title %}Categorías{% endblock %}
 
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Categorías</h2>
-
-    {# Botón visible solo para admins #}
-    {% if current_jugador and current_jugador.is_admin %}
-      <a href="{{ url_for('categorias_new') }}" class="btn btn-ghost btn-slim">➕ Nueva categoría</a>
-    {% endif %}
-  </div>
-
-  {% if categorias %}
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>Rango de puntos</th>
-          <th>Creada</th>
-          {% if current_jugador and current_jugador.is_admin %}
-            <th style="width:220px;">Acciones</th>
-          {% endif %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in categorias %}
-          <tr>
-            <td>{{ c.nombre }}</td>
-            <td>{{ c.puntos_min }} – {{ c.puntos_max }}</td>
-            <td>{{ c.creada_en|localdt('%Y-%m-%d %H:%M') }}</td>
-            {# Alternativa con tu filtro anterior:
-               {{ c.creada_en.strftime('%Y-%m-%d %H:%M') }} #}
-
-            {% if current_jugador and current_jugador.is_admin %}
-              <td>
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                  <a href="{{ url_for('categorias_edit', cat_id=c.id) }}" class="btn btn-ghost btn-slim">✏️ Editar</a>
-
-                  <form method="post"
-                        action="{{ url_for('categorias_delete', cat_id=c.id) }}"
-                        onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}? Esta acción no se puede deshacer.');"
-                        style="display:inline;">
-                    <button type="submit" class="btn btn-danger btn-slim">🗑 Eliminar</button>
-                  </form>
-                </div>
-              </td>
-            {% endif %}
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>No hay categorías cargadas.</p>
-  {% endif %}
-{% endblock %}
-
-{% block help_content %}
 <style>
-  /* ==== Modal de ayuda: contenedor BAJO y scroll en el contenedor (igual que index) ==== */
-  .help-container{ display:flex; justify-content:center; width:100%; }
-  .help-wrap{
-    width: min(800px, 90vw);
-    margin: 0 auto;
-
-    /* Altura reducida + scroll único del modal */
-    max-height: 62dvh;   /* si tu modal padre ocupa más, bajar a 60dvh/58dvh */
-    max-height: 62vh;    /* fallback */
-    overflow: auto;
-    overscroll-behavior: contain;
-
-    position: relative;
-    background: transparent;
+  /* ===== Hero / cabecera (igual que Inicio) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
   }
-
-  /* Encabezado compacto y sticky */
-  .help-head{
-    position: sticky; top: 0; z-index: 2;
-    display:flex; align-items:center; gap:6px;
-    padding:6px 6px; margin-bottom:4px;
-    background: var(--bg, rgba(10,12,20,.96));
-    border-bottom:1px solid rgba(255,255,255,.06);
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
   }
-  .help-title{ margin:0; font-size: clamp(.92rem, 2vw, 1.02rem); }
-  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.78rem, 1.7vw, .88rem); }
-
-  /* Grilla sin desbordes */
-  .help-grid{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
-    gap:8px;
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
   }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  /* Tarjetas y texto compactos */
-  .help-card{
-    background: rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:10px;
-    padding:6px;
+  /* Chips */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
   }
-  .help-card h4{
-    display:flex; align-items:center; gap:6px;
-    margin:0 0 4px;
-    font-size: clamp(.88rem, 1.9vw, .96rem);
-  }
-  .help-card p, .help-card li{
-    margin:3px 0;
-    font-size: clamp(.78rem, 1.6vw, .86rem);
-    line-height:1.3;
-  }
-  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
 
-  .chip{ display:inline-block; padding:2px 7px; border-radius:999px; font-size:.76rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
-  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
-  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
-  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
+  /* Botones coherentes */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
 
-  .help-visual{
-    display:flex; align-items:center; justify-content:center;
-    background: rgba(255,255,255,.03);
-    border:1px dashed rgba(255,255,255,.12);
-    border-radius:10px; padding:6px;
+  /* ===== Tabla en card ===== */
+  .card.table-card{
+    padding:0; border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
   }
-  .help-visual svg, .help-card img{ max-width:100%; height:auto; display:block; }
+  .table-wrap{
+    --thead-h: 44px;
+    max-height:70vh; overflow:auto; border-radius:12px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0));
+  }
+  table.cats{ width:100%; border-collapse:separate; border-spacing:0; margin:0; }
+  .cats thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  .cats tbody td{ padding:10px 8px; vertical-align:middle; }
+  .cats tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  .cats tbody tr:hover{ background:rgba(138,232,12,.05); }
 
-  @media (max-width:540px){
-    .help-grid{ grid-template-columns: 1fr; }
-    .help-card h4 svg{ display:none; }
+  .actions{ display:flex; gap:6px; flex-wrap:wrap; }
+  .btn-danger{ background:rgba(255,77,77,.1); border:1px solid rgba(255,77,77,.35); }
+
+  /* Responsive: ocultar “Creada” en pantallas chicas */
+  @media (max-width:700px){
+    .cats thead th:nth-child(3), .cats tbody td:nth-child(3){ display:none; }
   }
 </style>
 
-<div class="help-container">
-  <div class="help-wrap">
-    <div class="help-head">
-      <h3 class="help-title">¿Cómo leer y gestionar categorías?</h3>
-      <p class="help-sub">Guía rápida y visual</p>
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Categorías</h1>
+      <p class="hero-tag">Rangos de puntos y administración</p>
     </div>
 
-    <div class="help-grid">
-      <!-- ¿Qué estás viendo? (todos) -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M3 7h18v10H3z" stroke="currentColor"/><path d="M8 7V5a4 4 0 118 0v2" stroke="currentColor"/>
-          </svg>
-          ¿Qué estás viendo?
-        </h4>
-        <p>Un listado de <strong>categorías</strong> con su <strong>rango de puntos</strong>. El sistema usa estos rangos para desafíos, abiertos y zona de ascenso.</p>
-        <div>
-          <span class="chip info">Nombre</span>
-          <span class="chip ok">Puntos mínimos</span>
-          <span class="chip warn">Puntos máximos</span>
-        </div>
-      </section>
-
-      <!-- Columnas (todos) -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h8" stroke="currentColor"/></svg>
-          Columnas
-        </h4>
-        <ul class="help-ul">
-          <li><strong>Nombre</strong>: etiqueta visible (ej.: <em>7ma Mixta</em>).</li>
-          <li><strong>Rango de puntos</strong>: <em>mín–máx</em> que define pertenencia.</li>
-          <li><strong>Creada</strong>: fecha y hora de alta.</li>
-        </ul>
-      </section>
-
-      <!-- Visual del rango (todos) -->
-      <section class="help-card">
-        <h4>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor"/></svg>
-          Ejemplo visual del rango
-        </h4>
-        <div class="help-visual">
-          <svg width="260" height="110" viewBox="0 0 280 120" aria-hidden="true">
-            <rect x="20" y="58" width="240" height="6" rx="3" fill="#475569"/>
-            <rect x="60" y="50" width="160" height="22" rx="6" fill="#1b3b2a" stroke="#1a704d"/>
-            <text x="140" y="64" fill="#fff" font-size="11" text-anchor="middle">600 ↔ 699</text>
-            <text x="20" y="45" fill="#9aa3b2" font-size="10">0</text>
-            <text x="140" y="45" fill="#9aa3b2" font-size="10">600</text>
-            <text x="220" y="45" fill="#9aa3b2" font-size="10">699</text>
-          </svg>
-        </div>
-        <p class="muted" style="margin-top:4px;">Ejemplo: <strong>7ma Mixta</strong> con rango 600–699.</p>
-      </section>
-
-      {# ---- SOLO ADMIN ---- #}
+    <div class="hero-actions">
       {% if current_jugador and current_jugador.is_admin %}
-        <section class="help-card">
-          <h4>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6h12v12H6z" stroke="currentColor"/></svg>
-            Impacto en el sistema (admin)
-          </h4>
-          <ul class="help-ul">
-            <li>Los <strong>desafíos inter-nivel</strong> usan la <em>categoría superior</em> del desafiante.</li>
-            <li>La <strong>zona de ascenso</strong> se calcula con respecto al <em>mínimo</em> de la categoría.</li>
-            <li>Los <strong>partidos abiertos</strong> se crean y filtran por categoría.</li>
-          </ul>
-        </section>
-
-        <section class="help-card">
-          <h4>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5 20l2-7L1 9h7l4-7z" stroke="currentColor"/></svg>
-            Buenas prácticas (admin)
-          </h4>
-          <ul class="help-ul">
-            <li>Evitá <strong>solapamientos</strong> entre rangos.</li>
-            <li>Mantené <strong>contigüidad</strong> (sin huecos) y nombres consistentes.</li>
-            <li>Antes de crear, revisá la lista para no duplicar.</li>
-          </ul>
-        </section>
-
-        <section class="help-card">
-          <h4>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="currentColor"/></svg>
-            Acciones rápidas (admin)
-          </h4>
-          <ul class="help-ul">
-            <li><strong>Nueva categoría</strong>: definí nombre y rango min–max.</li>
-            <li>Si ajustás rangos, evaluá su efecto en desafíos y abiertos.</li>
-          </ul>
-          <div class="help-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-            <a href="{{ url_for('categorias_new') }}" class="btn btn-ghost btn-slim">➕ Nueva categoría</a>
-          </div>
-        </section>
+        <a href="{{ url_for('categorias_new') }}" class="btn">➕ Nueva categoría</a>
       {% endif %}
-      {# ---- /SOLO ADMIN ---- #}
+      <a href="{{ url_for('ranking') }}" class="btn-ghost btn-slim">Ver ranking</a>
     </div>
   </div>
+
+  <!-- Chips de contexto -->
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Total: {{ categorias|length if categorias else 0 }}</span>
+    {% if current_jugador and current_jugador.categoria %}
+      <span class="chip"><span class="dot dot-yellow"></span>Mi categoría: {{ current_jugador.categoria.nombre }}</span>
+    {% endif %}
+  </div>
 </div>
+
+{% if categorias %}
+  <div class="card table-card">
+    <div class="table-wrap">
+      <table class="cats">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rango de puntos</th>
+            <th>Creada</th>
+            {% if current_jugador and current_jugador.is_admin %}
+              <th style="width:240px;">Acciones</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in categorias %}
+            <tr>
+              <td>{{ c.nombre }}</td>
+              <td>{{ c.puntos_min }} – {{ c.puntos_max }}</td>
+              <td>{{ c.creada_en|localdt('%Y-%m-%d %H:%M') }}</td>
+
+              {% if current_jugador and current_jugador.is_admin %}
+                <td>
+                  <div class="actions">
+                    <a href="{{ url_for('categorias_edit', cat_id=c.id) }}" class="btn btn-ghost btn-slim">✏️ Editar</a>
+
+                    <form method="post"
+                          action="{{ url_for('categorias_delete', cat_id=c.id) }}"
+                          onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}? Esta acción no se puede deshacer.');">
+                      <button type="submit" class="btn btn-danger btn-slim">🗑 Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <p class="muted">No hay categorías cargadas.</p>
+{% endif %}
+{% endblock %}
+
+{% block help_content %}
+{{ super() }}
 {% endblock %}

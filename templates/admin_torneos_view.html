@@ -1,116 +1,220 @@
 {% extends "base.html" %}
 {% block title %}Torneo: {{ t.nombre }}{% endblock %}
+
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">{{ t.nombre }}</h2>
+<style>
+  /* ===== Encabezado ===== */
+  .page-head{
+    display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    margin: 4px 0 10px;
+  }
+  .page-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.2px; }
+  .page-sub{ margin:0; color:var(--muted,#9fb3c8); }
+
+  /* ===== Info del torneo ===== */
+  .torneo-info.card{ padding:10px 12px; }
+  .info-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap:8px;
+    margin-top:6px;
+  }
+  .info-item{ background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:8px; }
+  .info-item strong{ display:block; font-weight:800; font-size:.86rem; color:#cfe1ff; }
+  .info-item span{ display:block; margin-top:2px; }
+
+  .notes{
+    margin-top:8px; padding:8px; border-radius:10px;
+    background: rgba(255,255,255,.03); border:1px dashed rgba(255,255,255,.14);
+    color:var(--muted,#9fb3c8);
+    white-space:pre-wrap;
+  }
+
+  /* ===== Badges de estado (con buen contraste) ===== */
+  .badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:.8rem;
+    border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#e6edf3; }
+  .state-BORRADOR{ background:#2a2431; border-color:#5a4678; color:#e9d7ff; }
+  .state-CANCELADO{ background:#3b1b1b; border-color:#701a1a; color:#ffe1e1; }
+  .state-INSCRIPCION{ background:#1b2f3b; border-color:#1a4d70; color:#d6eaff; }
+  .state-INSCRIPCION_CERRADA{ background:#3b2f1b; border-color:#704d1a; color:#ffecc7; }
+  .state-EN_JUEGO{ background:#1b3b2a; border-color:#1a704d; color:#d7ffe9; }
+  .state-FINALIZADO{ background:#212121; border-color:#464646; color:#e6e6e6; }
+
+  /* ===== Barra de acciones ===== */
+  .actions.card{ padding:10px; }
+  .actions-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .seg{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .seg label{ font-weight:700; color:var(--muted,#9fb3c8); font-size:.9rem; }
+  .seg select{
+    height:36px; padding:6px 8px; border-radius:10px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text);
+    max-width:220px;
+  }
+  .spacer{ flex:1; }
+
+  /* Botones coherentes */
+  .btn{ cursor:pointer; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+  .btn-danger{ background:#3b1b1b; border:1px solid #701a1a; }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+
+  /* Bloques auxiliares */
+  .pill{
+    display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+    font-size:.86rem; color:#e6edf3;
+  }
+  .pill *{ color:inherit; }
+
+  @media (max-width:640px){
+    .info-grid{ grid-template-columns: 1fr; }
+  }
+</style>
+
+<!-- ===== Encabezado ===== -->
+<div class="page-head">
+  <div>
+    <h2 class="page-title">{{ t.nombre }}</h2>
+    <p class="page-sub">
+      Estado:
+      <span class="badge state-{{ t.estado }}">{{ t.estado }}</span>
+    </p>
+  </div>
+  <div class="seg">
     <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
-    <!-- NUEVO: ir a la página pública del torneo -->
     <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
   </div>
+</div>
 
-  <div class="card" style="max-width:820px;">
-    <p style="margin:0;">
-      <strong>Modalidad:</strong> {{ t.formato }} |
-      <strong>Formato:</strong> {{ t.tipo }} |
-      <strong>Categoría:</strong> {{ t.categoria.nombre if t.categoria else '-' }} |
-      <strong>Estado:</strong> <span class="badge">{{ t.estado }}</span>
-    </p>
-    <p style="margin:.35rem 0 0;">
-      <strong>Inicio:</strong> {{ t.fecha_inicio or '-' }} |
-      <strong>Sede:</strong> {{ t.sede or '-' }}
-    </p>
-    {% if t.es_dobles() %}
-      <p style="margin:.35rem 0 0;"><strong>Límite parejas:</strong> {{ t.cupo_max or 'Sin límite' }}</p>
-    {% else %}
-      <p style="margin:.35rem 0 0;"><strong>Límite jugadores:</strong> {{ t.cupo_max or 'Sin límite' }}</p>
-    {% endif %}
-    {% if t.notas %}
-      <p class="muted" style="margin:.35rem 0 0;"><em>{{ t.notas }}</em></p>
-    {% endif %}
+<!-- ===== Info del Torneo ===== -->
+<div class="card torneo-info">
+  <div class="info-grid" role="list">
+    <div class="info-item" role="listitem">
+      <strong>Modalidad</strong>
+      {# SINGLES/DOBLES → INDIVIDUAL/PAREJAS (prioriza t.modalidad) #}
+      {% set raw_mod = (t.modalidad or t.formato or '') %}
+      {% set mod_up = raw_mod.upper() %}
+      <span>{{ 'INDIVIDUAL' if mod_up == 'SINGLES'
+              else 'PAREJAS' if mod_up == 'DOBLES'
+              else (raw_mod or '-') }}</span>
+    </div>
+    <div class="info-item" role="listitem">
+      <strong>Formato</strong>
+      {% set tipo_up = (t.tipo or '')|upper %}
+      <span>{{ 'AMERICANO' if tipo_up == 'AMERICANO'
+              else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
+              else 'PLAYOFF' if tipo_up == 'PLAYOFF'
+              else (t.tipo or '-') }}</span>
+    </div>
+    <div class="info-item" role="listitem">
+      <strong>Categoría</strong>
+      <span>{{ t.categoria.nombre if t.categoria else '-' }}</span>
+    </div>
+    <div class="info-item" role="listitem">
+      <strong>Inicio</strong>
+      <span>{{ t.fecha_inicio or '-' }}</span>
+    </div>
+    <div class="info-item" role="listitem">
+      <strong>Sede</strong>
+      <span>{{ t.sede or '-' }}</span>
+    </div>
+    <div class="info-item" role="listitem">
+      {# Soporta t.es_dobles() si existe; si no, infiere por modalidad #}
+      {% set is_dobles = (t.es_dobles() if t.es_dobles is defined else ((t.modalidad or '')|upper == 'DOBLES')) %}
+      {% if is_dobles %}
+        <strong>Límite parejas</strong>
+      {% else %}
+        <strong>Límite jugadores</strong>
+      {% endif %}
+      <span>{{ t.cupo_max or 'Sin límite' }}</span>
+    </div>
   </div>
 
-  <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+  {% if t.notas %}
+    <div class="notes"><em>{{ t.notas }}</em></div>
+  {% endif %}
+</div>
+
+<!-- ===== Acciones ===== -->
+<div class="card actions" style="margin-top:10px;">
+  <div class="actions-row">
+
+    {# === Estados y acciones principales === #}
     {% if t.estado in ('BORRADOR','CANCELADO') %}
       <!-- Abrir inscripción -->
       <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
-        {# CSRF opcional #}
-        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn">Abrir inscripción</button>
       </form>
-      <!-- Generar fixture aún bloqueado -->
-      <span class="btn btn-ghost btn-slim" aria-disabled="true" title="Disponible cuando cierre la inscripción">
-        Generar fixture
-      </span>
+      <!-- Fixture bloqueado -->
+      <span class="pill" title="Disponible cuando cierre la inscripción">Generar fixture (bloqueado)</span>
 
     {% elif t.estado == 'INSCRIPCION' %}
       <!-- Cerrar inscripción -->
       <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
-        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn btn-ghost">Cerrar inscripción</button>
       </form>
-      <!-- Generar fixture bloqueado hasta cerrar inscripción -->
-      <span class="btn btn-ghost btn-slim" aria-disabled="true" title="Primero cerrá inscripción">
-        Generar fixture
-      </span>
+      <span class="pill" title="Primero cerrá inscripción">Generar fixture (bloqueado)</span>
 
     {% elif t.estado in ('INSCRIPCION_CERRADA', 'EN_JUEGO') %}
       {% if t.estado == 'INSCRIPCION_CERRADA' %}
-        <span class="btn btn-ghost btn-slim" aria-disabled="true">Inscripción cerrada</span>
+        <span class="pill">Inscripción cerrada</span>
       {% else %}
-        <span class="btn btn-ghost btn-slim" aria-disabled="true">Fixture en juego</span>
+        <span class="pill">Fixture en juego</span>
       {% endif %}
 
-      {# === Form funcional para Generar Fixture === #}
+      {# === Generar Fixture (activo) === #}
       <form method="post" action="{{ url_for('admin_torneos_generar_fixture', tid=t.id) }}"
-            style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            class="seg" aria-label="Generar fixture">
+        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
-        <!-- Modo -->
-        <label class="muted" for="modo" style="margin-left:4px;">Modo</label>
-        <select name="modo" id="modo">
-          {# AMERICANO solo cuando está INSCRIPCION_CERRADA #}
+        <label for="modo">Modo</label>
+        <select name="modo" id="modo" aria-describedby="desc-modo">
           <option value="AMERICANO" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
             Americano (liga / por zonas)
           </option>
-          {# PLAYOFF (1ª ronda) solo cuando está INSCRIPCION_CERRADA #}
           <option value="PLAYOFF" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
             Playoff (crear 1ª ronda)
           </option>
-          {# PLAYOFF_NEXT disponible también en EN_JUEGO #}
           <option value="PLAYOFF_NEXT">Siguiente ronda de Playoff</option>
         </select>
 
-        <!-- Zonas (solo aplica a AMERICANO) -->
-        <label class="muted" for="zonas">Zonas</label>
-        <select name="zonas" id="zonas" title="Solo aplica para AMERICANO">
+        <label for="zonas">Zonas</label>
+        <select name="zonas" id="zonas" title="Solo aplica a AMERICANO">
           {% for z in range(1, 17) %}
             <option value="{{ z }}" {{ 'selected' if z == 1 else '' }}>{{ z }}</option>
           {% endfor %}
         </select>
 
-        <!-- Ida y vuelta (solo aplica a AMERICANO) -->
-        <label class="muted" for="ida_y_vuelta">Ida y vuelta</label>
-        <select name="ida_y_vuelta" id="ida_y_vuelta" title="Solo aplica para AMERICANO">
+        <label for="ida_y_vuelta">Ida y vuelta</label>
+        <select name="ida_y_vuelta" id="ida_y_vuelta" title="Solo aplica a AMERICANO">
           <option value="0" selected>No</option>
           <option value="1">Sí</option>
         </select>
 
         <button type="submit" class="btn">Generar fixture</button>
+        <small id="desc-modo" class="muted" style="margin-left:2px;">
+          AMERICANO/PLAYOFF habilitados al cerrar inscripción. PLAYOFF_NEXT disponible en juego.
+        </small>
       </form>
 
-    {% elif t.estado in ('FINALIZADO') %}
-      <span class="btn btn-ghost btn-slim" aria-disabled="true">Torneo finalizado</span>
+    {% elif t.estado == 'FINALIZADO' %}
+      <span class="pill">Torneo finalizado</span>
 
     {% else %}
-      <span class="btn btn-ghost btn-slim" aria-disabled="true">Acciones no disponibles</span>
+      <span class="pill">Acciones no disponibles</span>
     {% endif %}
 
-    {# === NUEVO: Botón Eliminar torneo (visible siempre para admin) === #}
+    <div class="spacer"></div>
+
+    {# === Eliminar torneo (admin) === #}
     <form method="post"
           action="{{ url_for('admin_torneo_eliminar', tid=t.id) }}"
           onsubmit="return confirm('¿Seguro que querés eliminar este torneo? Esta acción no se puede deshacer.');">
-      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <button type="submit" class="btn btn-danger">Eliminar torneo</button>
+      {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <button type="submit" class="btn btn-danger btn-slim">Eliminar torneo</button>
     </form>
   </div>
+</div>
 {% endblock %}

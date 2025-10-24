@@ -3,17 +3,51 @@
 
 {% block content %}
 <style>
-  /* ===== Encabezado compacto ===== */
-  .page-head{
-    display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap;
-    margin: 4px 0 10px;
+  /* ===== Hero / cabecera (igual que Inicio) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
   }
-  .page-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.2px; }
-  .page-sub{ margin:0; color:var(--muted,#9fb3c8); }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* Chips */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
+
+  /* Botones coherentes */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
 
   /* ===== Filtros ===== */
   .filters.card{
     padding:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
   }
   .filters label{ font-weight:700; font-size:.92rem; }
   .filters select, .filters input[type="text"]{
@@ -24,6 +58,8 @@
   .filters .spacer{ flex:1; }
 
   /* ===== Tabla ===== */
+  .card.table-card{ padding:0; border-radius:14px; border:1px solid rgba(255,255,255,.12);
+                    background:linear-gradient(180deg, var(--panel), var(--panel-2)); }
   .table-wrap{
     --thead-h: 44px;
     max-height:70vh; overflow:auto; border-radius:12px;
@@ -36,12 +72,11 @@
     position:sticky; top:0; z-index:3;
     background:#0d1b2a; color:#dbe2ef; text-align:left;
     padding:10px 8px; height:var(--thead-h); line-height:1.1;
-    text-transform:uppercase; letter-spacing:.02em;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
     box-shadow:0 2px 0 rgba(0,0,0,.25);
-    font-size:.86rem;
   }
   .rank tbody td{ padding:10px 8px; vertical-align:middle; }
-  .rank tbody tr:not(.cat-sep):hover{ background:rgba(255,255,255,.04); }
+  .rank tbody tr:not(.cat-sep):hover{ background:rgba(138,232,12,.05); }
 
   /* Separador de categoría “sticky” debajo del thead */
   .cat-sep{ position:sticky; top:var(--thead-h); z-index:2; }
@@ -55,7 +90,7 @@
   /* Resaltar jugador actual */
   .row-highlight{ outline:1px solid rgba(138,232,12,.35); background:rgba(138,232,12,.06); }
 
-  /* Badges & botones */
+  /* Badges & botones en tabla */
   .badge{ display:inline-block; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); font-size:.8rem; }
   .badge-ok{ background:#153c2a; border-color:#2a8b5f; }
 
@@ -75,10 +110,29 @@
   }
 </style>
 
-<div class="page-head">
-  <div>
-    <h2 class="page-title">Ranking</h2>
-    <p class="page-sub">Superior → inferior. Dentro de cada nivel por puntos (más arriba = mejor).</p>
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Ranking</h1>
+      <p class="hero-tag">Superior → inferior por categoría</p>
+    </div>
+
+    <div class="hero-actions">
+      <a href="{{ url_for('jugadores_list') }}" class="btn-ghost btn-slim">Ver jugadores</a>
+      <a href="{{ url_for('torneos_public_list') }}" class="btn-ghost btn-slim">Torneos</a>
+    </div>
+  </div>
+
+  <!-- Chips de contexto -->
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Total categorías: {{ categorias_visible|length if categorias_visible else 0 }}</span>
+    {% if current_jugador %}
+      {% if current_jugador.categoria %}
+        <span class="chip"><span class="dot dot-yellow"></span>Mi categoría: {{ current_jugador.categoria.nombre }}</span>
+      {% endif %}
+      <span class="chip"><span class="dot dot-green"></span>Mis puntos: {{ current_jugador.puntos }}</span>
+    {% endif %}
   </div>
 </div>
 
@@ -103,14 +157,14 @@
   </select>
 
   <button type="submit" class="btn">Aplicar</button>
-  <a href="{{ url_for('ranking') }}" class="btn btn-ghost">Limpiar</a>
+  <a href="{{ url_for('ranking') }}" class="btn-ghost btn-slim">Limpiar</a>
 
   <div class="spacer"></div>
   <input id="searchBox" type="text" placeholder="Buscar jugador..." aria-label="Buscar jugador">
 </form>
 
 {% if grupos and grupos|length > 0 %}
-  <div class="card" style="padding:0;">
+  <div class="card table-card">
     <div class="table-wrap">
       <table id="rankingTable" class="rank">
         <thead>
@@ -199,7 +253,7 @@
 
 {% block help_content %}
 <style>
-  /* Ayuda compacta (mismo patrón que ya venimos usando) */
+  /* Ayuda compacta */
   .help-container{ display:flex; justify-content:center; width:100%; }
   .help-wrap{
     width:min(800px, 90vw); margin:0 auto;

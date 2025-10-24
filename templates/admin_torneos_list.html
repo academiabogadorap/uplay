@@ -2,16 +2,88 @@
 {% block title %}Torneos (admin){% endblock %}
 
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Torneos</h2>
-    <a href="{{ url_for('admin_torneos_new') }}" class="btn">Nuevo torneo</a>
-  </div>
+<style>
+  /* ===== Hero ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px; margin-bottom:10px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pill{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:8px 12px; border-radius:999px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
+    font-weight:800; text-decoration:none;
+    color:#f2f7ff !important; text-shadow:0 1px 0 rgba(0,0,0,.35);
+  }
+  .pill:hover{ background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.28); }
 
-  {% if torneos|length == 0 %}
-    <div class="card"><p style="margin:0;">No hay torneos creados.</p></div>
-  {% else %}
-    <div class="card" style="padding:0;">
-      <table class="table">
+  /* ===== Card + tabla sticky ===== */
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
+  .card.pad-0{ padding:0; }
+  .table-wrap{ --thead-h:44px; max-height:70vh; overflow:auto; border-radius:12px;
+               mask-image:linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0)); }
+  table.t-admin{ width:100%; border-collapse:separate; border-spacing:0; margin:0; }
+  .t-admin thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  .t-admin tbody td{ padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:middle; }
+  .t-admin tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  .t-admin tbody tr:hover{ background:rgba(138,232,12,.05); }
+
+  /* ===== Badges por estado ===== */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+  .badge-draft{ background:#1b2f3b; border-color:#1a4d70; }   /* BORRADOR / INSCRIPCION */
+  .badge-live { background:#3b2f1b; border-color:#704d1a; }   /* EN_JUEGO */
+  .badge-done { background:#153c2a; border-color:#2a8b5f; }   /* FINALIZADO */
+
+  /* ===== Botones ===== */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* Responsive: ocultar columnas menos críticas */
+  @media (max-width:960px){
+    .t-admin thead th:nth-child(3), .t-admin tbody td:nth-child(3){ display:none; } /* Formato */
+  }
+  @media (max-width:760px){
+    .t-admin thead th:nth-child(6), .t-admin tbody td:nth-child(6){ display:none; } /* Inicio */
+  }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Torneos (admin)</h1>
+      <p class="muted" style="margin:.25rem 0 0;">Crear, editar y administrar</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('admin_torneos_new') }}" class="pill">➕ Nuevo torneo</a>
+      <a href="{{ url_for('torneos_public_list') }}" class="pill">Ver públicos</a>
+    </div>
+  </div>
+</div>
+
+{% if torneos|length == 0 %}
+  <div class="card"><p style="margin:0;">No hay torneos creados.</p></div>
+{% else %}
+  <div class="card pad-0">
+    <div class="table-wrap">
+      <table class="t-admin">
         <thead>
           <tr>
             <th>Nombre</th>
@@ -20,40 +92,50 @@
             <th>Categoría</th>
             <th>Estado</th>
             <th>Inicio</th>
-            <th style="width:220px;"></th>
+            <th style="width:240px;"></th>
           </tr>
         </thead>
         <tbody>
           {% for t in torneos %}
             {% set puede_borrar = t.estado in ['BORRADOR','INSCRIPCION'] %}
+
+            {# Modalidad: Individual/Parejas (SINGLES/DOBLES) #}
+            {% set mod_up = (t.modalidad or '')|upper %}
+            {% set modalidad_humana = 'INDIVIDUAL' if mod_up == 'SINGLES'
+                                      else 'PAREJAS' if mod_up == 'DOBLES'
+                                      else (t.modalidad or '-') %}
+
+            {# Formato: tipo del torneo #}
+            {% set tipo_up = (t.tipo or '')|upper %}
+            {% set formato_humano = 'AMERICANO' if tipo_up == 'AMERICANO'
+                                   else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
+                                   else 'PLAYOFF' if tipo_up == 'PLAYOFF'
+                                   else (t.tipo or '-') %}
+
+            {# Badge de estado #}
+            {% set est_up = (t.estado or '')|upper %}
+            {% set badge_cls = 'badge' %}
+            {% if est_up in ['BORRADOR','INSCRIPCION','INSCRIPCIÓN'] %}
+              {% set badge_cls = 'badge badge-draft' %}
+            {% elif est_up in ['EN_JUEGO','EN JUEGO'] %}
+              {% set badge_cls = 'badge badge-live' %}
+            {% elif est_up in ['FINALIZADO','CERRADO'] %}
+              {% set badge_cls = 'badge badge-done' %}
+            {% endif %}
+
             <tr>
               <td>{{ t.nombre }}</td>
-
-              {# Modalidad: Individual/Parejas (desde t.modalidad con valores SINGLES/DOBLES) #}
-              <td>
-                {{ 'INDIVIDUAL' if (t.modalidad or '').upper() == 'SINGLES'
-                   else 'PAREJAS' if (t.modalidad or '').upper() == 'DOBLES'
-                   else (t.modalidad or '-') }}
-              </td>
-
-              {# Formato: mostrar el TIPO del torneo (Americano, Zonas + Playoff, Playoff) #}
-              <td>
-                {% set tipo = (t.tipo or '') %}
-                {{ 'AMERICANO' if tipo.upper() == 'AMERICANO'
-                   else 'ZONAS + PLAYOFF' if tipo.upper() in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
-                   else 'PLAYOFF' if tipo.upper() == 'PLAYOFF'
-                   else (tipo or '-') }}
-              </td>
-
+              <td>{{ modalidad_humana }}</td>
+              <td>{{ formato_humano }}</td>
               <td>{{ t.categoria.nombre if t.categoria else '-' }}</td>
-              <td><span class="badge">{{ t.estado }}</span></td>
+              <td><span class="{{ badge_cls }}">{{ t.estado }}</span></td>
               <td>{{ t.fecha_inicio or '-' }}</td>
               <td style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
                 <a class="btn btn-ghost btn-slim" href="{{ url_for('admin_torneos_view', tid=t.id) }}">Ver</a>
 
+                {# Mantiene tu flujo de eliminación y confirm #}
                 <form action="{{ url_for('admin_torneo_eliminar', tid=t.id) }}"
-                      method="post"
-                      style="display:inline;"
+                      method="post" style="display:inline;"
                       {% if puede_borrar %}
                         onsubmit="return confirm('¿Eliminar el torneo ' + {{ t.nombre|tojson }} + '?\nEsta acción no se puede deshacer.');"
                       {% endif %}>
@@ -70,5 +152,6 @@
         </tbody>
       </table>
     </div>
-  {% endif %}
+  </div>
+{% endif %}
 {% endblock %}

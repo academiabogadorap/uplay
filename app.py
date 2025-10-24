@@ -25,6 +25,7 @@ from flask_wtf.csrf import CSRFError, generate_csrf
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import and_, or_, exists  # ← agregado exists
+from sqlalchemy import func, CheckConstraint, UniqueConstraint, Index
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import column_property
 from sqlalchemy.ext.associationproxy import association_proxy
@@ -1613,6 +1614,10 @@ class Torneo(db.Model):
 
 
 
+from datetime import datetime
+from sqlalchemy import event, or_
+from sqlalchemy.exc import IntegrityError
+
 class TorneoInscripcion(db.Model):
     __tablename__ = 'torneos_inscripciones'
     id = db.Column(db.Integer, primary_key=True)
@@ -1626,18 +1631,19 @@ class TorneoInscripcion(db.Model):
     seed = db.Column(db.Integer, nullable=True)
     confirmado = db.Column(db.Boolean, nullable=False, default=True)
 
-    # NUEVO: estado (PENDIENTE/ACTIVA/BAJA) y baja_motivo opcional
+    # estado (PENDIENTE/ACTIVA/BAJA) y baja_motivo
     estado = db.Column(db.String(15), nullable=False, default='ACTIVA')
     baja_motivo = db.Column(db.String(120), nullable=True)
 
-    # NUEVO: timestamps
+    # timestamps
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # NUEVO: clave normalizada de dupla para evitar duplicados (j1-j2 == j2-j1)
+    # Clave normalizada de dupla para evitar duplicados (j1-j2 == j2-j1)
+    # Mantiene coherencia con la ruta: "S:<id>" | "D:<a>-<b>"
     pareja_key = db.Column(db.String(50), nullable=True, index=True)
 
-    # Datos opcionales que ya tenías
+    # Datos opcionales
     alias = db.Column(db.String(80), nullable=True)
     club = db.Column(db.String(80), nullable=True)
     disponibilidad = db.Column(db.String(120), nullable=True)
@@ -1650,27 +1656,48 @@ class TorneoInscripcion(db.Model):
     __table_args__ = (
         # Evita inscribir dos veces a la misma persona/pareja en el mismo torneo (soporta singles y dobles)
         db.UniqueConstraint('torneo_id', 'pareja_key', name='uq_torneo_pareja_key'),
-        # Índices útiles de consulta
+        # Índices útiles
         db.Index('ix_insc_torneo', 'torneo_id'),
         db.Index('ix_insc_j1', 'jugador1_id'),
         db.Index('ix_insc_j2', 'jugador2_id'),
     )
 
     # -------- Helpers de conveniencia --------
-    def calcular_pareja_key(self):
+    def calcular_pareja_key(self) -> str:
         """
-        Normaliza la 'pareja' para evitar duplicados (j1-j2 == j2-j1).
-        En singles, se usa solo jugador1_id.
+        Normaliza la clave de inscripción:
+        - Singles:  S:<j1>
+        - Dobles:   D:<min(j1,j2)>-<max(j1,j2)>
+        Prioriza el formato del torneo si está disponible.
         """
-        if self.jugador2_id:
+        is_dobles = None
+        if self.torneo is not None:
+            try:
+                is_dobles = bool(self.torneo.es_dobles())
+            except Exception:
+                is_dobles = None
+
+        if is_dobles is None:
+            # fallback por datos presentes
+            is_dobles = bool(self.jugador2_id)
+
+        if is_dobles:
+            if not self.jugador2_id:
+                # Si falta j2 en dobles, devolvemos algo consistente pero inválido (se validará antes de insert/update)
+                return f"D:{int(self.jugador1_id)}-?"
             a, b = sorted([int(self.jugador1_id), int(self.jugador2_id)])
-            return f"{a}-{b}"
-        return f"{int(self.jugador1_id)}"
+            return f"D:{a}-{b}"
+
+        # Singles
+        return f"S:{int(self.jugador1_id)}"
 
     def es_dobles(self) -> bool:
         # Usa el formato del torneo cuando esté cargado
         if self.torneo:
-            return self.torneo.es_dobles()
+            try:
+                return bool(self.torneo.es_dobles())
+            except Exception:
+                pass
         # fallback: si hay jugador2 cargado
         return bool(self.jugador2_id)
 
@@ -1679,6 +1706,88 @@ class TorneoInscripcion(db.Model):
 
     def pertenece_a(self, jugador_id: int) -> bool:
         return jugador_id in self.integrantes_ids()
+
+
+# ============================
+#  Event listeners (validación)
+# ============================
+
+def _validar_inscripcion_y_setear_clave(mapper, connection, target: TorneoInscripcion):
+    """
+    - Setea pareja_key si falta, usando el helper consistente con la ruta.
+    - Valida:
+      * Formato (singles/dobles) vs. campos cargados.
+      * Categoría de jugador1 (y jugador2 si dobles) = categoría del torneo (si la tiene).
+    """
+    # Cargar torneo si no está pegado
+    torneo = target.torneo
+    if torneo is None and target.torneo_id:
+        # conexión cruda: cargar sólo lo necesario
+        row = connection.execute(
+            db.text("SELECT id, categoria_id, modalidad FROM torneos WHERE id = :tid"),
+            {"tid": target.torneo_id}
+        ).mappings().first()
+        if row:
+            class _T:
+                id = row["id"]
+                categoria_id = row["categoria_id"]
+                modalidad = row.get("modalidad") if hasattr(row, "get") else row["modalidad"]
+                def es_dobles(self):
+                    m = (self.modalidad or '').upper()
+                    return m in ('DOBLES', 'DOUBLES')
+            torneo = _T()
+
+    # --- Validación de formato
+    is_dobles = None
+    if torneo is not None:
+        try:
+            is_dobles = bool(torneo.es_dobles())
+        except Exception:
+            is_dobles = None
+    if is_dobles is None:
+        is_dobles = bool(target.jugador2_id)
+
+    if is_dobles and not target.jugador2_id:
+        raise IntegrityError("dobles-sin-j2", params=None, orig=None)
+    if (not is_dobles) and target.jugador2_id:
+        raise IntegrityError("singles-con-j2", params=None, orig=None)
+
+    # --- Setear pareja_key si está vacío
+    if not target.pareja_key:
+        target.pareja_key = target.calcular_pareja_key()
+
+    # --- Validación de categoría (si el torneo tiene categoría)
+    categoria_torneo_id = getattr(torneo, 'categoria_id', None) if torneo else None
+    if categoria_torneo_id:
+        # Cargar categorías de j1 y j2, si corresponde
+        j1_id = target.jugador1_id
+        j2_id = target.jugador2_id
+
+        if j1_id:
+            row_j1 = connection.execute(
+                db.text("SELECT categoria_id, activo FROM jugadores WHERE id = :jid"),
+                {"jid": j1_id}
+            ).mappings().first()
+            if not row_j1 or not row_j1["activo"]:
+                raise IntegrityError("jugador1-inactivo-o-invalido", params=None, orig=None)
+            if (row_j1["categoria_id"] or None) != categoria_torneo_id:
+                raise IntegrityError("categoria-j1-distinta-al-torneo", params=None, orig=None)
+
+        if is_dobles and j2_id:
+            row_j2 = connection.execute(
+                db.text("SELECT categoria_id, activo FROM jugadores WHERE id = :jid"),
+                {"jid": j2_id}
+            ).mappings().first()
+            if not row_j2 or not row_j2["activo"]:
+                raise IntegrityError("jugador2-inactivo-o-invalido", params=None, orig=None)
+            if (row_j2["categoria_id"] or None) != categoria_torneo_id:
+                raise IntegrityError("categoria-j2-distinta-al-torneo", params=None, orig=None)
+
+
+# Hookear en insert/update
+event.listen(TorneoInscripcion, 'before_insert', _validar_inscripcion_y_setear_clave)
+event.listen(TorneoInscripcion, 'before_update', _validar_inscripcion_y_setear_clave)
+
 
 
 class TorneoFase(db.Model):
@@ -2152,40 +2261,122 @@ class TorneoLlaveNodo(db.Model):
     partido = db.relationship('TorneoPartido', lazy='joined')
 
 # models.py (junto a tus otros modelos)
-from sqlalchemy import func
+
 
 class TorneoPartidoResultadoPropuesto(db.Model):
     __tablename__ = 'torneos_partidos_resultados_propuestos'
+
     id = db.Column(db.Integer, primary_key=True)
-    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id'), nullable=False, unique=True)
 
-    ganador_lado = db.Column(db.String(1), nullable=False)   # 'A' o 'B'
-    sets_text   = db.Column(db.String(120), nullable=True)   # ej. "6-3, 4-6, 10-8"
+    # Un PRP por partido (en DB ya era unique=True, lo dejamos y además documentamos por __table_args__)
+    partido_id = db.Column(
+        db.Integer,
+        db.ForeignKey('torneos_partidos.id', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,
+        index=True
+    )
 
-    # tracking / auditoría básica
-    propuesto_por_jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
-    creado_en = db.Column(db.DateTime, server_default=func.now(), nullable=False)
-    actualizado_en = db.Column(db.DateTime, onupdate=func.now())
+    # 'A' o 'B'
+    ganador_lado = db.Column(db.String(1), nullable=False)
+    # ej. "6-3, 4-6, 10-8"
+    sets_text    = db.Column(db.String(120), nullable=True)
+
+    # tracking / auditoría
+    propuesto_por_jugador_id = db.Column(
+        db.Integer,
+        db.ForeignKey('jugadores.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True
+    )
+    # Timestamps consistentes
+    creado_en       = db.Column(db.DateTime, nullable=False, server_default=func.now())
+    actualizado_en  = db.Column(db.DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     # confirmaciones por lado (None = pendiente; True = acepta; False = rechaza)
     confirma_ladoA = db.Column(db.Boolean, nullable=True)
     confirma_ladoB = db.Column(db.Boolean, nullable=True)
 
-    partido = db.relationship('TorneoPartido', backref=db.backref('propuesta', uselist=False, lazy='joined'))
+    # Relaciones
+    partido = db.relationship(
+        'TorneoPartido',
+        backref=db.backref('propuesta', uselist=False, lazy='joined'),
+        lazy='joined',
+        passive_deletes=True
+    )
+    propuesto_por = db.relationship('Jugador', foreign_keys=[propuesto_por_jugador_id], lazy='joined')
+
+    __table_args__ = (
+        # Asegura A/B en DB (si tu motor soporta CHECK)
+        CheckConstraint("ganador_lado IN ('A','B')", name='ck_torneo_prp_ganador_lado'),
+        # Redundante con unique=True, pero explícito si alguna vez quitas el flag:
+        UniqueConstraint('partido_id', name='uq_torneo_prp_partido'),
+        # Índices útiles
+        Index('ix_torneo_prp_lado', 'ganador_lado'),
+    )
+
+    # ------- Helpers de conveniencia (no rompen nada) -------
+    @property
+    def ambos_confirmaron(self) -> bool:
+        return self.confirma_ladoA is True and self.confirma_ladoB is True
+
+    def __repr__(self) -> str:
+        return f"<TorneoPRP partido={self.partido_id} ganador={self.ganador_lado}>"
+
 
 class TorneoPartidoResultado(db.Model):
     __tablename__ = 'torneos_partidos_resultados'
-    id = db.Column(db.Integer, primary_key=True)
-    partido_id = db.Column(db.Integer, db.ForeignKey('torneos_partidos.id'), nullable=False, unique=True)
 
-    ganador_lado = db.Column(db.String(1), nullable=False)    # 'A' o 'B'
-    ganador_participante_id = db.Column(db.Integer, db.ForeignKey('torneos_participantes.id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Un resultado definitivo por partido
+    partido_id = db.Column(
+        db.Integer,
+        db.ForeignKey('torneos_partidos.id', ondelete='CASCADE'),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    # 'A' o 'B' + ganador_participante_id (participante del torneo)
+    ganador_lado = db.Column(db.String(1), nullable=False)
+    ganador_participante_id = db.Column(
+        db.Integer,
+        db.ForeignKey('torneos_participantes.id', ondelete='SET NULL'),
+        nullable=False,
+        index=True
+    )
+
     sets_text = db.Column(db.String(120), nullable=True)
 
-    confirmado_en = db.Column(db.DateTime, server_default=func.now(), nullable=False)
-    confirmado_por_jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=True)
+    # Auditoría de confirmación
+    confirmado_en = db.Column(db.DateTime, nullable=False, server_default=func.now())
+    confirmado_por_jugador_id = db.Column(
+        db.Integer,
+        db.ForeignKey('jugadores.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True
+    )
 
-    partido = db.relationship('TorneoPartido', backref=db.backref('resultado_def', uselist=False, lazy='joined'))
+    # Relaciones
+    partido = db.relationship(
+        'TorneoPartido',
+        backref=db.backref('resultado_def', uselist=False, lazy='joined'),
+        lazy='joined',
+        passive_deletes=True
+    )
+    ganador_participante = db.relationship('TorneoParticipante', foreign_keys=[ganador_participante_id], lazy='joined')
+    confirmado_por = db.relationship('Jugador', foreign_keys=[confirmado_por_jugador_id], lazy='joined')
+
+    __table_args__ = (
+        CheckConstraint("ganador_lado IN ('A','B')", name='ck_torneo_res_ganador_lado'),
+        UniqueConstraint('partido_id', name='uq_torneo_resultado_partido'),
+        Index('ix_torneo_res_lado', 'ganador_lado'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TorneoRes partido={self.partido_id} ganador={self.ganador_lado} participante={self.ganador_participante_id}>"
+
 
 
 # Crear DB si no existe
@@ -3674,6 +3865,8 @@ def partidos_new():
 # =========================
 @app.route('/partidos/<int:partido_id>/resultado', methods=['GET', 'POST'])
 def partidos_resultado(partido_id):
+    from datetime import datetime
+
     j = get_current_jugador()
     if not j:
         flash('Iniciá sesión.', 'error')
@@ -3700,27 +3893,24 @@ def partidos_resultado(partido_id):
         }
     except Exception:
         participantes_ids = set()
+
     soy_participante = j.id in participantes_ids
     if not (soy_participante or getattr(j, 'is_admin', False)):
         flash('Solo los jugadores del partido (o un admin) pueden cargar el resultado.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # 3) Evaluar permisos/flujo con helper (incluye estados válidos como ACEPTADO)
-    ok, motivo, debe_responder, prp = puede_proponer_resultado(p, j)
-    if debe_responder:
-        flash("Ya hay una propuesta del rival: por favor, respondela.", "warning")
-        return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
-    if not ok and not getattr(j, 'is_admin', False):
-        flash(motivo or "Este partido no permite cargar resultado en su estado actual.", "error")
-        return redirect(url_for('partidos_list'))
+    # 3) Si ya hay propuesta del rival, redirigir a confirmar
+    # (usamos únicamente los campos del propio Partido para evitar sangrado a torneos)
+    ya_hay_propuesta = p.resultado_propuesto_ganador_pareja_id is not None
+    if ya_hay_propuesta:
+        # Si la propuso el rival, que vayan a confirmar
+        soy_p1 = bool(p.pareja1 and j.id in (p.pareja1.jugador1_id, p.pareja1.jugador2_id))
+        mi_confirmacion = p.confirmo_pareja1 if soy_p1 else p.confirmo_pareja2
+        if not mi_confirmacion:
+            flash("Ya hay una propuesta del rival: por favor, respondela.", "warning")
+            return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
 
-    # 4) Modelo PRP (si existe el modelo en tu app)
-    try:
-        from .models import PartidoResultadoPropuesto as PRP
-    except Exception:
-        PRP = globals().get('PartidoResultadoPropuesto', None)
-
-    # 5) POST: crear/editar propuesta (no cierra partido)
+    # 4) POST: crear/editar propuesta (no cierra partido)
     if request.method == 'POST':
         ganador_id = request.form.get('ganador_pareja_id')
         sets_text  = (request.form.get('sets_text') or '').strip() or None
@@ -3740,21 +3930,7 @@ def partidos_resultado(partido_id):
 
         soy_p1 = bool(p.pareja1 and j.id in (p.pareja1.jugador1_id, p.pareja1.jugador2_id))
 
-        # Crear/editar PRP (si hay tabla)
-        if PRP:
-            if prp is None:
-                prp = PRP(partido_id=p.id)
-            prp.propuesto_por_pareja_id = p.pareja1_id if soy_p1 else p.pareja2_id
-            prp.ganador_pareja_id = ganador_id
-            prp.sets_text = sets_text
-            # Si tu modelo tiene updated_at/usá creado_en como timestamp de última edición
-            if hasattr(prp, 'updated_en'):
-                prp.updated_en = datetime.utcnow()
-            else:
-                prp.creado_en = datetime.utcnow()
-            db.session.add(prp)
-
-        # Legacy para compatibilidad (autocierre >12h)
+        # Grabar SOLO en el propio partido (legacy fields)
         p.resultado_propuesto_ganador_pareja_id = ganador_id
         p.resultado_propuesto_sets_text = sets_text
         p.resultado_propuesto_por_id = j.id
@@ -3764,19 +3940,17 @@ def partidos_resultado(partido_id):
         p.estado = 'PROPUESTO'
         if soy_p1:
             p.confirmo_pareja1 = 1
-            p.confirmo_pareja2 = None  # limpiar por si había confirmación vieja
+            p.confirmo_pareja2 = None
         else:
             p.confirmo_pareja2 = 1
-            p.confirmo_pareja1 = None  # limpiar por si había confirmación vieja
+            p.confirmo_pareja1 = None
 
         db.session.commit()
         flash('Resultado propuesto. Ahora debe confirmarlo la otra pareja.', 'ok')
         return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
 
-    # 6) GET → mostrar formulario (si prp existe y es de mi lado, permitimos “editar”)
-    return render_template('partidos_resultado.html', partido=p, prp=prp)
-
-
+    # 5) GET → mostrar formulario
+    return render_template('partidos_resultado.html', partido=p, prp=None)
 
 # =========================
 # RUTA: RESPONDER INVITACIÓN (aceptar/rechazar rivales/compañero)
@@ -3913,8 +4087,14 @@ def partidos_responder(partido_id):
 # =========================
 # RUTA: CONFIRMAR / RECHAZAR PROPUESTA DE RESULTADO
 # =========================
+from datetime import datetime
+from sqlalchemy import and_
+
 @app.route('/partidos/<int:partido_id>/confirmar-resultado', methods=['GET', 'POST'])
 def partidos_confirmar_resultado(partido_id):
+    from datetime import datetime
+
+    # Carga estricta del partido solicitado
     p = get_or_404(Partido, partido_id)
     yo = get_current_jugador()
     if not yo:
@@ -3926,25 +4106,20 @@ def partidos_confirmar_resultado(partido_id):
         flash('Este partido ya no está pendiente de confirmación.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # PRP (si existe) + legacy
-    try:
-        from .models import PartidoResultadoPropuesto as PRP
-    except Exception:
-        PRP = globals().get('PartidoResultadoPropuesto', None)
-
-    prp = None
-    if PRP:
-        prp = db.session.query(PRP).filter_by(partido_id=p.id).one_or_none()
-
-    if (p.resultado_propuesto_ganador_pareja_id is None) and (prp is None):
+    # Usamos solo la propuesta guardada en el propio Partido
+    if p.resultado_propuesto_ganador_pareja_id is None:
         flash('Aún no hay un resultado propuesto.', 'error')
         return redirect(url_for('partidos_list'))
 
-    # Debe ser participante
-    participantes_ids = {
-        p.pareja1.jugador1_id, p.pareja1.jugador2_id,
-        p.pareja2.jugador1_id, p.pareja2.jugador2_id
-    }
+    # Debe ser participante (o admin)
+    try:
+        participantes_ids = {
+            p.pareja1.jugador1_id, p.pareja1.jugador2_id,
+            p.pareja2.jugador1_id, p.pareja2.jugador2_id
+        }
+    except Exception:
+        participantes_ids = set()
+
     if yo.id not in participantes_ids and not getattr(yo, 'is_admin', False):
         flash('Solo jugadores de este partido pueden confirmar el resultado.', 'error')
         return redirect(url_for('partidos_list'))
@@ -3957,166 +4132,175 @@ def partidos_confirmar_resultado(partido_id):
             flash('Acción inválida.', 'error')
             return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
 
-        # --- RECHAZAR: limpiar propuesta (tabla + legacy) y volver a PENDIENTE
-        if accion == 'rechazar':
-            if prp:
-                db.session.delete(prp)
-            p.resultado_propuesto_ganador_pareja_id = None
-            p.resultado_propuesto_sets_text = None
-            p.resultado_propuesto_por_id = None
-            p.resultado_propuesto_en = None
-            p.confirmo_pareja1 = None
-            p.confirmo_pareja2 = None
-            # trazabilidad del rechazo
-            p.rechazo_ultimo_por_id = yo.id
-            p.rechazo_ultimo_en = datetime.utcnow()
-            p.estado = 'PENDIENTE'
+        try:
+            # --- RECHAZAR: limpiar propuesta y volver a PENDIENTE
+            if accion == 'rechazar':
+                p.resultado_propuesto_ganador_pareja_id = None
+                p.resultado_propuesto_sets_text = None
+                p.resultado_propuesto_por_id = None
+                p.resultado_propuesto_en = None
+                p.confirmo_pareja1 = None
+                p.confirmo_pareja2 = None
+                # trazabilidad del rechazo
+                p.rechazo_ultimo_por_id = yo.id
+                p.rechazo_ultimo_en = datetime.utcnow()
+                p.estado = 'PENDIENTE'
+                db.session.commit()
+                flash('Rechazaste la propuesta. El partido sigue pendiente sin resultado.', 'ok')
+                return redirect(url_for('partidos_list'))
+
+            # --- ACEPTAR: marcar confirmación de MI pareja
+            if soy_p1:
+                p.confirmo_pareja1 = 1
+            else:
+                p.confirmo_pareja2 = 1
+
+            # ¿Ambas parejas confirmadas? → cerrar y aplicar puntos
+            if (p.confirmo_pareja1 == 1) and (p.confirmo_pareja2 == 1):
+                ganador_id = p.resultado_propuesto_ganador_pareja_id
+                sets_text  = p.resultado_propuesto_sets_text
+
+                # === CIERRE con tu lógica de puntos + bonus + desafío ===
+                DELTA_WIN = globals().get('DELTA_WIN', -10)
+                DELTA_LOSS = globals().get('DELTA_LOSS', +5)
+                DELTA_WIN_BONUS = globals().get('DELTA_WIN_BONUS', -3)
+                BONUS_APLICA_DESDE = globals().get('BONUS_APLICA_DESDE', 3)
+
+                def clamp_por_jugador(jg):
+                    cat = getattr(jg, 'categoria', None)
+                    if not cat:
+                        return jg.puntos
+                    try:
+                        p_val = int(jg.puntos or 0)
+                        pmin = int(cat.puntos_min)
+                        pmax = int(cat.puntos_max)
+                    except Exception:
+                        return jg.puntos
+                    jg.puntos = max(pmin, min(pmax, p_val))
+                    return jg.puntos
+
+                p1 = p.pareja1
+                p2 = p.pareja2
+                pareja_g = p1 if ganador_id == p1.id else p2
+                pareja_p = p2 if ganador_id == p1.id else p1
+
+                ganadores  = [pareja_g.jugador1, pareja_g.jugador2]
+                perdedores = [pareja_p.jugador1, pareja_p.jugador2]
+
+                # bonus por repetición de victorias
+                victorias_previas = (
+                    db.session.query(PartidoResultado)
+                    .join(Partido, PartidoResultado.partido_id == Partido.id)
+                    .filter(PartidoResultado.ganador_pareja_id == pareja_g.id)
+                    .filter(Partido.id != p.id)  # nunca contar el actual
+                    .count()
+                )
+                aplica_bonus = (victorias_previas + 1) >= BONUS_APLICA_DESDE
+
+                for jg in ganadores:
+                    base = (jg.puntos or (jg.categoria.puntos_max if jg.categoria else 0))
+                    jg.puntos = base + DELTA_WIN + (DELTA_WIN_BONUS if aplica_bonus else 0)
+                    clamp_por_jugador(jg)
+
+                for jp in perdedores:
+                    base = (jp.puntos or (jp.categoria.puntos_max if jp.categoria else 0))
+                    jp.puntos = base + DELTA_LOSS
+                    clamp_por_jugador(jp)
+
+                # Registrar resultado definitivo
+                pr = PartidoResultado(
+                    partido_id=p.id,
+                    ganador_pareja_id=ganador_id,
+                    sets_text=sets_text or None
+                )
+                db.session.add(pr)
+                p.estado = 'JUGADO'
+
+                # Desafío (si aplica) — tu lógica actual
+                desafio = Desafio.query.filter_by(partido_id=p.id).first()
+                msg_extra = ''
+                if desafio:
+                    def ensure_estado(jg):
+                        e = JugadorEstado.query.filter_by(jugador_id=jg.id).first()
+                        if not e:
+                            e = JugadorEstado(jugador_id=jg.id)
+                            db.session.add(e)
+                            db.session.flush()
+                        return e
+
+                    pareja_inferior = p.pareja1
+                    pareja_superior = p.pareja2
+                    inferiores = [pareja_inferior.jugador1, pareja_inferior.jugador2]
+                    superiores = [pareja_superior.jugador1, pareja_superior.jugador2]
+
+                    if ganador_id == pareja_inferior.id:
+                        subio_alguien = []
+                        for jj in inferiores:
+                            e = ensure_estado(jj)
+                            e.victorias_vs_superior = (e.victorias_vs_superior or 0) + 1
+                            if e.victorias_vs_superior >= 3:
+                                cat_sup = desafio.categoria_superior
+                                if cat_sup:
+                                    jj.categoria_id = cat_sup.id
+                                    jj.puntos = cat_sup.puntos_max
+                                e.victorias_vs_superior = 0
+                                e.derrotas_vs_inferior = 0
+                                subio_alguien.append(jj.nombre_completo)
+                        if subio_alguien:
+                            msg_extra += f" Ascenso: {', '.join(subio_alguien)}."
+                    else:
+                        bajo_alguien = []
+                        for jj in superiores:
+                            e = ensure_estado(jj)
+                            e.derrotas_vs_inferior = (e.derrotas_vs_inferior or 0) + 1
+                            if e.derrotas_vs_inferior >= 3:
+                                cat_inf = desafio.categoria_origen
+                                if cat_inf:
+                                    jj.categoria_id = cat_inf.id
+                                    jj.puntos = cat_inf.puntos_max
+                                e.derrotas_vs_inferior = 0
+                                e.victorias_vs_superior = 0
+                                bajo_alguien.append(jj.nombre_completo)
+                        if bajo_alguien:
+                            msg_extra += f" Descenso: {', '.join(bajo_alguien)}."
+
+                    desafio.estado = 'JUGADO'
+
+                # Limpiar la propuesta (solo de este partido)
+                p.resultado_propuesto_ganador_pareja_id = None
+                p.resultado_propuesto_sets_text = None
+                p.resultado_propuesto_en = None
+                p.resultado_propuesto_por_id = None
+                p.confirmo_pareja1 = None
+                p.confirmo_pareja2 = None
+
+                db.session.commit()
+                base_msg = ('Resultado confirmado y cerrado. Se aplicó bonus por compañero'
+                            if aplica_bonus else
+                            'Resultado confirmado y cerrado.')
+                flash(base_msg + (f' {msg_extra}' if msg_extra else ''), 'ok')
+                return redirect(url_for('partidos_list'))
+
+            # Aceptación parcial: mantener/forzar PROPUESTO
+            if p.estado != 'PROPUESTO':
+                p.estado = 'PROPUESTO'
             db.session.commit()
-            flash('Rechazaste la propuesta. El partido sigue pendiente sin resultado.', 'ok')
+            flash('Tu confirmación fue registrada. Falta la otra pareja.', 'ok')
             return redirect(url_for('partidos_list'))
 
-        # --- ACEPTAR: marcar confirmación de mi pareja
-        if soy_p1:
-            p.confirmo_pareja1 = 1
-        else:
-            p.confirmo_pareja2 = 1
-
-        # ¿Ambas parejas confirmadas? → cerrar y aplicar puntos
-        if (p.confirmo_pareja1 == 1) and (p.confirmo_pareja2 == 1):
-            ganador_id = prp.ganador_pareja_id if prp else p.resultado_propuesto_ganador_pareja_id
-            sets_text  = prp.sets_text if prp else p.resultado_propuesto_sets_text
-
-            # === CIERRE con tu lógica de puntos + bonus + desafío ===
-            DELTA_WIN = globals().get('DELTA_WIN', -10)
-            DELTA_LOSS = globals().get('DELTA_LOSS', +5)
-            DELTA_WIN_BONUS = globals().get('DELTA_WIN_BONUS', -3)
-            BONUS_APLICA_DESDE = globals().get('BONUS_APLICA_DESDE', 3)
-
-            def clamp_por_jugador(j):
-                cat = getattr(j, 'categoria', None)
-                if not cat:
-                    return j.puntos
-                try:
-                    p_val = int(j.puntos or 0)
-                    pmin = int(cat.puntos_min)
-                    pmax = int(cat.puntos_max)
-                except Exception:
-                    return j.puntos
-                j.puntos = max(pmin, min(pmax, p_val))
-                return j.puntos
-
-            p1 = p.pareja1
-            p2 = p.pareja2
-            pareja_g = p1 if ganador_id == p1.id else p2
-            pareja_p = p2 if ganador_id == p1.id else p1
-
-            ganadores  = [pareja_g.jugador1, pareja_g.jugador2]
-            perdedores = [pareja_p.jugador1, pareja_p.jugador2]
-
-            victorias_previas = (
-                db.session.query(PartidoResultado)
-                .join(Partido, PartidoResultado.partido_id == Partido.id)
-                .filter(PartidoResultado.ganador_pareja_id == pareja_g.id)
-                .filter(Partido.id != p.id)
-                .count()
-            )
-            aplica_bonus = (victorias_previas + 1) >= BONUS_APLICA_DESDE
-
-            for jg in ganadores:
-                base = (jg.puntos or (jg.categoria.puntos_max if jg.categoria else 0))
-                jg.puntos = base + DELTA_WIN + (DELTA_WIN_BONUS if aplica_bonus else 0)
-                clamp_por_jugador(jg)
-
-            for jp in perdedores:
-                base = (jp.puntos or (jp.categoria.puntos_max if jp.categoria else 0))
-                jp.puntos = base + DELTA_LOSS
-                clamp_por_jugador(jp)
-
-            pr = PartidoResultado(
-                partido_id=p.id,
-                ganador_pareja_id=ganador_id,
-                sets_text=sets_text or None
-            )
-            db.session.add(pr)
-            p.estado = 'JUGADO'
-
-            # Desafío (si aplica)
-            desafio = Desafio.query.filter_by(partido_id=p.id).first()
-            msg_extra = ''
-            if desafio:
-                def ensure_estado(j):
-                    e = JugadorEstado.query.filter_by(jugador_id=j.id).first()
-                    if not e:
-                        e = JugadorEstado(jugador_id=j.id)
-                        db.session.add(e)
-                        db.session.flush()
-                    return e
-
-                pareja_inferior = p.pareja1
-                pareja_superior = p.pareja2
-                inferiores = [pareja_inferior.jugador1, pareja_inferior.jugador2]
-                superiores = [pareja_superior.jugador1, pareja_superior.jugador2]
-
-                if ganador_id == pareja_inferior.id:
-                    subio_alguien = []
-                    for jj in inferiores:
-                        e = ensure_estado(jj)
-                        e.victorias_vs_superior = (e.victorias_vs_superior or 0) + 1
-                        if e.victorias_vs_superior >= 3:
-                            cat_sup = desafio.categoria_superior
-                            if cat_sup:
-                                jj.categoria_id = cat_sup.id
-                                jj.puntos = cat_sup.puntos_max
-                            e.victorias_vs_superior = 0
-                            e.derrotas_vs_inferior = 0
-                            subio_alguien.append(jj.nombre_completo)
-                    if subio_alguien:
-                        msg_extra += f" Ascenso: {', '.join(subio_alguien)}."
-                else:
-                    bajo_alguien = []
-                    for jj in superiores:
-                        e = ensure_estado(jj)
-                        e.derrotas_vs_inferior = (e.derrotas_vs_inferior or 0) + 1
-                        if e.derrotas_vs_inferior >= 3:
-                            cat_inf = desafio.categoria_origen
-                            if cat_inf:
-                                jj.categoria_id = cat_inf.id
-                                jj.puntos = cat_inf.puntos_max
-                            e.derrotas_vs_inferior = 0
-                            e.victorias_vs_superior = 0
-                            bajo_alguien.append(jj.nombre_completo)
-                    if bajo_alguien:
-                        msg_extra += f" Descenso: {', '.join(bajo_alguien)}."
-
-                desafio.estado = 'JUGADO'
-
-            # Limpiar propuesta (tabla + legacy)
-            if prp:
-                db.session.delete(prp)
-            p.resultado_propuesto_ganador_pareja_id = None
-            p.resultado_propuesto_sets_text = None
-            p.resultado_propuesto_en = None
-            p.resultado_propuesto_por_id = None
-            p.confirmo_pareja1 = None
-            p.confirmo_pareja2 = None
-
-            db.session.commit()
-            base_msg = ('Resultado confirmado y cerrado. Se aplicó bonus por compañero'
-                        if aplica_bonus else
-                        'Resultado confirmado y cerrado.')
-            flash(base_msg + (f' {msg_extra}' if msg_extra else ''), 'ok')
-            return redirect(url_for('partidos_list'))
-
-        # Aceptación parcial: mantener/forzar PROPUESTO
-        if p.estado != 'PROPUESTO':
-            p.estado = 'PROPUESTO'
-        db.session.commit()
-        flash('Tu confirmación fue registrada. Falta la otra pareja.', 'ok')
-        return redirect(url_for('partidos_list'))
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception("Error al confirmar/rechazar propuesta del partido %s", p.id)
+            flash('No se pudo procesar la acción. Intentá nuevamente.', 'error')
+            return redirect(url_for('partidos_confirmar_resultado', partido_id=p.id))
 
     # GET → mostrar propuesta + botones aceptar/rechazar
-    return render_template('partidos_confirmar_resultado.html',
-                           partido=p, yo=yo, soy_p1=soy_p1, propuesta=prp)
+    return render_template(
+        'partidos_confirmar_resultado.html',
+        partido=p, yo=yo, soy_p1=soy_p1, propuesta=None
+    )
+
+
 
 
 # === FUNCIÓN CORE: cierra propuestas >12h (idéntica a confirmar por ambas partes) ===
@@ -6017,6 +6201,30 @@ def get_current_jugador():
     jid = session.get('jugador_id')
     return db.session.get(Jugador, int(jid)) if jid else None
 
+# --- Helpers de categoría/visibilidad torneo ---
+
+def _jugador_puede_ver_torneo(torneo, jugador) -> bool:
+    """
+    Visibilidad en listas: si el torneo NO tiene categoría fija -> lo ven todos.
+    Si tiene categoría -> solo lo ven jugadores de ESA misma categoría.
+    """
+    if torneo is None:
+        return False
+    if getattr(torneo, 'categoria_id', None) is None:
+        return True
+    if jugador is None:
+        # usuario no logueado: solo mostramos torneos sin categoría fija
+        return False
+    return jugador.categoria_id == torneo.categoria_id
+
+def _jugador_puede_inscribirse_en_torneo(torneo, jugador) -> bool:
+    """
+    Inscripción: misma lógica que visibilidad (idéntica categoría si el torneo la tiene fija).
+    Si el torneo no tiene categoría fija, permitimos (puede que lo segmentes por puntos luego).
+    """
+    return _jugador_puede_ver_torneo(torneo, jugador)
+
+
 @app.route('/mi/pin', methods=['GET', 'POST'])
 def mi_cambiar_pin():
     j = get_current_jugador()
@@ -6682,6 +6890,11 @@ def torneo_inscribirme(tid):
 
     t = get_or_404(Torneo, tid)
 
+    # === 🔒 Validación de categoría ===
+    if getattr(t, 'categoria_id', None) and j.categoria_id != t.categoria_id:
+        flash('No podés inscribirte: el torneo es de otra categoría.', 'error')
+        return redirect(url_for('torneo_public_detail', torneo_id=t.id))
+
     # Helper local idempotente (si ya lo definiste global, se usa ese)
     try:
         build_pareja_key  # noqa: F821
@@ -6714,7 +6927,7 @@ def torneo_inscribirme(tid):
         flash('Cupo completo.', 'error')
         return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
-    # Evitar duplicado del propio jugador ya inscripto en cualquier rol
+    # Evitar duplicado del propio jugador ya inscripto
     ya = (db.session.query(TorneoInscripcion)
           .filter(TorneoInscripcion.torneo_id == t.id,
                   or_(TorneoInscripcion.jugador1_id == j.id,
@@ -6725,7 +6938,6 @@ def torneo_inscribirme(tid):
         return redirect(url_for('torneo_public_detail', torneo_id=t.id))
 
     if request.method == 'POST':
-        # Datos opcionales del form
         alias = request.form.get('alias') or None
         club = request.form.get('club') or None
         disponibilidad = request.form.get('disponibilidad') or None
@@ -6745,6 +6957,11 @@ def torneo_inscribirme(tid):
                 flash('Compañero inválido o inactivo.', 'error')
                 return redirect(url_for('torneo_inscribirme', tid=t.id))
 
+            # 🔒 Validación de categoría del compañero
+            if getattr(t, 'categoria_id', None) and comp.categoria_id != t.categoria_id:
+                flash('El compañero no pertenece a la categoría del torneo.', 'error')
+                return redirect(url_for('torneo_inscribirme', tid=t.id))
+
             # El compañero ya está inscripto?
             ya_comp = (db.session.query(TorneoInscripcion)
                        .filter(TorneoInscripcion.torneo_id == t.id,
@@ -6756,7 +6973,6 @@ def torneo_inscribirme(tid):
                 return redirect(url_for('torneo_inscribirme', tid=t.id))
 
             pareja_key = build_pareja_key(t, j.id, comp.id)
-            # Evitar duplicado por pareja_key
             dup = TorneoInscripcion.query.filter_by(torneo_id=t.id, pareja_key=pareja_key).first()
             if dup:
                 flash('Esa pareja ya está inscripta en este torneo.', 'error')
@@ -6792,7 +7008,7 @@ def torneo_inscribirme(tid):
                 confirmado=True
             )
 
-        # Timestamps defensivos (por si la DB no auto-setea)
+        # Timestamps defensivos
         now = datetime.utcnow()
         if hasattr(ins, "created_at") and getattr(ins, "created_at") is None:
             ins.created_at = now
@@ -7012,28 +7228,41 @@ def admin_torneo_eliminar(tid):
     return redirect(url_for('admin_torneos_list'))
 
 
-
-
 @app.route('/torneos', methods=['GET'])
 def torneos_public_list():
     # Filtros de querystring
     estado = (request.args.get('estado') or '').upper().strip()
     categoria_id = request.args.get('categoria', type=int)
 
+    # Jugador actual (si está logueado)
+    j = get_current_jugador()
+
     # Solo torneos públicos (visibles para todos)
     q = db.session.query(Torneo).filter(Torneo.es_publico.is_(True))
+
+    # ---- Filtro de VISIBILIDAD por categoría del jugador ----
+    # - Logueado: ve torneos sin categoría fija o de su misma categoría
+    # - No logueado: ve solo torneos sin categoría fija
+    if j is not None:
+        q = q.filter(or_(Torneo.categoria_id.is_(None),
+                         Torneo.categoria_id == j.categoria_id))
+    else:
+        q = q.filter(Torneo.categoria_id.is_(None))
 
     # Filtro por estado (se mantiene tu lógica)
     if estado in {'BORRADOR','INSCRIPCION','EN_JUEGO','FINALIZADO','CANCELADO'}:
         q = q.filter(Torneo.estado == estado)
 
-    # Filtro por categoría (opcional)
+    # Filtro por categoría (opcional) — se aplica además de la visibilidad
     if categoria_id:
         q = q.filter(Torneo.categoria_id == categoria_id)
 
     # Orden: primero por fecha (si existe), luego por creación (como tenías)
-    # Si preferís solo por created_at, podés dejar la línea original.
-    torneos = q.order_by(Torneo.fecha_inicio.is_(None), Torneo.fecha_inicio.asc(), Torneo.created_at.desc()).all()
+    torneos = q.order_by(
+        Torneo.fecha_inicio.is_(None),
+        Torneo.fecha_inicio.asc(),
+        Torneo.created_at.desc()
+    ).all()
 
     return render_template(
         'torneos_list.html',
@@ -7041,6 +7270,7 @@ def torneos_public_list():
         estado=estado,
         categoria=categoria_id
     )
+
 
 @app.route('/torneos/<int:torneo_id>', methods=['GET'])
 def torneo_public_detail(torneo_id: int):
@@ -7464,6 +7694,7 @@ def torneo_partido_detalle(partido_id: int):
 # ================ PROPONER =================
 @app.route('/torneos/partidos/<int:partido_id>/proponer', methods=['GET', 'POST'])
 def torneo_partido_proponer(partido_id: int):
+    """Crear/editar la propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
     # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
 
@@ -7473,7 +7704,7 @@ def torneo_partido_proponer(partido_id: int):
         abort(403)
 
     # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)            # {'A': True/False, 'B': True/False}
+    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
     lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
 
     es_admin = bool(getattr(j, 'is_admin', False))
@@ -7484,11 +7715,11 @@ def torneo_partido_proponer(partido_id: int):
         abort(403)
 
     # Si ya está cerrado, no permitir nuevas propuestas
-    if p.estado == 'JUGADO' or getattr(p, 'resultado_def', None):
+    if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Leer (si existe) propuesta actual para prellenar el form
+    # Leer (si existe) propuesta actual para prellenar el form (SIEMPRE scoping por partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
 
     if request.method == 'GET':
@@ -7499,53 +7730,64 @@ def torneo_partido_proponer(partido_id: int):
     # POST (submit)
     # ----------------
     ganador_lado = (request.form.get('ganador_lado') or '').strip().upper()
-    # Normalización suave del texto de sets; si tenés un helper global, podés reemplazar esta línea por él
-    sets_text = (request.form.get('sets_text') or '').strip()
+    sets_text = (request.form.get('sets_text') or '').strip() or None
 
+    # Validación del lado ganador y existencia de lados en el partido
     if ganador_lado not in ('A', 'B'):
         flash('Seleccioná el lado ganador (A o B).', 'error')
         return redirect(url_for('torneo_partido_proponer', partido_id=partido_id))
 
-    if prop is None:
-        # Crear propuesta
-        prop = TorneoPartidoResultadoPropuesto(
-            partido_id=p.id,
-            ganador_lado=ganador_lado,
-            sets_text=sets_text,
-            propuesto_por_jugador_id=j.id,
-            # auto-confirma SOLO el lado del proponente si es participante; admin no-participante no auto-confirma
-            confirma_ladoA=True if lado_user == 'A' else None,
-            confirma_ladoB=True if lado_user == 'B' else None,
-        )
-        db.session.add(prop)
-    else:
-        # Editar propuesta existente
-        prop.ganador_lado = ganador_lado
-        prop.sets_text = sets_text
-        prop.propuesto_por_jugador_id = j.id
+    # (Opcional) Si querés validar que ambos lados tengan jugadores:
+    # _validar_lados_torneo(p)  # si tenés un helper, si no, podés omitir
 
-        # Si propone un participante, auto-confirma su lado y resetea el contrario a "pendiente" (si no estaba confirmado)
-        if lado_user == 'A':
-            prop.confirma_ladoA = True
-            if prop.confirma_ladoB is not True:
-                prop.confirma_ladoB = None
-        elif lado_user == 'B':
-            prop.confirma_ladoB = True
-            if prop.confirma_ladoA is not True:
-                prop.confirma_ladoA = None
-        # Si propone un admin que no participa, no se auto-confirma ningún lado
+    try:
+        # Crear/editar propuesta SIEMPRE aislado al partido p.id
+        if prop is None:
+            prop = TorneoPartidoResultadoPropuesto(
+                partido_id=p.id,
+                ganador_lado=ganador_lado,
+                sets_text=sets_text,
+                propuesto_por_jugador_id=j.id,
+                # auto-confirma SOLO el lado del proponente si es participante; admin no-participante no auto-confirma
+                confirma_ladoA=True if lado_user == 'A' else None,
+                confirma_ladoB=True if lado_user == 'B' else None,
+            )
+            db.session.add(prop)
+        else:
+            # Editar propuesta existente (manteniendo scoping por partido)
+            prop.ganador_lado = ganador_lado
+            prop.sets_text = sets_text
+            prop.propuesto_por_jugador_id = j.id
 
-    # Marcar estado del partido como PROPUESTO (si no está ya cerrado)
-    p.estado = 'PROPUESTO'
-    db.session.commit()
+            # Si propone un participante, auto-confirma su lado y resetea el contrario a "pendiente" (si no estaba confirmado)
+            if lado_user == 'A':
+                prop.confirma_ladoA = True
+                if prop.confirma_ladoB is not True:
+                    prop.confirma_ladoB = None
+            elif lado_user == 'B':
+                prop.confirma_ladoB = True
+                if prop.confirma_ladoA is not True:
+                    prop.confirma_ladoA = None
+            # Si propone un admin que no participa, no se auto-confirma ningún lado
 
-    flash('Resultado propuesto enviado.', 'success')
-    return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+        # Marcar estado del partido como PROPUESTO (si no está ya cerrado)
+        p.estado = 'PROPUESTO'
+        db.session.commit()
+
+        flash('Resultado propuesto enviado.', 'success')
+        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Error al proponer resultado en torneo (partido_id=%s)", p.id)
+        flash('No se pudo enviar la propuesta. Intentá nuevamente.', 'error')
+        return redirect(url_for('torneo_partido_proponer', partido_id=partido_id))
 
 
 # ================ RESPONDER =================
 @app.route('/torneos/partidos/<int:partido_id>/responder', methods=['GET', 'POST'])
 def torneo_partido_responder(partido_id: int):
+    """Responder una propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
     # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
 
@@ -7555,7 +7797,7 @@ def torneo_partido_responder(partido_id: int):
         abort(403)
 
     # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)            # {'A': True/False, 'B': True/False}
+    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
     lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
 
     es_admin = bool(getattr(j, 'is_admin', False))
@@ -7566,11 +7808,11 @@ def torneo_partido_responder(partido_id: int):
         abort(403)
 
     # Si ya está cerrado, no permitir responder
-    if p.estado == 'JUGADO' or getattr(p, 'resultado_def', None):
+    if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Debe existir una propuesta para poder responder
+    # Debe existir una propuesta para poder responder (aislada a este partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
     if not prop:
         flash('No hay propuesta para responder.', 'warning')
@@ -7578,8 +7820,10 @@ def torneo_partido_responder(partido_id: int):
 
     if request.method == 'GET':
         # Admin no participante puede elegir lado en el form
-        return render_template('torneo_partido_responder.html',
-                               p=p, prop=prop, lado_user=lado_user, es_admin=es_admin)
+        return render_template(
+            'torneo_partido_responder.html',
+            p=p, prop=prop, lado_user=lado_user, es_admin=es_admin
+        )
 
     # ----------------
     # POST (submit)
@@ -7599,45 +7843,55 @@ def torneo_partido_responder(partido_id: int):
         flash('No se pudo determinar el lado que responde (A/B).', 'error')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Aplicar acción
-    if accion == 'aceptar':
-        if working_lado == 'A':
-            prop.confirma_ladoA = True
-        else:
-            prop.confirma_ladoB = True
+    try:
+        if accion == 'aceptar':
+            # Marcar confirmación del lado que responde
+            if working_lado == 'A':
+                prop.confirma_ladoA = True
+            else:
+                prop.confirma_ladoB = True
 
-        # Si ambos confirmaron -> cerrar partido
-        if prop.confirma_ladoA is True and prop.confirma_ladoB is True:
-            _finalizar_partido(
-                p,
-                prop.ganador_lado,
-                prop.sets_text,
-                confirmado_por_jugador_id=j.id  # quien ejecutó la confirmación final
-            )
+            # Si ambos confirmaron -> cerrar partido
+            if prop.confirma_ladoA is True and prop.confirma_ladoB is True:
+                _finalizar_partido(
+                    p,
+                    prop.ganador_lado,
+                    prop.sets_text,
+                    confirmado_por_jugador_id=j.id  # quien ejecutó la confirmación final
+                )
+                # Importante: limpiar SOLO la propuesta de ESTE partido
+                db.session.delete(prop)
+                db.session.commit()
+                flash('Partido cerrado como JUGADO.', 'success')
+                return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
+            # Aún falta la otra confirmación
+            p.estado = 'PROPUESTO'
             db.session.commit()
-            flash('Partido cerrado como JUGADO.', 'success')
+            flash('Aceptaste la propuesta. Falta confirmación del rival.', 'info')
             return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-        # Aún falta la otra confirmación
-        p.estado = 'PROPUESTO'
-        db.session.commit()
-        flash('Aceptaste la propuesta. Falta confirmación del rival.', 'info')
-        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+        elif accion == 'rechazar':
+            # Marcar rechazo del lado que responde (se mantiene la propuesta para auditoría)
+            if working_lado == 'A':
+                prop.confirma_ladoA = False
+            else:
+                prop.confirma_ladoB = False
 
-    elif accion == 'rechazar':
-        if working_lado == 'A':
-            prop.confirma_ladoA = False
+            # Queda para revisión manual
+            p.estado = 'EN_REVISION'
+            db.session.commit()
+            flash('Marcaste la propuesta como RECHAZADA. Se pasó a revisión.', 'warning')
+            return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
+
         else:
-            prop.confirma_ladoB = False
+            flash('Acción inválida.', 'error')
+            return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-        # Queda para revisión manual
-        p.estado = 'EN_REVISION'
-        db.session.commit()
-        flash('Marcaste la propuesta como RECHAZADA. Se pasó a revisión.', 'warning')
-        return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
-
-    else:
-        flash('Acción inválida.', 'error')
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Error al responder propuesta en torneo (partido_id=%s)", p.id)
+        flash('No se pudo procesar la respuesta. Intentá nuevamente.', 'error')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
 

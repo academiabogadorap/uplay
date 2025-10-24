@@ -1,89 +1,158 @@
 {% extends "base.html" %}
 {% block title %}Nuevo torneo{% endblock %}
+
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Nuevo torneo</h2>
-    <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
+<style>
+  /* ===== Hero ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px; margin-bottom:10px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pill{ display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+         background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18); font-weight:800; text-decoration:none; }
+
+  /* ===== Card + form ===== */
+  .card{
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:12px;
+    max-width:780px;
+  }
+  .form-grid{ display:grid; gap:10px; }
+  .row-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px; }
+
+  /* Inputs consistentes con el resto del sitio */
+  .field label{ display:block; margin:0 0 4px; color:var(--muted,#98a2b3); font-weight:700; }
+  .field input, .field select, .field textarea{
+    width:100%; box-sizing:border-box; height:38px; padding:8px 10px; border-radius:10px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text,#e6edf3);
+  }
+  .field textarea{ height:auto; min-height:92px; resize:vertical; }
+  .hint{ color:var(--muted,#9fb3c8); font-size:.9rem; margin-top:4px; }
+
+  /* Badges para ayuda visual */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.78rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+
+  /* Botones */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:800; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Nuevo torneo</h1>
+      <p class="hint" style="margin:.25rem 0 0;">Completá los campos y creá el torneo. Podrás ajustarlo luego desde “Ver”.</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('admin_torneos_list') }}" class="pill">Volver a la lista</a>
+    </div>
   </div>
+</div>
 
-  <div class="card" style="max-width:680px;">
-    <form method="post" style="display:grid; gap:10px;">
-      <div>
-        <label class="muted" for="nombre" style="display:block; margin-bottom:4px;">Nombre</label>
-        <input id="nombre" name="nombre" required placeholder="Ej: Torneo Primavera" style="width:100%;">
+<div class="card">
+  <form method="post" class="form-grid">
+    {% if csrf_token is defined %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+
+    <div class="field">
+      <label for="nombre">Nombre</label>
+      <input id="nombre" name="nombre" required placeholder="Ej: Torneo Primavera">
+    </div>
+
+    <div class="row-grid">
+      <div class="field">
+        <label for="modalidad">Modalidad <span class="badge">INDIVIDUAL / PAREJAS</span></label>
+        <select id="modalidad" name="modalidad" required>
+          <option value="SINGLES">INDIVIDUAL</option>
+          <option value="DOBLES">PAREJAS</option>
+        </select>
       </div>
 
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px;">
-        <div>
-          <label class="muted" for="modalidad" style="display:block; margin-bottom:4px;">Modalidad</label>
-          <select id="modalidad" name="modalidad" required>
-            <option value="SINGLES">INDIVIDUAL</option>
-            <option value="DOBLES">PAREJAS</option>
-          </select>
-        </div>
-        <div>
-          <label class="muted" for="formato" style="display:block; margin-bottom:4px;">Formato</label>
-          <select id="formato" name="formato" required>
-            <option value="AMERICANO">AMERICANO</option>
-            <option value="ZONAS+PLAYOFF">ZONAS + PLAYOFF</option>
-            <option value="PLAYOFF">PLAYOFF</option>
-          </select>
-        </div>
-        <div>
-          <label class="muted" for="categoria_id" style="display:block; margin-bottom:4px;">Categoría (opcional)</label>
-          <select id="categoria_id" name="categoria_id">
-            <option value="">— Sin categoría fija —</option>
-            {% for c in categorias %}
-              <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
-            {% endfor %}
-          </select>
-        </div>
+      <div class="field">
+        <label for="formato">Formato</label>
+        <select id="formato" name="formato" required>
+          <option value="AMERICANO">AMERICANO</option>
+          <option value="ZONAS+PLAYOFF">ZONAS + PLAYOFF</option>
+          <option value="PLAYOFF">PLAYOFF</option>
+        </select>
       </div>
 
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px;">
-        <div id="wrap_limite_jug">
-          <label class="muted" for="limite_jugadores" style="display:block; margin-bottom:4px;">Límite de jugadores (solo Individual)</label>
-          <input id="limite_jugadores" name="limite_jugadores" type="number" min="2" placeholder="Ej: 16" style="width:100%;">
-        </div>
-        <div id="wrap_limite_par">
-          <label class="muted" for="limite_parejas" style="display:block; margin-bottom:4px;">Límite de parejas (solo Parejas)</label>
-          <input id="limite_parejas" name="limite_parejas" type="number" min="2" placeholder="Ej: 16" style="width:100%;">
-        </div>
-        <div>
-          <label class="muted" for="fecha_inicio" style="display:block; margin-bottom:4px;">Fecha inicio (opcional)</label>
-          <input id="fecha_inicio" name="fecha_inicio" type="date" style="width:100%;">
-        </div>
+      <div class="field">
+        <label for="categoria_id">Categoría (opcional)</label>
+        <select id="categoria_id" name="categoria_id">
+          <option value="">— Sin categoría fija —</option>
+          {% for c in categorias %}
+            <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="row-grid">
+      <div id="wrap_limite_jug" class="field">
+        <label for="limite_jugadores">Límite de jugadores (solo Individual)</label>
+        <input id="limite_jugadores" name="limite_jugadores" type="number" min="2" placeholder="Ej: 16">
+        <div class="hint">Se usa cuando la modalidad es <strong>INDIVIDUAL</strong>.</div>
       </div>
 
-      <div>
-        <label class="muted" for="sede" style="display:block; margin-bottom:4px;">Sede (opcional)</label>
-        <input id="sede" name="sede" placeholder="Club, ciudad…" style="width:100%;">
+      <div id="wrap_limite_par" class="field">
+        <label for="limite_parejas">Límite de parejas (solo Parejas)</label>
+        <input id="limite_parejas" name="limite_parejas" type="number" min="2" placeholder="Ej: 16">
+        <div class="hint">Se usa cuando la modalidad es <strong>PAREJAS</strong>.</div>
       </div>
 
-      <div>
-        <label class="muted" for="notas" style="display:block; margin-bottom:4px;">Notas (opcional)</label>
-        <textarea id="notas" name="notas" rows="3" style="width:100%;" placeholder="Detalles, reglas, etc."></textarea>
+      <div class="field">
+        <label for="fecha_inicio">Fecha inicio (opcional)</label>
+        <input id="fecha_inicio" name="fecha_inicio" type="date">
       </div>
+    </div>
 
-      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
-        <button type="submit" class="btn">Crear torneo</button>
-        <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost">Cancelar</a>
-      </div>
-    </form>
-  </div>
+    <div class="field">
+      <label for="sede">Sede (opcional)</label>
+      <input id="sede" name="sede" placeholder="Club, ciudad…">
+    </div>
 
-  <script>
-    // Mostrar/ocultar límites según modalidad (los values siguen siendo SINGLES/DOBLES)
-    const modalidad = document.getElementById('modalidad');
-    const wrapJug = document.getElementById('wrap_limite_jug');
-    const wrapPar = document.getElementById('wrap_limite_par');
+    <div class="field">
+      <label for="notas">Notas (opcional)</label>
+      <textarea id="notas" name="notas" rows="3" placeholder="Detalles, reglas, etc."></textarea>
+    </div>
 
-    function syncLimites(){
-      const m = (modalidad.value || '').toUpperCase();
-      if (m === 'SINGLES') { wrapJug.style.display = ''; wrapPar.style.display = 'none'; }
-      else { wrapJug.style.display = 'none'; wrapPar.style.display = ''; }
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+      <button type="submit" class="btn">Crear torneo</button>
+      <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  // Mostrar/ocultar límites según modalidad (valores SINGLES/DOBLES)
+  const modalidad = document.getElementById('modalidad');
+  const wrapJug = document.getElementById('wrap_limite_jug');
+  const wrapPar = document.getElementById('wrap_limite_par');
+
+  function syncLimites(){
+    const m = (modalidad.value || '').toUpperCase();
+    if (m === 'SINGLES') {
+      wrapJug.style.display = '';
+      wrapPar.style.display = 'none';
+    } else {
+      wrapJug.style.display = 'none';
+      wrapPar.style.display = '';
     }
-    modalidad?.addEventListener('change', syncLimites);
-    syncLimites();
-  </script>
+  }
+  modalidad && modalidad.addEventListener('change', syncLimites);
+  syncLimites();
+</script>
 {% endblock %}
