@@ -4376,8 +4376,7 @@ def aplicar_delta_rankeable(j, delta):
         # sin categoría, aplicamos delta “crudo”
         try:
             j.puntos = int(j.puntos) + int(delta)
-        
-        clamp_por_jugador(j)
+            clamp_por_jugador(j)
         except Exception:
             pass
         return
@@ -8887,3 +8886,8 @@ def inject_csrf_token():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+# --- Healthcheck para Render ---
+@app.get("/health")
+def health():
+    return "ok", 200
