@@ -3228,6 +3228,30 @@ def jugadores_edit(jugador_id):
 @app.route('/jugadores/<int:jugador_id>/eliminar', methods=['POST'])
 @admin_required
 def jugadores_delete(jugador_id):
+    # --- Hard delete si ya está INACTIVO ---
+    j = db.session.get(Jugador, int(jugador_id))
+    if not j:
+        try:
+            from flask import flash, redirect, url_for
+            flash("Jugador no encontrado.", "danger")
+            return redirect(url_for("jugadores_listar"))
+        except Exception:
+            pass
+    inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
+    if inactivo:
+        try:
+            from flask import flash, redirect, url_for
+            if eliminar_jugador_si_posible(j):
+                flash("Jugador eliminado definitivamente.", "success")
+            else:
+                if hasattr(j, "activo"): j.activo = False
+                if hasattr(j, "inactivo"): j.inactivo = True
+                db.session.commit()
+                flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
+            return redirect(url_for("jugadores_listar"))
+        except Exception:
+            pass
+
     j = get_or_404(Jugador, jugador_id)
 
     try:
