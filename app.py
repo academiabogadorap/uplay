@@ -8811,15 +8811,20 @@ def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
     if not Jug:
         return
 
-    # 1) aplicar win/loss
+    # Helper esperado ya existente en tu app:
+    # aplicar_delta_rankeable(jugador, delta) -> ajusta puntos y "clampa" dentro del rango,
+    # permitiendo salir del rango inferior SOLO por la lógica de desafíos.
+
+    # 1) aplicar win/loss usando la misma lógica que en "partidos normales"
     for jid in win_ids:
         j = db.session.get(Jug, int(jid))
-        if j and j.puntos is not None:
-            j.puntos = int(j.puntos) + int(DELTA_WIN)
+        if j:
+            aplicar_delta_rankeable(j, DELTA_WIN)
+
     for jid in lose_ids:
         j = db.session.get(Jug, int(jid))
-        if j and j.puntos is not None:
-            j.puntos = int(j.puntos) + int(DELTA_LOSS)
+        if j:
+            aplicar_delta_rankeable(j, DELTA_LOSS)
 
     # 2) (opcional) bonus por compañero repetido desde la 3ra victoria conjunta
     #    Solo si el lado ganador es dupla (2 jugadores).
@@ -8841,10 +8846,13 @@ def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
                 (i2.jugador1_id IN (?, ?) OR i2.jugador2_id IN (?, ?))
             )
             """
-            # el criterio "IN (?,?)" es un mejor-esfuerzo; asume que la dupla a-b está distribuida en insc1/insc2
+            # el criterio "IN (?,?)" es un mejor-esfuerzo; asume que la dupla a-b está distribuida en i1/i2
             count_prev = db.session.execute(
-                db.text(sql), {'param_1': a, 'param_2': b, 'param_3': a, 'param_4': b,
-                               'param_5': a, 'param_6': b, 'param_7': a, 'param_8': b}
+                db.text(sql),
+                {
+                    'param_1': a, 'param_2': b, 'param_3': a, 'param_4': b,
+                    'param_5': a, 'param_6': b, 'param_7': a, 'param_8': b
+                }
             ).scalar_one_or_none()
             count_prev = int(count_prev or 0)
 
@@ -8852,11 +8860,12 @@ def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
             if count_prev + 1 >= int(BONUS_APLICA_DESDE):
                 for jid in win_ids:
                     j = db.session.get(Jug, int(jid))
-                    if j and j.puntos is not None:
-                        j.puntos = int(j.puntos) + int(DELTA_WIN_BONUS)
+                    if j:
+                        aplicar_delta_rankeable(j, DELTA_WIN_BONUS)
     except Exception:
         # Si algo falla en el bonus, no frenamos el flujo principal
         pass
+
 
 
 @app.errorhandler(CSRFError)
