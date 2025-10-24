@@ -229,7 +229,7 @@
 
                     {% if j.activo %}
                       <form method="post"
-                            action="{{ url_for('jugadores_deactivate', jugador_id=j.id) }}"
+                            action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
                             onsubmit="return confirm('¿Desactivar a {{ j.nombre_completo }}? Podrás reactivarlo después.');">
                         <button type="submit" class="btn-ghost btn-slim">Desactivar</button>
                       </form>

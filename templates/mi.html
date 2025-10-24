@@ -182,7 +182,7 @@
             </div>
             <div>
               {% if t.id %}
-                <a href="{{ url_for('torneos_public_view', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
+                <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
               {% else %}
                 <a href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}" class="btn btn-slim">Ver</a>
               {% endif %}
@@ -206,7 +206,7 @@
             </div>
             <div>
               {% if t.id %}
-                <a href="{{ url_for('torneos_public_view', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Info</a>
+                <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Info</a>
               {% else %}
                 <a href="{{ url_for('torneos_public_list') }}" class="btn btn-ghost btn-slim">Ver todos</a>
               {% endif %}
