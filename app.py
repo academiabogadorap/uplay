@@ -47,6 +47,16 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
+# --- Bypass de health para Render (se registra antes que otros before_request) ---
+@app.before_request
+def _health_bypass():
+    try:
+        from flask import request
+        if request.path == "/health":
+            return "ok", 200
+    except Exception:
+        # si algo falla, deja seguir el flujo normal
+        return None
 
 csrf = CSRFProtect()
 csrf.init_app(app)
