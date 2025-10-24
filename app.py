@@ -3232,7 +3232,6 @@ def jugadores_delete(jugador_id):
     j = db.session.get(Jugador, int(jugador_id))
     if not j:
         try:
-            from flask import flash, redirect, url_for
             flash("Jugador no encontrado.", "danger")
             return redirect(url_for("jugadores_listar"))
         except Exception:
@@ -3240,7 +3239,6 @@ def jugadores_delete(jugador_id):
     inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
     if inactivo:
         try:
-            from flask import flash, redirect, url_for
             if eliminar_jugador_si_posible(j):
                 flash("Jugador eliminado definitivamente.", "success")
             else:
