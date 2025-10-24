@@ -49,7 +49,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 app = Flask(__name__)
 # --- Interceptor: si jugador está inactivo y se accede a /jugadores/<id>/eliminar (o /jugadores/eliminar/<id>), intenta borrado real ---
 @app.before_request
-def _hard_delete_inactive_player():
+def _hard_delete_inactive_player_disabled():
     try:
         from flask import request, redirect, url_for, flash
         import re
@@ -114,7 +114,7 @@ def _hard_delete_inactive_player():
         return None
 # --- Interceptor: si jugador está inactivo y se POSTea /jugadores/<id>/eliminar, intenta borrado real ---
 @app.before_request
-def _hard_delete_inactive_player():
+def _hard_delete_inactive_player_disabled():
     try:
         from flask import request, redirect, url_for, flash
         import re
@@ -9027,3 +9027,36 @@ def eliminar_jugador_si_posible(j):
     except IntegrityError:
         db.session.rollback()
         return False
+
+# --- Hard delete: elimina definitivamente si ya está inactivo ---
+@app.post("/jugadores/<int:jug_id>/eliminar-fisico")
+def jugadores_eliminar_fisico(jug_id):
+    from flask import redirect, url_for, flash
+    j = db.session.get(Jugador, jug_id)
+    if not j:
+        flash("Jugador no encontrado.", "danger")
+        return redirect(url_for("jugadores_listar"))
+
+    inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
+
+    # Si está ACTIVO, mantenemos comportamiento actual: dejarlo inactivo
+    if not inactivo:
+        if hasattr(j, "activo"):
+            j.activo = False
+        if hasattr(j, "inactivo"):
+            j.inactivo = True
+        db.session.commit()
+        flash(f'Se desactivó a "{getattr(j,"nombre","Jugador")}".', "info")
+        return redirect(url_for("jugadores_listar"))
+
+    # Si ya está INACTIVO, intentamos borrado real
+    if eliminar_jugador_si_posible(j):
+        flash("Jugador eliminado definitivamente.", "success")
+    else:
+        # Dependencias: mantener inactivo y avisar
+        if hasattr(j, "activo"): j.activo = False
+        if hasattr(j, "inactivo"): j.inactivo = True
+        db.session.commit()
+        flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
+
+    return redirect(url_for("jugadores_listar"))
