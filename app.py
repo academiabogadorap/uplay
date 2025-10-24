@@ -4377,7 +4377,8 @@ def aplicar_delta_rankeable(j, delta):
         try:
             j.puntos = int(j.puntos) + int(delta)
         
-        clamp_por_jugador(j)except Exception:
+        clamp_por_jugador(j)
+        except Exception:
             pass
         return
 
