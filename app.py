@@ -4376,7 +4376,8 @@ def aplicar_delta_rankeable(j, delta):
         # sin categoría, aplicamos delta “crudo”
         try:
             j.puntos = int(j.puntos) + int(delta)
-        except Exception:
+        
+        clamp_por_jugador(j)except Exception:
             pass
         return
 
