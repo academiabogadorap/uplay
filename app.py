@@ -3239,6 +3239,40 @@ def jugadores_delete(jugador_id):
     inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
     if inactivo:
         try:
+                        # limpiar auxiliares antes de intentar FK delete
+            try:
+                try:
+                    from app import PartidoAbiertoJugador, JugadorEstado
+                    # ORM
+                    try:
+                        db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete()
+                    except Exception:
+                        pass
+                    try:
+                        JugadorEstado.query.filter_by(jugador_id=j.id).delete()
+                    except Exception:
+                        pass
+                    db.session.flush()
+                except Exception:
+                    pass
+                # Fallback SQL por si los nombres difieren
+                try:
+                    from sqlalchemy import text
+                    for sql in (
+                        "DELETE FROM partidos_abiertos_jugadores WHERE jugador_id = :id",
+                        "DELETE FROM abiertos_jugadores WHERE jugador_id = :id",
+                        "DELETE FROM jugadores_estados WHERE jugador_id = :id",
+                        "DELETE FROM jugador_estado WHERE jugador_id = :id"
+                    ):
+                        try:
+                            db.session.execute(text(sql), {"id": j.id})
+                        except Exception:
+                            pass
+                    db.session.flush()
+                except Exception:
+                    pass
+            except Exception:
+                pass
             if eliminar_jugador_si_posible(j):
                 flash("Jugador eliminado definitivamente.", "success")
             else:
