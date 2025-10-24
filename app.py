@@ -47,6 +47,49 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
+# --- Interceptor: si jugador está inactivo y se POSTea /jugadores/<id>/eliminar, intenta borrado real ---
+@app.before_request
+def _hard_delete_inactive_player():
+    try:
+        from flask import request, redirect, url_for, flash
+        import re
+        if request.method != "POST":
+            return None
+        m = re.fullmatch(r"/jugadores/(d+)/eliminar", request.path or "")
+        if not m:
+            return None
+
+        jug_id = int(m.group(1))
+        # Import local para evitar ciclos
+        from app import db, Jugador, eliminar_jugador_si_posible
+
+        j = db.session.get(Jugador, jug_id)
+        if not j:
+            try: flash("Jugador no encontrado.", "danger")
+            except Exception: pass
+            return redirect(url_for("jugadores_listar"))
+
+        inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
+        if not inactivo:
+            # Activo -> deja seguir al endpoint actual (hará soft-delete como siempre)
+            return None
+
+        # Inactivo -> intentamos borrado real
+        if eliminar_jugador_si_posible(j):
+            try: flash("Jugador eliminado definitivamente.", "success")
+            except Exception: pass
+            return redirect(url_for("jugadores_listar"))
+        else:
+            # No se pudo por dependencias -> garantizar inactivo y avisar
+            if hasattr(j, "activo"): j.activo = False
+            if hasattr(j, "inactivo"): j.inactivo = True
+            db.session.commit()
+            try: flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
+            except Exception: pass
+            return redirect(url_for("jugadores_listar"))
+    except Exception:
+        # Si algo falla, no interrumpimos el flujo normal
+        return None
 # --- Bypass de health para Render (se registra antes que otros before_request) ---
 @app.before_request
 def _health_bypass():
@@ -8901,3 +8944,21 @@ if __name__ == '__main__':
 @app.get("/health")
 def health():
     return "ok", 200
+
+# --- Helper: eliminar jugador si es posible (maneja FKs con SAVEPOINT) ---
+from sqlalchemy.exc import IntegrityError
+
+def eliminar_jugador_si_posible(j):
+    """
+    Intenta borrado físico del jugador.
+    - Devuelve True si se pudo borrar.
+    - Devuelve False si hay dependencias (FKs) y deja la sesión consistente.
+    """
+    try:
+        with db.session.begin_nested():  # SAVEPOINT
+            db.session.delete(j)
+        db.session.commit()
+        return True
+    except IntegrityError:
+        db.session.rollback()
+        return False
