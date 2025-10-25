@@ -47,129 +47,6 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 app = Flask(__name__)
-# --- Interceptor: si jugador está inactivo y se accede a /jugadores/<id>/eliminar (o /jugadores/eliminar/<id>), intenta borrado real ---
-@app.before_request
-def _hard_delete_inactive_player_disabled():
-    try:
-        from flask import request, redirect, url_for, flash
-        import re
-
-        path = (request.path or "")
-        method = (request.method or "GET").upper()
-
-        # soportar:
-        #   .../jugadores/<id>/eliminar
-        #   .../jugadores/eliminar/<id>
-        # con o sin prefijos (p.ej. /admin) y con/sin barra final
-        m = re.search(r"/jugadores/(?:eliminar/(d+)|(d+)/eliminar)/?$", path)
-        jug_id = None
-        if m:
-            jug_id = m.group(1) or m.group(2)
-
-        # Fallback: ?id= en query/form
-        if not jug_id:
-            jug_id = request.args.get("id") or request.form.get("id")
-        if not jug_id:
-            return None
-
-        # Aceptar GET o POST (si tu botón usa GET, evitamos el CSRF del POST)
-        if method not in ("GET", "POST"):
-            return None
-
-        try:
-            jug_id = int(jug_id)
-        except Exception:
-            return None
-
-        # import local para evitar ciclos
-        from app import db, Jugador, eliminar_jugador_si_posible
-
-        j = db.session.get(Jugador, jug_id)
-        if not j:
-            try: flash("Jugador no encontrado.", "danger")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            return redirect(url_for("jugadores_listar"))
-
-        inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
-
-        # Si está ACTIVO, dejamos que tu endpoint haga el soft-delete como siempre
-        if not inactivo:
-            return None
-
-        # Si está INACTIVO, intentamos borrado físico
-        if eliminar_jugador_si_posible(j):
-            try: flash("Jugador eliminado definitivamente.", "success")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-        else:
-            # No se pudo por dependencias -> garantizar inactivo y avisar
-            if hasattr(j, "activo"): j.activo = False
-            if hasattr(j, "inactivo"): j.inactivo = True
-            db.session.commit()
-            try: flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-        return redirect(url_for("jugadores_listar"))
-    except Exception:
-        # si algo falla, no frenamos el flujo normal
-        return None
-# --- Interceptor: si jugador está inactivo y se POSTea /jugadores/<id>/eliminar, intenta borrado real ---
-@app.before_request
-def _hard_delete_inactive_player_disabled():
-    try:
-        from flask import request, redirect, url_for, flash
-        import re
-        if request.method != "POST":
-            return None
-        m = re.fullmatch(r"/jugadores/(d+)/eliminar", request.path or "")
-        if not m:
-            return None
-
-        jug_id = int(m.group(1))
-        # Import local para evitar ciclos
-        from app import db, Jugador, eliminar_jugador_si_posible
-
-        j = db.session.get(Jugador, jug_id)
-        if not j:
-            try: flash("Jugador no encontrado.", "danger")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            return redirect(url_for("jugadores_listar"))
-
-        inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
-        if not inactivo:
-            # Activo -> deja seguir al endpoint actual (hará soft-delete como siempre)
-            return None
-
-        # Inactivo -> intentamos borrado real
-        if eliminar_jugador_si_posible(j):
-            try: flash("Jugador eliminado definitivamente.", "success")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            return redirect(url_for("jugadores_listar"))
-        else:
-            # No se pudo por dependencias -> garantizar inactivo y avisar
-            if hasattr(j, "activo"): j.activo = False
-            if hasattr(j, "inactivo"): j.inactivo = True
-            db.session.commit()
-            try: flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            return redirect(url_for("jugadores_listar"))
-    except Exception:
-        # Si algo falla, no interrumpimos el flujo normal
-        return None
-# --- Bypass de health para Render (se registra antes que otros before_request) ---
-@app.before_request
-def _health_bypass():
-    try:
-        from flask import request
-        if request.path == "/health":
-            return "ok", 200
-    except Exception:
-        # si algo falla, deja seguir el flujo normal
-        return None
 
 csrf = CSRFProtect()
 csrf.init_app(app)
@@ -382,8 +259,9 @@ def send_mail(
             "SMTP debug: host=%r port=%r TLS=%r SSL=%r user=%r from=%r pass_len=%d to=%s cc=%s bcc=%s",
             host, port, use_tls, use_ssl, user, sender, len(pwd or ""), to_clean, cc_clean, bcc_clean
         )
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # --- Envío
     try:
         if use_ssl and use_tls:
@@ -779,8 +657,8 @@ def _obtener_ganador_partido(p: 'TorneoPartido') -> int | None:
     try:
         if getattr(p, 'estado', None) == 'JUGADO' and getattr(p, 'ganador_participante_id', None):
             return int(p.ganador_participante_id)
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
     return None
 
 
@@ -1818,8 +1696,8 @@ class TorneoInscripcion(db.Model):
         if self.torneo:
             try:
                 return bool(self.torneo.es_dobles())
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
+            except Exception:
+                pass
         # fallback: si hay jugador2 cargado
         return bool(self.jugador2_id)
 
@@ -2178,8 +2056,8 @@ class TorneoPartido(db.Model):
                                 nombres.append(j.nombre_completo)
                 # solo primer match (cada lado es único por constraint)
                 return nombres
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         return []
 
     # === API pública para permisos/vistas ===
@@ -2533,7 +2411,7 @@ with app.app_context():
             )
             db.session.add(admin)
             db.session.commit()
-            logging.getLogger('seed').info(f"[SEED] Admin creado: {admin_nombre}")
+            print(f"[SEED] Admin creado: {admin_nombre}")
         else:
             # Aseguramos que siga siendo admin y tenga categoría si hiciera falta
             changed = False
@@ -2545,9 +2423,9 @@ with app.app_context():
                 changed = True
             if changed:
                 db.session.commit()
-            logging.getLogger('seed').info(f"[SEED] Admin ya existía: {admin_nombre}")
+            print(f"[SEED] Admin ya existía: {admin_nombre}")
     else:
-        logging.getLogger('seed').info("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
+        print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
 
 
 # --- Migraciones/ALTERs idempotentes para SQLite ---
@@ -3232,98 +3110,23 @@ def jugadores_edit(jugador_id):
 @app.route('/jugadores/<int:jugador_id>/eliminar', methods=['POST'])
 @admin_required
 def jugadores_delete(jugador_id):
-    # --- Hard delete si ya está INACTIVO ---
-    j = db.session.get(Jugador, int(jugador_id))
-    if not j:
-        flash("Jugador no encontrado.", "danger")
-        return redirect(url_for("jugadores_list"))
-
-    inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
-    force_hard = (request.args.get('hard') == '1') or (request.form.get('hard') == '1')
-
-    if inactivo or force_hard:
-        try:
-            # limpiar auxiliares antes de intentar FK delete (sin imports locales)
-            try:
-                # ORM (si existen los modelos)
-                try:
-                    db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete(synchronize_session=False)
-                except Exception as e:
-                    logging.getLogger(__name__).exception('Error capturado en except')
-                try:
-                    JugadorEstado.query.filter_by(jugador_id=j.id).delete(synchronize_session=False)
-                except Exception as e:
-                    logging.getLogger(__name__).exception('Error capturado en except')
-                db.session.flush()
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            # Fallback SQL por si los nombres difieren
-            try:
-                from sqlalchemy import text
-                for sql in (
-                    "DELETE FROM partidos_abiertos_jugadores WHERE jugador_id = :id",
-                    "DELETE FROM abiertos_jugadores WHERE jugador_id = :id",
-                    "DELETE FROM jugadores_estados WHERE jugador_id = :id",
-                    "DELETE FROM jugador_estado WHERE jugador_id = :id"
-                ):
-                    try:
-                        db.session.execute(text(sql), {"id": j.id})
-                    except Exception as e:
-                        logging.getLogger(__name__).exception('Error capturado en except')
-                db.session.flush()
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            # Limpiezas adicionales antes del hard delete (si hay relaciones)
-            try:
-                db.session.query(Pareja).filter(
-                    (Pareja.jugador1_id == j.id) | (Pareja.jugador2_id == j.id)
-                ).delete(synchronize_session=False)
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            try:
-                db.session.query(TorneoInscripcion).filter(
-                    (TorneoInscripcion.jugador1_id == j.id) | (TorneoInscripcion.jugador2_id == j.id)
-                ).delete(synchronize_session=False)
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
-            db.session.flush()
-
-            if eliminar_jugador_si_posible(j):
-                flash("Jugador eliminado definitivamente.", "success")
-            else:
-                if hasattr(j, "activo"):
-                    j.activo = False
-                if hasattr(j, "inactivo"):
-                    j.inactivo = True
-                db.session.commit()
-                flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
-            return redirect(url_for("jugadores_list"))
-        except Exception:
-            # podés loguear si querés
-            pass
-
-    # --- Soft delete (activo -> inactivo) ---
     j = get_or_404(Jugador, jugador_id)
+
     try:
         # 1) Inactivar/romper sus parejas
         _inactivar_parejas_de(j.id)
 
-        # 2) Sacar inscripciones a abiertos
-        try:
-            db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete(synchronize_session=False)
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
-        # 3) Borrar estado/contadores si existe
-        try:
-            JugadorEstado.query.filter_by(jugador_id=j.id).delete(synchronize_session=False)
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
-        # 4) Soft-delete del jugador
+        # 2) Sacar inscripciones a abiertos (opcional pero recomendado para no dejar “fantasmas”)
+        db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete()
+
+        # 3) Borrar estado/contadores si existe (lo mantenías)
+        JugadorEstado.query.filter_by(jugador_id=j.id).delete()
+
+        # 4) Soft-delete del jugador (no se elimina la fila)
         if hasattr(Jugador, 'activo'):
             j.activo = False
-            if hasattr(Jugador, 'inactivo'):
-                j.inactivo = True
         else:
+            # Si tu modelo no tiene 'activo', último recurso: borrar
             db.session.delete(j)
 
         db.session.commit()
@@ -3336,8 +3139,40 @@ def jugadores_delete(jugador_id):
 
     return redirect(url_for('jugadores_list'))
 
+
+@app.route('/jugadores/<int:jugador_id>/desactivar', methods=['POST'])
+@admin_required
 def jugadores_deactivate(jugador_id):
-    return redirect(url_for('jugadores_delete', jugador_id=jugador_id))
+    j = get_or_404(Jugador, jugador_id)
+
+    if hasattr(Jugador, 'activo') and not j.activo:
+        flash('El jugador ya estaba inactivo.', 'error')
+        return redirect(url_for('jugadores_list'))
+
+    try:
+        # Inactivar/romper sus parejas (o borrar si tu modelo no tiene .activa)
+        _inactivar_parejas_de(j.id)
+
+        # Quitar inscripciones a “partidos abiertos” para no dejar pendientes
+        db.session.query(PartidoAbiertoJugador).filter_by(jugador_id=j.id).delete()
+
+        # Dejar en falso el flag activo (soft-delete)
+        if hasattr(Jugador, 'activo'):
+            j.activo = False
+        else:
+            # Si tu modelo no tiene 'activo', no lo borro aquí (la ruta eliminar ya contempla ese caso)
+            pass
+
+        db.session.commit()
+        flash(f'Se desactivó a {j.nombre_completo}. Ya no aparecerá para nuevos partidos/desafíos.', 'ok')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error desactivando jugador %s: %s", j.id, e)
+        flash(f'No se pudo desactivar al jugador: {e}', 'error')
+
+    return redirect(url_for('jugadores_list'))
+
 
 @app.route('/jugadores/<int:jugador_id>/reactivar', methods=['POST'])
 @admin_required
@@ -3463,15 +3298,16 @@ def _partido_to_vm(p: 'Partido') -> dict:
         pj2 = getattr(getattr(p, "pareja1", None), "jugador2", None)
         if pj1 or pj2:
             ladoA = " + ".join([_nom(x) for x in [pj1, pj2] if x])
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
     try:
         pj1 = getattr(getattr(p, "pareja2", None), "jugador1", None)
         pj2 = getattr(getattr(p, "pareja2", None), "jugador2", None)
         if pj1 or pj2:
             ladoB = " + ".join([_nom(x) for x in [pj1, pj2] if x])
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # Intento 2: individuales (si tu modelo los tiene)
     if not ladoA:
         ladoA = _nom(getattr(p, "jugador_a", None))
@@ -3571,8 +3407,8 @@ def _query_torneo_partidos_del_jugador(jugador_id: int):
     except Exception as e:
         try:
             current_app.logger.exception(f"[/partidos] SQL match falló: {e}")
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         tps_sql = []
 
     # ---------- 2) Fallback Python (SIEMPRE) ----------
@@ -3591,8 +3427,8 @@ def _query_torneo_partidos_del_jugador(jugador_id: int):
     except Exception as e:
         try:
             current_app.logger.exception(f"[/partidos] fallback falló: {e}")
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         tps_py = []
 
     # ---------- 3) Unión + deduplicación ----------
@@ -3614,8 +3450,9 @@ def _query_torneo_partidos_del_jugador(jugador_id: int):
             ids_py  = {tp.id for tp in tps_py}
             ids_missing_in_sql = sorted(ids_py - ids_sql)
             current_app.logger.info(f"[/partidos] ids faltantes en SQL: {ids_missing_in_sql}")
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     return result
 
 
@@ -3685,24 +3522,27 @@ def _resolve_jugador_id():
             jid = getattr(j, "id", None)
             if jid:
                 return jid
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 2) g.current_jugador.id
     try:
         from flask import g
         jid = getattr(getattr(g, "current_jugador", None), "id", None)
         if jid:
             return jid
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 3) session['jugador_id']
     try:
         from flask import session
         jid = session.get("jugador_id")
         if jid:
             return jid
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 4) buscar por user_id si el modelo Jugador tiene ese campo
     try:
         from app import Jugador  # ajustá import si tu modelo está en otro módulo
@@ -3711,8 +3551,9 @@ def _resolve_jugador_id():
                 q = db.session.query(Jugador.id).filter(Jugador.user_id == _cu.id).first()
                 if q and q[0]:
                     return q[0]
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 5) buscar por email si el modelo Jugador tiene 'email'
     try:
         from app import Jugador
@@ -3722,8 +3563,9 @@ def _resolve_jugador_id():
                 q = db.session.query(Jugador.id).filter(Jugador.email == email).first()
                 if q and q[0]:
                     return q[0]
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     return None
 
 
@@ -3737,8 +3579,8 @@ def partidos_list():
         try:
             if '._resolve_jugador_id' in str(_resolve_jugador_id):  # pragma: no cover
                 pass
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         try:
             return _resolve_jugador_id()  # ya lo tenés en tu app
         except Exception:
@@ -3788,8 +3630,9 @@ def partidos_list():
         # Usa tu helper si existe
         try:
             return _query_torneo_partidos_del_jugador(jugador_id)
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
+
         # Fallback genérico: trae TP y filtra por pertenencia usando lado_de_jugador_en_partido
         TP = globals().get('TorneoPartido')
         if TP is None:
@@ -3842,8 +3685,9 @@ def partidos_list():
     jugador_id = _safe_resolve_jugador_id()
     try:
         current_app.logger.info("[/partidos] jugador_id(resuelto)=%r", jugador_id)
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # ---- 3) Partidos de TORNEO del jugador ----------------------------------------
     if jugador_id:
         try:
@@ -4532,9 +4376,8 @@ def aplicar_delta_rankeable(j, delta):
         # sin categoría, aplicamos delta “crudo”
         try:
             j.puntos = int(j.puntos) + int(delta)
-            clamp_por_jugador(j)
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         return
 
     try:
@@ -6095,7 +5938,7 @@ def mi_panel():
     partidos_para_responder = (
         db.session.query(Partido)
         .filter(
-            Partido.estado == 'PENDIENTE',
+            Partido.estado.in_(['POR_CONFIRMAR', 'PENDIENTE']),
             or_(
                 and_(Partido.rival1_id == j.id, Partido.rival1_acepto.is_(None)),
                 and_(Partido.rival2_id == j.id, Partido.rival2_acepto.is_(None))
@@ -6109,7 +5952,7 @@ def mi_panel():
     partidos_creados_pend = (
         db.session.query(Partido)
         .filter(
-            Partido.estado == 'PENDIENTE',
+            Partido.estado.in_(['POR_CONFIRMAR', 'PENDIENTE']),
             Partido.creador_id == j.id,
             or_(Partido.rival1_acepto.is_(None), Partido.rival2_acepto.is_(None))
         )
@@ -6138,10 +5981,13 @@ def mi_panel():
         .all()
     )
 
-    # Abiertos de su categoría
+    # Abiertos de su categoría (sincronizado con /abiertos)
     abiertos_cat = (
         db.session.query(PartidoAbierto)
-        .filter(PartidoAbierto.categoria_id == j.categoria_id)
+        .filter(
+            PartidoAbierto.categoria_id == j.categoria_id,
+            PartidoAbierto.estado.in_(["ABIERTO", "LLENO"])
+        )
         .order_by(PartidoAbierto.creado_en.desc())
         .all()
     )
@@ -6220,17 +6066,58 @@ def mi_panel():
 
     # === Métricas / listas para UI ===
 
-    # 1) "Listos para cargar"
+    # Estados que permiten proponer resultado (no jugado, ya aceptado o sin invitación)
+    ESTADOS_PROPONIBLES = {'PENDIENTE', 'POR_CONFIRMAR', 'CONFIRMADO', 'ACEPTADO', 'PROGRAMADO'}
+
+    def _as_bool(v):
+        # Normaliza valores desde DB (True/False/None/1/0/'1'/'0')
+        return True if v in (True, 1, '1') else False
+
+    # 1) "Listos para cargar" (yo puedo proponer resultado)
     listos_para_cargar = []
     for m in partidos_pend:
         hubo_invitacion = (m.rival1_id is not None and m.rival2_id is not None)
-        aceptado = (not hubo_invitacion) or (m.rival1_acepto == 1 and m.rival2_acepto == 1)
+        r1_ok = _as_bool(getattr(m, 'rival1_acepto', None))
+        r2_ok = _as_bool(getattr(m, 'rival2_acepto', None))
+
+        # Aceptado si:
+        # - no hubo invitación (partido generado por sistema/torneo), o
+        # - ambos aceptaron, o
+        # - el estado del partido ya marca aceptación/confirmación
+        aceptado = (not hubo_invitacion) or (r1_ok and r2_ok) or (m.estado in ('CONFIRMADO', 'ACEPTADO'))
+
         tiene_propuesta = (m.id in propuestas_map)
-        if aceptado and not tiene_propuesta and m.estado in ('PENDIENTE', 'POR_CONFIRMAR'):
+
+        # Proponible si no está jugado, está en un estado válido y no existe propuesta previa
+        if aceptado and not tiene_propuesta and (m.estado in ESTADOS_PROPONIBLES):
             listos_para_cargar.append(m)
 
     # 2) Resultado propuesto y YO debo responder
     partidos_resultado_para_responder = [m for m in partidos_pend if m.necesita_respuesta_de(j.id)]
+
+    # 2.b) Propuestas ENVIADAS por mí (a la espera de confirmación del rival)
+    partidos_propuestas_enviadas_pend = []
+    for m in partidos_pend:
+        pr = propuestas_map.get(m.id)
+        if not pr:
+            continue
+
+        # Detectar autor de la propuesta con tolerancia de nombres de campo
+        proponente_id = (
+            getattr(pr, 'jugador_id', None)
+            or getattr(pr, 'propuesto_por_id', None)
+            or getattr(pr, 'autor_id', None)
+            or getattr(pr, 'creador_id', None)
+        )
+
+        if proponente_id == j.id:
+            estado_pr = (getattr(pr, 'estado', None) or '').upper()
+            aceptada = _as_bool(getattr(pr, 'aceptado', None)) or _as_bool(getattr(pr, 'confirmado', None)) or (estado_pr in ('ACEPTADA', 'CONFIRMADA'))
+            rechazada = _as_bool(getattr(pr, 'rechazado', None)) or (estado_pr in ('RECHAZADA', 'RECHAZADO'))
+
+            # Si no fue aceptada ni rechazada => sigue pendiente de la otra parte
+            if not aceptada and not rechazada:
+                partidos_propuestas_enviadas_pend.append(m)
 
     # 3) Partidos sin resultado (candidatos a "Proponer resultado")
     partidos_sin_resultado = listos_para_cargar
@@ -6243,6 +6130,14 @@ def mi_panel():
     cant_partidos_para_responder = len(partidos_para_responder)  # invitaciones
     cant_partidos_creados_pend = len(partidos_creados_pend)
     cant_partidos_resultado_para_responder = len(partidos_resultado_para_responder)
+    cant_propuestas_enviadas_pend = len(partidos_propuestas_enviadas_pend)
+
+    # NUEVO: total de tareas de resultados (proponer + responder + propuestas enviadas)
+    cant_tareas_resultados = (
+        cant_pend_sin_result
+        + cant_partidos_resultado_para_responder
+        + cant_propuestas_enviadas_pend
+    )
 
     return render_template(
         'mi.html',
@@ -6282,6 +6177,10 @@ def mi_panel():
         # Para botones "Proponer resultado"
         partidos_sin_resultado=partidos_sin_resultado,
 
+        # NUEVO: propuestas enviadas por mí (pendientes)
+        partidos_propuestas_enviadas_pend=partidos_propuestas_enviadas_pend,
+        cant_propuestas_enviadas_pend=cant_propuestas_enviadas_pend,
+
         # Suplencias (bloque dedicado)
         suplencias=suplencias,
         cant_suplencias=cant_suplencias,
@@ -6289,7 +6188,13 @@ def mi_panel():
         # === NUEVO PARA UI de abiertos ===
         suplentes_counts=suplentes_counts,      # dict {pa_id: cantidad}
         mis_suplencias_pa_ids=mis_suplencias_pa_ids,  # set de pa_id donde YA soy suplente
+
+        # === NUEVO: total de tareas de resultados para el badge/condición en UI ===
+        cant_tareas_resultados=cant_tareas_resultados,
     )
+
+
+
 
 
 
@@ -6797,8 +6702,8 @@ def admin_partido_resultado_editar(partido_id):
         except Exception as e:
             try:
                 current_app.logger.exception("Error recalculando puntos para partido_id=%s: %s", _partido.id, e)
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
+            except Exception:
+                pass
         return False
 
     if request.method == 'POST':
@@ -6935,8 +6840,9 @@ def admin_torneos_new():
             cj = get_current_jugador()
             if cj:
                 creador_id = cj.id
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
+
         # Crear torneo (manteniendo compat con columna legacy modalidad NOT NULL)
         t = Torneo(
             nombre=nombre,
@@ -7776,15 +7682,17 @@ def _jugador_id_actual() -> int | None:
     # 1) Resolver por helper propio si existe
     try:
         return _resolve_jugador_id()  # si no existe, caerá en except
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 2) Tu helper existente
     try:
         if 'get_current_jugador' in globals():
             j = get_current_jugador()
             return int(j.id) if j else None
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 3) Fallback a la sesión
     try:
         jid = session.get('jugador_id')
@@ -8215,8 +8123,8 @@ def _get_or_create_fase_unica(torneo: 'Torneo') -> 'TorneoFase':
             try:
                 fase.orden = 1
                 db.session.flush()
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
+            except Exception:
+                pass
         return fase
 
     # Crear con campos canónicos
@@ -8245,8 +8153,8 @@ def _get_or_create_fase_playoff(torneo: 'Torneo') -> 'TorneoFase':
             try:
                 fase.orden = 99
                 db.session.flush()
-            except Exception as e:
-                logging.getLogger(__name__).exception('Error capturado en except')
+            except Exception:
+                pass
         return fase
 
     kwargs = dict(torneo_id=torneo.id, nombre='PLAYOFF', orden=99)
@@ -8845,8 +8753,8 @@ def lado_de_jugador_en_partido(tp: 'TorneoPartido', jugador_id: int) -> str | No
                     v = _to_int_or_none(getattr(j, 'id', None))
                     if v:
                         ids.add(v)
-        except Exception as e:
-            logging.getLogger(__name__).exception('Error capturado en except')
+        except Exception:
+            pass
         return ids
 
     def _colectar_ids_de_lado(side_obj, side_id_attr_candidates: tuple[str, ...]) -> set[int]:
@@ -8931,8 +8839,9 @@ def _jugadores_del_lado_torneo(p: 'TorneoPartido', lado: str) -> list[int]:
                             out.append(int(jid))
                 if out:
                     return out
-    except Exception as e:
-        logging.getLogger(__name__).exception('Error capturado en except')
+    except Exception:
+        pass
+
     # 2) Fallback a participante_a / participante_b
     tp = p.participante_a if lado == 'A' else p.participante_b
     try:
@@ -9038,59 +8947,3 @@ def inject_csrf_token():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-# --- Healthcheck para Render ---
-@app.get("/health")
-def health():
-    return "ok", 200
-
-# --- Helper: eliminar jugador si es posible (maneja FKs con SAVEPOINT) ---
-from sqlalchemy.exc import IntegrityError
-
-def eliminar_jugador_si_posible(j):
-    """
-    Intenta borrado físico del jugador.
-    - Devuelve True si se pudo borrar.
-    - Devuelve False si hay dependencias (FKs) y deja la sesión consistente.
-    """
-    try:
-        with db.session.begin_nested():  # SAVEPOINT
-            db.session.delete(j)
-        db.session.commit()
-        return True
-    except IntegrityError:
-        db.session.rollback()
-        return False
-
-# --- Hard delete: elimina definitivamente si ya está inactivo ---
-@app.post("/jugadores/<int:jug_id>/eliminar-fisico")
-def jugadores_eliminar_fisico(jug_id):
-    from flask import redirect, url_for, flash
-    j = db.session.get(Jugador, jug_id)
-    if not j:
-        flash("Jugador no encontrado.", "danger")
-        return redirect(url_for("jugadores_listar"))
-
-    inactivo = (getattr(j, "inactivo", None) is True) or (getattr(j, "activo", None) is False)
-
-    # Si está ACTIVO, mantenemos comportamiento actual: dejarlo inactivo
-    if not inactivo:
-        if hasattr(j, "activo"):
-            j.activo = False
-        if hasattr(j, "inactivo"):
-            j.inactivo = True
-        db.session.commit()
-        flash(f'Se desactivó a "{getattr(j,"nombre","Jugador")}".', "info")
-        return redirect(url_for("jugadores_listar"))
-
-    # Si ya está INACTIVO, intentamos borrado real
-    if eliminar_jugador_si_posible(j):
-        flash("Jugador eliminado definitivamente.", "success")
-    else:
-        # Dependencias: mantener inactivo y avisar
-        if hasattr(j, "activo"): j.activo = False
-        if hasattr(j, "inactivo"): j.inactivo = True
-        db.session.commit()
-        flash("No se pudo eliminar: tiene registros asociados. Se mantiene inactivo.", "warning")
-
-    return redirect(url_for("jugadores_listar"))

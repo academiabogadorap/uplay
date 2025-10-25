@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Jugadores{% endblock %}
+
+{% block content %}
+<style>
+  /* ===== Hero / cabecera (igual que Inicio) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ===== Chips ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
+
+  /* ===== Botones consistentes ===== */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* ===== Filtros ===== */
+  .filters.card{
+    padding:10px; display:grid; gap:10px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    align-items:end;
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+  }
+  .filters .inline{
+    display:flex; align-items:center; gap:8px; min-height:36px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16);
+    padding:6px 10px; border-radius:10px;
+  }
+  .filters label{ font-weight:700; font-size:.92rem; }
+  .filters select, .filters input[type="text"]{
+    height:36px; padding:6px 8px; border-radius:10px; width:100%;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text);
+  }
+  .filters .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .filters .hint{ grid-column: 1 / -1; margin:2px 0 0; color:var(--muted,#9fb3c8); }
+
+  /* ===== Tabla ===== */
+  .card.table-card{ padding:0; border-radius:14px; border:1px solid rgba(255,255,255,.12);
+                    background:linear-gradient(180deg, var(--panel), var(--panel-2)); }
+  .table-wrap{
+    --thead-h: 44px;
+    max-height:70vh; overflow:auto; border-radius:12px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0));
+  }
+  table.players{ width:100%; border-collapse:separate; border-spacing:0; margin:0; }
+  .players thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  .players tbody td{ padding:10px 8px; vertical-align:middle; }
+  .players tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  .players tbody tr:hover{ background:rgba(138,232,12,.05); }
+
+  .row-inactive{ opacity:.72; }
+  .row-me{ outline:1px solid rgba(138,232,12,.35); background:rgba(138,232,12,.06); }
+
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; }
+
+  .col-contact small{ display:block; color:var(--muted,#9fb3c8); }
+  .actions-cell{ min-width:220px; }
+  .actions-row{ display:flex; flex-wrap:wrap; gap:6px; }
+
+  /* Responsive: ocultar columnas menos críticas */
+  @media (max-width:900px){
+    .players thead th:nth-child(6), .players tbody td:nth-child(6){ display:none; } /* Asc./Desc. */
+    .players thead th:nth-child(8), .players tbody td:nth-child(8){ display:none; } /* Creado */
+  }
+  @media (max-width:680px){
+    .players thead th:nth-child(5), .players tbody td:nth-child(5){ display:none; } /* Zona ascenso */
+    .players thead th:nth-child(7), .players tbody td:nth-child(7){ display:none; } /* Contacto */
+  }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Jugadores</h1>
+      <p class="hero-tag">Listado y filtros</p>
+    </div>
+
+    <div class="hero-actions">
+      {% if current_jugador and current_jugador.is_admin %}
+        <a href="{{ url_for('jugadores_new') }}" class="btn">Nuevo jugador</a>
+      {% endif %}
+      <a href="{{ url_for('ranking') }}" class="btn-ghost btn-slim">Ver ranking</a>
+    </div>
+  </div>
+
+  <!-- Chips de contexto -->
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Total: {{ jugadores|length if jugadores else 0 }}</span>
+    {% if current_jugador and current_jugador.categoria %}
+      <span class="chip"><span class="dot dot-yellow"></span>Mi categoría: {{ current_jugador.categoria.nombre }}</span>
+      <span class="chip"><span class="dot dot-green"></span>Mis puntos: {{ current_jugador.puntos }}</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ===== Filtros ===== -->
+<form method="get" class="card filters" role="search" aria-label="Filtros de jugadores">
+  <label class="inline" title="Incluir jugadores dados de baja temporal">
+    <input type="checkbox" name="inactivos" value="1" {% if mostrar_inactivos == 1 %}checked{% endif %}>
+    Mostrar inactivos
+  </label>
+
+  {% if current_jugador and current_jugador.categoria_id %}
+  <label class="inline" title="Ignora el selector de categoría">
+    <input type="checkbox" name="solo_mi_cat" value="1" {% if solo_mi_cat == 1 %}checked{% endif %}>
+    Solo mi categoría ({{ current_jugador.categoria.nombre }})
+  </label>
+  {% endif %}
+
+  <div>
+    <label for="categoria_id">Categoría</label>
+    <select id="categoria_id" name="categoria_id">
+      <option value="">Todas</option>
+      {% for c in categorias %}
+        <option value="{{ c.id }}" {% if categoria_id and categoria_id == c.id %}selected{% endif %}>
+          {{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label for="q">Buscar por nombre</label>
+    <input id="q" name="q" placeholder="Ej: Juan Pérez" value="{{ q or '' }}">
+  </div>
+
+  <div class="actions">
+    <button type="submit" class="btn">Aplicar</button>
+    <a href="{{ url_for('jugadores_list') }}" class="btn-ghost btn-slim">Limpiar</a>
+  </div>
+
+  <p class="hint">Tip: si marcás “Solo mi categoría”, se ignora el selector de categoría.</p>
+</form>
+
+<!-- ===== Tabla ===== -->
+{% if jugadores %}
+  <div class="card table-card">
+    <div class="table-wrap">
+      <table class="players">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Pts</th>
+            <th>Categoría</th>
+            <th>Estado</th>
+            <th>Zona ascenso</th>
+            <th>Asc./Desc.</th>
+            <th>Contacto</th>
+            <th>Creado</th>
+            <th style="width:260px;">Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in jugadores %}
+            {% set is_me = (current_jugador and j.id == current_jugador.id) %}
+            <tr class="{% if not j.activo %}row-inactive{% endif %} {% if is_me %}row-me{% endif %}">
+              <td>{{ j.nombre_completo }}</td>
+              <td>{{ j.puntos }}</td>
+              <td>{{ j.categoria.nombre if j.categoria else '-' }}</td>
+              <td>
+                {% if j.activo %}
+                  <span class="badge badge-ok">Activo</span>
+                {% else %}
+                  <span class="badge badge-warn">Inactivo</span>
+                {% endif %}
+              </td>
+              <td>{{ 'Sí' if zona_ascenso.get(j.id) else 'No' }}</td>
+              <td>
+                {% set est = j.estado %}
+                {% if est %}
+                  {{ est.victorias_vs_superior }} / {{ est.derrotas_vs_inferior }}
+                {% else %}
+                  0 / 0
+                {% endif %}
+              </td>
+              <td class="col-contact">
+                {% if j.email %}<small>📧 {{ j.email }}</small>{% endif %}
+                {% if j.telefono %}<small>📱 {{ j.telefono }}</small>{% endif %}
+              </td>
+              <td><small>{{ j.creado_en.strftime('%Y-%m-%d %H:%M') }}</small></td>
+              <td class="actions-cell">
+                <div class="actions-row">
+                  {% if j.activo and zona_ascenso.get(j.id) %}
+                    <a href="{{ url_for('desafios_new', desafiante_id=j.id) }}" class="btn btn-slim">Desafiar</a>
+                  {% endif %}
+
+                  {% if current_jugador and current_jugador.is_admin %}
+                    <a href="{{ url_for('jugadores_edit', jugador_id=j.id) }}" class="btn-ghost btn-slim">Editar</a>
+
+                    {% if j.activo %}
+                      <form method="post"
+                            action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
+                            onsubmit="return confirm('¿Desactivar a {{ j.nombre_completo }}? Podrás reactivarlo después.');">
+                        <button type="submit" class="btn-ghost btn-slim">Desactivar</button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="{{ url_for('jugadores_activate', jugador_id=j.id) }}">
+                        <button type="submit" class="btn btn-slim">Reactivar</button>
+                      </form>
+                    {% endif %}
+
+                    <form method="post"
+                          action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
+                          onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE a {{ j.nombre_completo }}? Esta acción no se puede deshacer.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" class="btn-ghost btn-slim">Eliminar</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <p class="muted">Sin jugadores aún.</p>
+{% endif %}
+{% endblock %}
+
+{% block help_content %}
+{{ super() }}
+{% endblock %}

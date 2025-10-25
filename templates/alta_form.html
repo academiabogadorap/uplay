@@ -2,53 +2,155 @@
 {% block title %}Solicitud de alta{% endblock %}
 
 {% block content %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-    <h2 style="margin:0;">Solicitud de alta</h2>
-    <a href="{{ url_for('login') }}" class="btn btn-ghost btn-slim">Volver a Iniciar sesión</a>
+<style>
+  /* ===== Hero / cabecera (mismo que index) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ===== Chips / stats (por consistencia, aunque acá no se usan) ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
+  .dot-blue{background:#6EA8FF;}
+
+  /* ===== Variables de tarjetas/botones (mismo set) ===== */
+  :root{
+    --card-h: 200px;
+    --cta-btn-w: 200px;
+    --cta-btn-h: 44px;
+  }
+
+  /* ===== Layout de contenido ===== */
+  .page-wrap{
+    display:grid; gap:10px; margin-top:12px;
+    grid-template-columns: minmax(280px, 1fr);
+  }
+
+  /* Tarjeta formulario */
+  .card-form{
+    max-width: 720px;
+  }
+
+  /* ===== Inputs coherentes con el resto ===== */
+  .form-row{ display:block; }
+  .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
+  .form-input, .form-select{
+    width:100%;
+    border-radius:10px;
+    padding:10px 12px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.14);
+    color:var(--text, #fff);
+    outline:none;
+  }
+  .form-input:focus, .form-select:focus{
+    border-color: rgba(16,185,129,.45);
+    box-shadow: 0 0 0 3px rgba(16,185,129,.18);
+  }
+
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; }
+  .btn:focus{ outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
+
+  /* Ayuda consistente con index */
+  .help-note{ color:var(--muted); margin:6px 0 0; font-size:.92rem; }
+
+  /* Modal base (si alguna vez lo necesitás aquí también) */
+  .backdrop{position:fixed; inset:0; display:none; z-index:1001; background:rgba(1,18,34,.65);}
+  .dialog{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    color:var(--text);
+    width:min(560px, 94vw); margin:8vh auto; border-radius:14px;
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+  }
+  .dialog-header{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);}
+  .dialog-title{margin:0; font-size:1.02rem; font-weight:800;}
+  .dialog-body{padding:14px;}
+  .dialog-footer{padding:12px 14px; border-top:1px solid rgba(255,255,255,.10); display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);}
+  .close-btn{background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);}
+</style>
+
+<!-- ===== HERO (igual estilo que index) ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">UPLAY</h1>
+      <p class="hero-tag">Solicitud de alta</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Volver a Iniciar sesión</a>
+    </div>
   </div>
+  <p class="muted" style="margin:10px 0 0;">Completá tus datos y un administrador aprobará tu acceso.</p>
+</div>
 
-  <div class="card" style="max-width:620px;">
-    <p class="muted" style="margin:0 0 8px;">
-      Completá tus datos y un administrador aprobará tu acceso.
-    </p>
+<!-- ===== CONTENIDO ===== -->
+<div class="page-wrap">
 
+  <div class="card card-form">
     <form method="post" style="display:grid; gap:10px;">
-      <div>
-        <label for="nombre_completo" class="muted" style="display:block; margin-bottom:4px;">Nombre completo</label>
-        <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" style="width:100%;">
+      <div class="form-row">
+        <label for="nombre_completo" class="form-label">Nombre completo</label>
+        <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" class="form-input">
         <small class="muted">Se guardará en mayúsculas.</small>
       </div>
 
-      <div>
-        <label for="email" class="muted" style="display:block; margin-bottom:4px;">Email</label>
-        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" style="width:100%;" autocomplete="email">
+      <div class="form-row">
+        <label for="email" class="form-label">Email</label>
+        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email">
       </div>
 
       <!-- Teléfono dividido: código de país + número local -->
-      <div>
-        <label class="muted" style="display:block; margin-bottom:4px;">Teléfono</label>
+      <div class="form-row">
+        <label class="form-label">Teléfono</label>
         <div style="display:flex; gap:8px; align-items:center;">
           <div style="min-width:110px;">
             <div style="display:flex; align-items:center; gap:6px;">
               <span class="muted">País</span>
               <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="\d{1,4}"
-                     value="54" maxlength="4" style="width:80px;" aria-label="Código de país">
+                     value="54" maxlength="4" class="form-input" style="width:90px;" aria-label="Código de país">
             </div>
           </div>
           <div style="flex:1;">
             <input id="tel_local" name="tel_local" type="text" inputmode="numeric" maxlength="18"
-                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)" style="width:100%;">
+                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)" class="form-input">
           </div>
         </div>
         <small class="muted">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>11 12345678</strong> → se guarda como <code>+541112345678</code>.</small>
-
-        <!-- Compat con backend anterior: lo dejamos vacío -->
+        <!-- Compat backend anterior -->
         <input type="hidden" name="telefono" id="telefono_compat" value="">
       </div>
 
-      <div>
-        <label for="categoria_id" class="muted" style="display:block; margin-bottom:4px;">Categoría</label>
-        <select id="categoria_id" name="categoria_id" required style="width:100%;">
+      <div class="form-row">
+        <label for="categoria_id" class="form-label">Categoría</label>
+        <select id="categoria_id" name="categoria_id" required class="form-select">
           <option value="">-- Elegí categoría --</option>
           {% for c in categorias %}
             <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
@@ -56,72 +158,75 @@
         </select>
       </div>
 
-      <div>
-        <label for="mensaje" class="muted" style="display:block; margin-bottom:4px;">Mensaje (opcional)</label>
-        <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." style="width:100%;">
+      <div class="form-row">
+        <label for="mensaje" class="form-label">Mensaje (opcional)</label>
+        <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." class="form-input">
       </div>
 
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
         <button type="submit" class="btn">Enviar solicitud</button>
-        <a href="{{ url_for('login') }}" class="btn btn-ghost">Cancelar</a>
+        <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Cancelar</a>
       </div>
 
-      <p class="muted" style="margin:6px 0 0; font-size:.92rem;">
+      <p class="help-note">
         Al enviar, aceptás que un administrador vea tus datos para validar el alta.
       </p>
     </form>
   </div>
 
-  <!-- JS: mayúsculas en nombre + sanitizar teléfono -->
-  <script>
-    // Nombre en MAYÚSCULAS (mantiene acentos)
-    const $nombre = document.getElementById('nombre_completo');
-    if ($nombre){
-      $nombre.addEventListener('input', () => {
-        const pos = $nombre.selectionStart;
-        $nombre.value = ($nombre.value || '').toUpperCase();
-        try { $nombre.setSelectionRange(pos, pos); } catch(_){}
-      }, { passive: true });
-    }
+  <!-- Bloque informativo (similar a la sección pública del index) -->
+  <div class="card" style="border-style:dashed;">
+    <h3 style="margin:0 0 6px;">¿Cómo sigue?</h3>
+    <ol style="margin:0; padding-left:18px;">
+      <li>Un admin revisa tu solicitud.</li>
+      <li>Si todo está OK, te asignan un <strong>PIN</strong>.</li>
+      <li>Entrás por <em>Iniciar sesión</em> (nombre + PIN) y vas a <strong>Mi panel</strong>.</li>
+    </ol>
+  </div>
 
-    // Teléfono: permitir solo dígitos en tel_cc y tel_local
-    const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
-    function sanitizeNumericInput(el, maxLen){
-      if (!el) return;
-      el.addEventListener('input', () => {
-        const raw = el.value;
-        const digits = onlyDigits(raw).slice(0, maxLen || 32);
-        if (raw !== digits) el.value = digits;
-      }, { passive: true });
-    }
-    sanitizeNumericInput(document.getElementById('tel_cc'), 4);
-    sanitizeNumericInput(document.getElementById('tel_local'), 18);
+</div>
 
-    // Compat: mantener hidden "telefono" vacío
-    const $compat = document.getElementById('telefono_compat');
-    if ($compat) $compat.value = '';
-  </script>
+<!-- JS: mayúsculas en nombre + sanitizar teléfono (conservado) -->
+<script>
+  // Nombre en MAYÚSCULAS (mantiene acentos)
+  const $nombre = document.getElementById('nombre_completo');
+  if ($nombre){
+    $nombre.addEventListener('input', () => {
+      const pos = $nombre.selectionStart;
+      $nombre.value = ($nombre.value || '').toUpperCase();
+      try { $nombre.setSelectionRange(pos, pos); } catch(_){}
+    }, { passive: true });
+  }
+
+  // Teléfono: permitir solo dígitos en tel_cc y tel_local
+  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
+  function sanitizeNumericInput(el, maxLen){
+    if (!el) return;
+    el.addEventListener('input', () => {
+      const raw = el.value;
+      const digits = onlyDigits(raw).slice(0, maxLen || 32);
+      if (raw !== digits) el.value = digits;
+    }, { passive: true });
+  }
+  sanitizeNumericInput(document.getElementById('tel_cc'), 4);
+  sanitizeNumericInput(document.getElementById('tel_local'), 18);
+
+  // Compat: mantener hidden "telefono" vacío
+  const $compat = document.getElementById('telefono_compat');
+  if ($compat) $compat.value = '';
+</script>
 {% endblock %}
 
 {% block help_content %}
 <style>
-  /* ==== Modal de ayuda compacto con scroll propio (alineado con otras páginas) ==== */
+  /* ==== Ayuda consistente con index ==== */
   .help-container{ display:flex; justify-content:center; width:100%; }
   .help-wrap{
     width: min(800px, 90vw);
     margin: 0 auto;
-
-    /* Altura reducida + scroll en el contenedor */
-    max-height: 62dvh;
-    max-height: 62vh;   /* fallback */
-    overflow: auto;
-    overscroll-behavior: contain;
-
-    position: relative;
-    background: transparent;
+    max-height: 62dvh; max-height: 62vh;
+    overflow: auto; overscroll-behavior: contain; position: relative; background: transparent;
   }
-
-  /* Header sticky y compacto */
   .help-head{
     position: sticky; top: 0; z-index: 2;
     display:flex; align-items:center; gap:6px;
@@ -131,45 +236,17 @@
   }
   .help-title{ margin:0; font-size: clamp(.9rem, 2vw, 1rem); }
   .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.76rem, 1.6vw, .86rem); }
-
-  /* Grid */
-  .help-grid{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
-    gap:8px;
-  }
-
-  /* Cards */
-  .help-card{
-    background: rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:10px;
-    padding:6px;
-  }
-  .help-card h4{
-    display:flex; align-items:center; gap:6px;
-    margin:0 0 4px;
-    font-size: clamp(.86rem, 1.8vw, .94rem);
-  }
-  .help-card p, .help-card li{
-    margin:3px 0;
-    font-size: clamp(.76rem, 1.5vw, .84rem);
-    line-height:1.28;
-  }
+  .help-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap:8px; }
+  .help-card{ background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:6px; }
+  .help-card h4{ display:flex; align-items:center; gap:6px; margin:0 0 4px; font-size: clamp(.86rem, 1.8vw, .94rem); }
+  .help-card p, .help-card li{ margin:3px 0; font-size: clamp(.76rem, 1.5vw, .84rem); line-height:1.28; }
   .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
-
   .chip{ display:inline-block; padding:2px 6px; border-radius:999px; font-size:.74rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
   .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
   .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
   .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
-
-  .help-visual{
-    display:flex; align-items:center; justify-content:center;
-    background: rgba(255,255,255,.03);
-    border:1px dashed rgba(255,255,255,.12);
-    border-radius:10px; padding:6px;
-  }
-
+  .help-visual{ display:flex; align-items:center; justify-content:center; background: rgba(255,255,255,.03);
+    border:1px dashed rgba(255,255,255,.12); border-radius:10px; padding:6px;}
   @media (max-width:540px){
     .help-grid{ grid-template-columns: 1fr; }
     .help-card h4 svg{ display:none; }
@@ -184,7 +261,6 @@
     </div>
 
     <div class="help-grid">
-      <!-- Qué estás solicitando -->
       <section class="help-card">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -200,7 +276,6 @@
         </div>
       </section>
 
-      <!-- Campos y cómo completarlos -->
       <section class="help-card">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -217,7 +292,6 @@
         </ul>
       </section>
 
-      <!-- Qué pasa después -->
       <section class="help-card">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -232,7 +306,6 @@
         </ol>
       </section>
 
-      <!-- Privacidad -->
       <section class="help-card">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -247,7 +320,6 @@
         </ul>
       </section>
 
-      <!-- Tips -->
       <section class="help-card">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -263,4 +335,5 @@
     </div>
   </div>
 </div>
+{{ super() }}
 {% endblock %}

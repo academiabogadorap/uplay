@@ -1,0 +1,5 @@
+From: UPLAY <'"$MAIL_FROM"'>
+To: <'"$MAIL_TO"'>
+Subject: Prueba SMTP UPLAY
+
+Hola, este es un test SMTP directo desde curl.

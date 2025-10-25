@@ -39,18 +39,13 @@
   .btn-ok{ background:rgba(16,185,129,.2); border:1px solid rgba(16,185,129,.4); }
   .btn-danger{ background:rgba(239,68,68,.18); border:1px solid rgba(239,68,68,.38); }
 
-  /* Tablas/filas compactas */
+  /* Tablas/filas de torneos compactas */
   .torneos-list{ list-style:none; padding:0; margin:0; }
   .torneos-list li{
     display:flex; gap:8px; align-items:center; justify-content:space-between;
     padding:8px 0; border-top:1px solid rgba(255,255,255,.08);
   }
   .torneo-meta{ font-size:.9rem; color:var(--muted); }
-
-  /* Mis partidos */
-  .match-line{ display:flex; gap:8px; align-items:center; justify-content:space-between; padding:8px 0; border-top:1px solid rgba(255,255,255,.08); }
-  .match-teams{ font-weight:600; }
-  .muted{ color:var(--muted); }
 </style>
 
 <!-- ===== HERO ===== -->
@@ -70,83 +65,40 @@
   </div>
 </div>
 
-<!-- ===== SECCIONES PRINCIPALES ===== -->
+<!-- ===== SECCIONES PRINCIPALES (sin duplicar lo de Inicio) ===== -->
 <div class="section-grid">
 
   <!-- Tareas pendientes -->
   <div class="card">
-    {# ---- Contadores base ---- #}
-    {% set cant_part_pend = (partidos_para_responder|length) if partidos_para_responder else 0 %}
-    {% set cant_creados_pend = (partidos_creados_pend|length) if partidos_creados_pend else 0 %}
-    {% set cant_responder_result = (cant_partidos_resultado_para_responder or 0) %}
-    {% set cant_prop_enviadas = (cant_propuestas_enviadas_pend or 0) %}
-    {% set cant_para_proponer = (cant_pend_sin_result or 0) %}
-    {% set cant_desaf_pend = (desafios_para_responder|length) if desafíos_para_responder is defined and desafios_para_responder else 0 %}
-    {# ---- TOTAL: suma de todas las tareas del panel ---- #}
-    {% set cant_total_tareas = cant_part_pend + cant_creados_pend + cant_responder_result + cant_prop_enviadas + cant_para_proponer + cant_desaf_pend %}
-
-    <h3>
-      Tareas pendientes
-      <span class="badge" title="Invitaciones, creados por mí, resultados (responder/proponer/enviadas) y desafíos">{{ cant_total_tareas }}</span>
-    </h3>
-
+    <h3>Tareas pendientes</h3>
     <ul class="list-clean">
-      {# Invitaciones #}
+      {% set cant_part_pend = (partidos_para_responder|length) if partidos_para_responder else 0 %}
+      {% set cant_responder_result = (cant_partidos_resultado_para_responder or 0) %}
       {% if cant_part_pend > 0 %}
         <li>Tenés <strong>{{ cant_part_pend }}</strong> invitación(es) a partido.
           <a href="#partidos-para-responder" class="btn btn-ghost btn-slim">Ver</a>
         </li>
-      {% else %}
-        <li class="muted">No tenés partidos para responder invitación.</li>
-      {% endif %}
+      {% else %}<li class="muted">No tenés partidos para responder invitación.</li>{% endif %}
 
-      {# Creados por mí esperando #}
-      {% if cant_creados_pend > 0 %}
-        <li>Tenés <strong>{{ cant_creados_pend }}</strong> partido(s) creados por vos esperando aceptación.
-          <a href="#partidos-creados-pend" class="btn btn-ghost btn-slim">Ver</a>
-        </li>
-      {% else %}
-        <li class="muted">No tenés partidos creados pendientes de aceptación.</li>
-      {% endif %}
-
-      {# Resultados: responder #}
       {% if cant_responder_result > 0 %}
         <li>Tenés <strong>{{ cant_responder_result }}</strong> partido(s) para <strong>responder resultado</strong>.
           <a href="#partidos-resultado-para-responder" class="btn btn-ghost btn-slim">Responder ahora</a>
         </li>
-      {% else %}
-        <li class="muted">No tenés partidos para responder resultado.</li>
-      {% endif %}
+      {% else %}<li class="muted">No tenés partidos para responder resultado.</li>{% endif %}
 
-      {# Resultados: propuestas enviadas por mí #}
-      {% if cant_prop_enviadas > 0 %}
-        <li>Tenés <strong>{{ cant_prop_enviadas }}</strong> propuesta(s) de resultado <strong>enviadas</strong> esperando confirmación.
-          <a href="#propuestas-enviadas-pend" class="btn btn-ghost btn-slim">Ver</a>
-        </li>
-      {% endif %}
-
-      {# Resultados: proponer #}
-      {% if cant_para_proponer > 0 %}
-        <li>Tenés <strong>{{ cant_para_proponer }}</strong> partido(s) para <strong>proponer resultado</strong>.
-          <a href="#partidos-sin-resultado" class="btn btn-ghost btn-slim">Ver</a>
+      {% if cant_pend_sin_result > 0 %}
+        <li>Tenés <strong>{{ cant_pend_sin_result }}</strong> partido(s) sin resultado.
           <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">Cargar ahora</a>
         </li>
-      {% else %}
-        {% if cant_responder_result == 0 and cant_prop_enviadas == 0 %}
-          <li class="muted">No tenés partidos pendientes de resultado.</li>
-        {% endif %}
-      {% endif %}
+      {% else %}<li class="muted">No tenés partidos pendientes de resultado.</li>{% endif %}
 
-      {# Desafíos #}
+      {% set cant_desaf_pend = (desafios_para_responder|length) if desafios_para_responder else 0 %}
       {% if cant_desaf_pend > 0 %}
         <li>Te desafiaron en <strong>{{ cant_desaf_pend }}</strong> desafío(s).
           <a href="{{ url_for('desafios_list') }}" class="btn btn-ghost btn-slim">Ver</a>
         </li>
-      {% else %}
-        <li class="muted">No tenés desafíos para responder.</li>
-      {% endif %}
+      {% else %}<li class="muted">No tenés desafíos para responder.</li>{% endif %}
 
-      {# Abiertos en tu categoría (no cuentan para el total) #}
       {% if cant_abiertos_mi_cat > 0 %}
         <li>Hay <strong>{{ cant_abiertos_mi_cat }}</strong> abiertos en tu categoría.
           <a href="{{ url_for('abiertos_list') }}" class="btn btn-ghost btn-slim">Ver</a>
@@ -230,7 +182,7 @@
             </div>
             <div>
               {% if t.id %}
-                <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
+                <a href="{{ url_for('torneos_public_view', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
               {% else %}
                 <a href="{{ url_for('torneos_public_list', estado='INSCRIPCION') }}" class="btn btn-slim">Ver</a>
               {% endif %}
@@ -254,7 +206,7 @@
             </div>
             <div>
               {% if t.id %}
-                <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Info</a>
+                <a href="{{ url_for('torneos_public_view', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Info</a>
               {% else %}
                 <a href="{{ url_for('torneos_public_list') }}" class="btn btn-ghost btn-slim">Ver todos</a>
               {% endif %}
@@ -271,8 +223,7 @@
 
 </div>
 
-<!-- ===== DETALLES ENLAZADOS DESDE “Tareas pendientes” ===== -->
-
+<!-- Bloques detallados que se linkean desde “Tareas pendientes” -->
 {% if partidos_para_responder and partidos_para_responder|length > 0 %}
   <div id="partidos-para-responder" class="card" style="margin-top:12px;">
     <h3>Partidos para responder (invitación)</h3>
@@ -293,25 +244,6 @@
   </div>
 {% endif %}
 
-{% if partidos_creados_pend and partidos_creados_pend|length > 0 %}
-  <div id="partidos-creados-pend" class="card" style="margin-top:12px;">
-    <h3>Partidos creados por mí (esperando aceptación)</h3>
-    <ul class="list-clean">
-      {% for p in partidos_creados_pend %}
-        <li>
-          <span class="badge">#{{ p.id }}</span>
-          {% if p.categoria %}[{{ p.categoria.nombre }}]{% endif %}
-          — Estado: {{ p.estado }} — Falta aceptación de:
-          {% set faltan = [] %}
-          {% if p.rival1 and p.rival1_acepto is none %}{% set _ = faltan.append(p.rival1.nombre_completo) %}{% endif %}
-          {% if p.rival2 and p.rival2_acepto is none %}{% set _ = faltan.append(p.rival2.nombre_completo) %}{% endif %}
-          {{ faltan|join(' y ') if faltan else '—' }}
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
-{% endif %}
-
 {% if partidos_resultado_para_responder and partidos_resultado_para_responder|length > 0 %}
   <div id="partidos-resultado-para-responder" class="card" style="margin-top:12px;">
     <h3>Partidos para responder resultado</h3>
@@ -326,132 +258,6 @@
     </ul>
   </div>
 {% endif %}
-
-{# Propuestas enviadas por mí (pendientes de confirmación) #}
-{% if partidos_propuestas_enviadas_pend and partidos_propuestas_enviadas_pend|length > 0 %}
-  <div id="propuestas-enviadas-pend" class="card" style="margin-top:12px;">
-    <h3>Propuestas enviadas (pendientes de confirmación)</h3>
-    <ul class="list-clean">
-      {% for p in partidos_propuestas_enviadas_pend %}
-        {% set pr = propuestas_map.get(p.id) %}
-        <li class="match-line">
-          <div>
-            <span class="badge">#{{ p.id }}</span>
-            {% if p.categoria %}[{{ p.categoria.nombre }}]{% endif %}
-            <span class="match-teams">
-              {% set p1 = p.pareja1 %}{% set p2 = p.pareja2 %}
-              {% set p1n1 = p1.jugador1.nombre_completo if p1 and p1.jugador1 else '—' %}
-              {% set p1n2 = p1.jugador2.nombre_completo if p1 and p1.jugador2 else '—' %}
-              {% set p2n1 = p2.jugador1.nombre_completo if p2 and p2.jugador1 else '—' %}
-              {% set p2n2 = p2.jugador2.nombre_completo if p2 and p2.jugador2 else '—' %}
-              — {{ p1n1 }} + {{ p1n2 }} vs {{ p2n1 }} + {{ p2n2 }}
-            </span>
-            {% if p.fecha %}<span class="muted"> — {{ p.fecha.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
-            {% if pr and (pr.resumen or pr.resultado_str) %}
-              <div class="muted" style="margin-top:2px;">Propuesto: {{ pr.resumen or pr.resultado_str }}</div>
-            {% endif %}
-          </div>
-          <div class="muted">
-            Esperando confirmación del rival…
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
-{% endif %}
-
-{# Partidos donde yo puedo proponer resultado #}
-{% if partidos_sin_resultado and partidos_sin_resultado|length > 0 %}
-  <div id="partidos-sin-resultado" class="card" style="margin-top:12px;">
-    <h3>Partidos para proponer resultado</h3>
-    <ul class="list-clean">
-      {% for m in partidos_sin_resultado %}
-        <li class="match-line">
-          <div>
-            <span class="badge">#{{ m.id }}</span>
-            {% if m.categoria %}[{{ m.categoria.nombre }}]{% endif %}
-            <span class="match-teams">
-              {% set p1 = m.pareja1 %}{% set p2 = m.pareja2 %}
-              {% set p1n1 = p1.jugador1.nombre_completo if p1 and p1.jugador1 else '—' %}
-              {% set p1n2 = p1.jugador2.nombre_completo if p1 and p1.jugador2 else '—' %}
-              {% set p2n1 = p2.jugador1.nombre_completo if p2 and p2.jugador1 else '—' %}
-              {% set p2n2 = p2.jugador2.nombre_completo if p2 and p2.jugador2 else '—' %}
-              — {{ p1n1 }} + {{ p1n2 }} vs {{ p2n1 }} + {{ p2n2 }}
-            </span>
-            {% if m.fecha %}<span class="muted"> — {{ m.fecha.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
-          </div>
-          <div>
-            <a href="{{ url_for('partidos_list') }}" class="btn btn-ghost btn-slim">Cargar resultado</a>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
-{% endif %}
-
-<!-- ===== MIS PARTIDOS ===== -->
-<div class="card" style="margin-top:12px;">
-  <h3>Mis partidos</h3>
-
-  <h4 style="margin:6px 0 4px;">Por jugar</h4>
-  {% if partidos_pend and partidos_pend|length > 0 %}
-    <ul class="list-clean">
-      {% for m in partidos_pend %}
-        <li class="match-line">
-          <div>
-            <span class="badge">#{{ m.id }}</span>
-            {% if m.categoria %}[{{ m.categoria.nombre }}]{% endif %}
-            <span class="match-teams">
-              {% set p1 = m.pareja1 %}
-              {% set p2 = m.pareja2 %}
-              {% set p1n1 = p1.jugador1.nombre_completo if p1 and p1.jugador1 else '—' %}
-              {% set p1n2 = p1.jugador2.nombre_completo if p1 and p1.jugador2 else '—' %}
-              {% set p2n1 = p2.jugador1.nombre_completo if p2 and p2.jugador1 else '—' %}
-              {% set p2n2 = p2.jugador2.nombre_completo if p2 and p2.jugador2 else '—' %}
-              — {{ p1n1 }} + {{ p1n2 }} vs {{ p2n1 }} + {{ p2n2 }}
-            </span>
-            {% if m.fecha %}<span class="muted"> — {{ m.fecha.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
-          </div>
-          <div>
-            <span class="badge {% if m.estado in ['POR_CONFIRMAR','PENDIENTE'] %}badge-warn{% else %}badge-ok{% endif %}">{{ m.estado }}</span>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="muted">No tenés partidos por jugar.</p>
-  {% endif %}
-
-  <h4 style="margin:10px 0 4px;">Últimos jugados</h4>
-  {% if partidos_jug and partidos_jug|length > 0 %}
-    <ul class="list-clean">
-      {% for m in partidos_jug %}
-        <li class="match-line">
-          <div>
-            <span class="badge">#{{ m.id }}</span>
-            {% if m.categoria %}[{{ m.categoria.nombre }}]{% endif %}
-            <span class="match-teams">
-              {% set p1 = m.pareja1 %}
-              {% set p2 = m.pareja2 %}
-              {% set p1n1 = p1.jugador1.nombre_completo if p1 and p1.jugador1 else '—' %}
-              {% set p1n2 = p1.jugador2.nombre_completo if p1 and p1.jugador2 else '—' %}
-              {% set p2n1 = p2.jugador1.nombre_completo if p2 and p2.jugador1 else '—' %}
-              {% set p2n2 = p2.jugador2.nombre_completo if p2 and p2.jugador2 else '—' %}
-              — {{ p1n1 }} + {{ p1n2 }} vs {{ p2n1 }} + {{ p2n2 }}
-            </span>
-            {% if m.fecha %}<span class="muted"> — {{ m.fecha.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
-          </div>
-          <div>
-            <span class="badge badge-ok">{{ m.estado }}</span>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="muted">Aún no registraste partidos jugados.</p>
-  {% endif %}
-</div>
-
 {% endblock %}
 
 {% block help_content %}

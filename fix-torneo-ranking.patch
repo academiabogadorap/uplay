@@ -1,0 +1,34 @@
+*** a/app.py
+--- b/app.py
+@@
+ def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
+@@
+-    # 1) aplicar win/loss
+-    for jid in win_ids:
+-        j = db.session.get(Jug, int(jid))
+-        if j and j.puntos is not None:
+-            j.puntos = int(j.puntos) + int(DELTA_WIN)
+-    for jid in lose_ids:
+-        j = db.session.get(Jug, int(jid))
+-        if j and j.puntos is not None:
+-            j.puntos = int(j.puntos) + int(DELTA_LOSS)
++    # 1) aplicar win/loss usando la misma lógica que en 'partidos' normales
++    for jid in win_ids:
++        j = db.session.get(Jug, int(jid))
++        if j:
++            aplicar_delta_rankeable(j, DELTA_WIN)
++    for jid in lose_ids:
++        j = db.session.get(Jug, int(jid))
++        if j:
++            aplicar_delta_rankeable(j, DELTA_LOSS)
+@@
+-            if count_prev + 1 >= int(BONUS_APLICA_DESDE):
+-                for jid in win_ids:
+-                    j = db.session.get(Jug, int(jid))
+-                    if j and j.puntos is not None:
+-                        j.puntos = int(j.puntos) + int(DELTA_WIN_BONUS)
++            if count_prev + 1 >= int(BONUS_APLICA_DESDE):
++                for jid in win_ids:
++                    j = db.session.get(Jug, int(jid))
++                    if j:
++                        aplicar_delta_rankeable(j, DELTA_WIN_BONUS)
