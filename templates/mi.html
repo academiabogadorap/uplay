@@ -235,12 +235,13 @@
                 {% if t.modalidad %} — {{ t.modalidad }}{% endif %}
               </div>
             </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
-              <a href="{{ url_for('torneo_inscribirme', tid=t.id) }}" class="btn btn-ghost btn-slim">Inscribirme</a>
-              <a href="{{ url_for('torneo_public_fixture', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Fixture</a>
-              <a href="{{ url_for('torneo_public_tabla', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Tabla</a>
-            </div>
+<div style="display:flex; gap:6px; flex-wrap:wrap;">
+  <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
+  <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}#inscripcion" class="btn btn-ghost btn-slim">Inscribirme</a>
+  <a href="{{ url_for('torneo_public_fixture', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Fixture</a>
+  <a href="{{ url_for('torneo_public_tabla', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Tabla</a>
+</div>
+
           </li>
         {% endfor %}
       </ul>
