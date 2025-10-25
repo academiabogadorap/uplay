@@ -6139,63 +6139,6 @@ def mi_panel():
         + cant_propuestas_enviadas_pend
     )
 
-    # =========================
-    # === NUEVO BLOQUE: TORNEOS (novedades + tareas de torneo)
-    # =========================
-    # Torneos de mi categoría (o sin categoría)
-    try:
-        from datetime import datetime, timedelta
-        hace_60d = datetime.utcnow().date() - timedelta(days=60)
-
-        torneos_q = db.session.query(Torneo).filter(
-            or_(Torneo.categoria_id == j.categoria_id, Torneo.categoria_id.is_(None))
-        )
-        # Si hay fecha_inicio, priorizamos recientes (fallback si es NULL)
-        torneos_q = torneos_q.filter(or_(Torneo.fecha_inicio.is_(None), Torneo.fecha_inicio >= hace_60d))
-        torneos_q = torneos_q.order_by(Torneo.id.desc()).limit(6)
-        torneos_mi_cat = torneos_q.all()
-    except Exception:
-        torneos_mi_cat = []
-
-    # Partidos de TORNEO pendientes del jugador
-    partidos_torneo_pend = []
-    cant_torneo_partidos_pend = 0
-    try:
-        # Inscripciones donde participa el jugador
-        insc_ids_sq = (
-            db.session.query(TorneoInscripcion.id)
-            .filter(or_(TorneoInscripcion.jugador1_id == j.id,
-                        TorneoInscripcion.jugador2_id == j.id))
-            .subquery()
-        )
-
-        # Participantes (wrapper de inscripción)
-        part_ids_sq = (
-            db.session.query(TorneoParticipante.id)
-            .filter(TorneoParticipante.inscripcion_id.in_(insc_ids_sq))
-            .subquery()
-        )
-
-        # Partidos de torneo que me incluyen y siguen abiertos/sin resultado
-        partidos_torneo_pend = (
-            db.session.query(TorneoPartido)
-            .filter(or_(TorneoPartido.participante_a_id.in_(part_ids_sq),
-                        TorneoPartido.participante_b_id.in_(part_ids_sq)))
-            .filter(or_(TorneoPartido.resultado_json.is_(None),
-                        TorneoPartido.resultado_json == '',
-                        TorneoPartido.resultado_json == 'null'))
-            .filter(TorneoPartido.estado.in_(('PENDIENTE', 'PROGRAMADO')))
-            .order_by(TorneoPartido.programado_en.is_(None), TorneoPartido.programado_en.asc())
-            .all()
-        )
-        cant_torneo_partidos_pend = len(partidos_torneo_pend)
-    except Exception:
-        partidos_torneo_pend = []
-        cant_torneo_partidos_pend = 0
-    # =========================
-    # === /NUEVO BLOQUE TORNEOS
-    # =========================
-
     return render_template(
         'mi.html',
         jugador=j,
@@ -6248,12 +6191,9 @@ def mi_panel():
 
         # === NUEVO: total de tareas de resultados para el badge/condición en UI ===
         cant_tareas_resultados=cant_tareas_resultados,
-
-        # === NUEVO: Torneos (novedades + tareas de torneo)
-        torneos_mi_cat=torneos_mi_cat,
-        partidos_torneo_pend=partidos_torneo_pend,
-        cant_torneo_partidos_pend=cant_torneo_partidos_pend,
     )
+
+
 
 
 
