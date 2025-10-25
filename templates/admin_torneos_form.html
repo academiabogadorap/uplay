@@ -38,6 +38,18 @@
   .field textarea{ height:auto; min-height:92px; resize:vertical; }
   .hint{ color:var(--muted,#9fb3c8); font-size:.9rem; margin-top:4px; }
 
+  /* ▼ Fix visual para desplegables en Windows/Chrome:
+       el control cerrado queda oscuro; el menú de opciones usa negro sobre blanco */
+  .field select option{
+    color:#0f172a !important;
+    background:#ffffff !important;
+  }
+  .field select option:checked,
+  .field select option:hover{
+    background:#e5e7eb !important;
+    color:#0f172a !important;
+  }
+
   /* Badges para ayuda visual */
   .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.78rem;
           background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
