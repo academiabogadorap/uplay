@@ -168,21 +168,45 @@
                   — aceptaron {{ aceptos }}/2
                 {% endif %}
               </td>
+
+              {# ======= COLUMNA RESULTADO (corregida y robusta) ======= #}
               <td>
-                {% if d.partido and d.partido.estado == 'JUGADO' and d.partido.resultado %}
-                  {% set g = d.partido.resultado.ganador_pareja_id %}
-                  {% if g == d.pareja1_id %}
-                    Ganó: {{ d.partido.pareja1.jugador1.nombre_completo }} + {{ d.partido.pareja1.jugador2.nombre_completo }}
-                  {% elif g == d.pareja2_id %}
-                    Ganó: {{ d.partido.pareja2.jugador1.nombre_completo }} + {{ d.partido.pareja2.jugador2.nombre_completo }}
+                {% set p = d.partido %}
+                {% if p %}
+                  {# 1) Resultado definitivo (si existe) #}
+                  {% if p.resultado %}
+                    {% set gpid = p.resultado.ganador_pareja_id %}
+                    {% if gpid == p.pareja1_id %}
+                      Ganó: {{ p.pareja1.jugador1.nombre_completo }} + {{ p.pareja1.jugador2.nombre_completo }}
+                    {% elif gpid == p.pareja2_id %}
+                      Ganó: {{ p.pareja2.jugador1.nombre_completo }} + {{ p.pareja2.jugador2.nombre_completo }}
+                    {% else %}
+                      Ganador no identificado
+                    {% endif %}
+                    {% if p.resultado.sets_text %} — {{ p.resultado.sets_text }}{% endif %}
+
+                  {# 2) Sino, mostrar resultado propuesto (si hay) #}
+                  {% elif p.resultado_propuesto_ganador_pareja_id %}
+                    {% set gpid = p.resultado_propuesto_ganador_pareja_id %}
+                    {% if gpid == p.pareja1_id %}
+                      Propuesto: {{ p.pareja1.jugador1.nombre_completo }} + {{ p.pareja1.jugador2.nombre_completo }}
+                    {% elif gpid == p.pareja2_id %}
+                      Propuesto: {{ p.pareja2.jugador1.nombre_completo }} + {{ p.pareja2.jugador2.nombre_completo }}
+                    {% else %}
+                      Propuesto: Ganador no identificado
+                    {% endif %}
+                    {% if p.resultado_propuesto_sets_text %} — {{ p.resultado_propuesto_sets_text }}{% endif %}
+
+                  {# 3) Sin datos #}
                   {% else %}
-                    Ganador no identificado
+                    —
                   {% endif %}
-                  {% if d.partido.resultado.sets_text %} — {{ d.partido.resultado.sets_text }}{% endif %}
                 {% else %}
                   —
                 {% endif %}
               </td>
+              {# ======= FIN COLUMNA RESULTADO ======= #}
+
               <td>{{ d.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
               <td style="white-space:nowrap;">
                 {# Rivales: Responder si corresponde #}
