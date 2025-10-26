@@ -5906,7 +5906,7 @@ def mi_panel():
             else:
                 partidos_pend.append(m)
 
-    # Propuestas de resultado existentes
+    # Propuestas de resultado existentes (partidos "normales")
     propuestas_map = {}
     try:
         from .models import PartidoResultadoPropuesto
@@ -6093,10 +6093,10 @@ def mi_panel():
         if aceptado and not tiene_propuesta and (m.estado in ESTADOS_PROPONIBLES):
             listos_para_cargar.append(m)
 
-    # 2) Resultado propuesto y YO debo responder
+    # 2) Resultado propuesto y YO debo responder (partidos "normales")
     partidos_resultado_para_responder = [m for m in partidos_pend if m.necesita_respuesta_de(j.id)]
 
-    # 2.b) Propuestas ENVIADAS por mí
+    # 2.b) Propuestas ENVIADAS por mí (partidos "normales")
     partidos_propuestas_enviadas_pend = []
     for m in partidos_pend:
         pr = propuestas_map.get(m.id)
@@ -6117,7 +6117,7 @@ def mi_panel():
 
     partidos_sin_resultado = listos_para_cargar
 
-    # Contadores
+    # Contadores base (sin torneo aún)
     cant_pend_sin_resultado = len(partidos_sin_resultado)
     cant_abiertos_mi_cat = len(abiertos_cat)
     puede_desafiar = bool(en_zona and cat_superior)
@@ -6126,12 +6126,6 @@ def mi_panel():
     cant_partidos_creados_pend = len(partidos_creados_pend)
     cant_partidos_resultado_para_responder = len(partidos_resultado_para_responder)
     cant_propuestas_enviadas_pend = len(partidos_propuestas_enviadas_pend)
-
-    cant_tareas_resultados = (
-        cant_pend_sin_resultado
-        + cant_partidos_resultado_para_responder
-        + cant_propuestas_enviadas_pend
-    )
 
     # =========================
     # === BLOQUE: TORNEOS ===
@@ -6251,6 +6245,110 @@ def mi_panel():
     except Exception:
         partidos_torneo_pend = []
         cant_torneo_partidos_pend = 0
+
+    # ====== NUEVO: Propuestas de TORNEO que YO debo responder (optimizado, sin megajoin) ======
+    helper_torneo   = globals().get('_jugadores_del_lado_torneo')
+    helper_generico = globals().get('_jugadores_del_lado')
+
+    TP  = globals().get('TorneoPartido')
+    TPR = globals().get('TorneoPartidoResultado')
+    try:
+        TPRP = globals().get('TorneoPartidoResultadoPropuesto') or __import__('app').TorneoPartidoResultadoPropuesto
+    except Exception:
+        TPRP = globals().get('TorneoPartidoResultadoPropuesto', None)
+
+    torneo_partidos_resultado_para_responder = []
+    jug_ids_necesarios = set()
+
+    if TP and TPRP:
+        # Query mínima: solo TPRP + TP, y "sin resultado definitivo" con NOT EXISTS
+        pr_rows = db.session.execute(
+            select(
+                TPRP.id.label('pr_id'),
+                TPRP.partido_id.label('tp_id'),
+                TPRP.ganador_lado,
+                TPRP.sets_text,
+                TPRP.propuesto_por_jugador_id,
+                TPRP.creado_en,
+                TP.ronda,
+                TP.orden,
+                TP.programado_en,
+                TP.cancha,
+                TP.torneo_id,
+            )
+            .select_from(TPRP)
+            .join(TP, TPRP.partido_id == TP.id)
+            .where(
+                ~exists(select(TPR.id).where(TPR.partido_id == TP.id))  # aún sin resultado final
+            )
+        ).all()
+
+        for row in pr_rows:
+            tp = db.session.get(TP, row.tp_id)  # carga puntual
+
+            # Determinar jugadores de ambos lados
+            try:
+                idsA = (helper_torneo(tp, 'A') if helper_torneo else helper_generico(tp, 'A')) or []
+                idsB = (helper_torneo(tp, 'B') if helper_torneo else helper_generico(tp, 'B')) or []
+            except TypeError:
+                idsA, idsB = [], []
+
+            idsA = [int(x) for x in idsA if x]
+            idsB = [int(x) for x in idsB if x]
+            ids_all = set(idsA) | set(idsB)
+
+            # Si participo y NO fui el proponente → me toca responder
+            prop_id = int(row.propuesto_por_jugador_id) if row.propuesto_por_jugador_id else None
+            if j and (j.id in ids_all) and (prop_id != j.id):
+                torneo_partidos_resultado_para_responder.append({
+                    'id': row.tp_id,
+                    'ronda': row.ronda,
+                    'orden': row.orden,
+                    'programado_en': row.programado_en,
+                    'cancha': row.cancha,
+                    'torneo': getattr(tp, 'torneo', None),
+                    'idsA': idsA,
+                    'idsB': idsB,
+                    'propuesta_id': row.pr_id,
+                    'propuesto_por_jugador_id': prop_id,
+                    'sets_text': row.sets_text,
+                    'ganador_lado': row.ganador_lado,
+                    'creado_en': row.creado_en,
+                })
+                jug_ids_necesarios.update(ids_all)
+                if prop_id:
+                    jug_ids_necesarios.add(prop_id)
+
+    # Map de jugadores (para nombres humanos)
+    jugadores_by_id = {}
+    if jug_ids_necesarios:
+        from app import Jugador as _JUG_
+        rows = db.session.query(_JUG_).filter(_JUG_.id.in_(list(jug_ids_necesarios))).all()
+        jugadores_by_id = {row.id: row for row in rows}
+
+    # Helpers para nombres
+    def _nomb(jg):
+        if not jg:
+            return '—'
+        return getattr(jg, 'nombre_completo', None) or getattr(jg, 'display_name', None) or getattr(jg, 'nombre', None) or f'#{getattr(jg, "id", "?")}'
+
+    def _join_nombres(ids):
+        return ' + '.join(_nomb(jugadores_by_id.get(i)) for i in ids) if ids else '—'
+
+    for it in torneo_partidos_resultado_para_responder:
+        it['a_nombres'] = _join_nombres(it['idsA'])
+        it['b_nombres'] = _join_nombres(it['idsB'])
+
+    # Aumentamos el contador de “para responder resultado” con los de torneo
+    cant_partidos_resultado_para_responder += len(torneo_partidos_resultado_para_responder)
+
+    # ===== Contador de tareas de resultados (normales + torneo) =====
+    cant_tareas_resultados = (
+        cant_pend_sin_resultado
+        + cant_partidos_resultado_para_responder
+        + cant_propuestas_enviadas_pend
+    )
+
     # =========================
     # === /BLOQUE: TORNEOS ===
     # =========================
@@ -6301,7 +6399,12 @@ def mi_panel():
         torneos_mi_cat=torneos_mi_cat,
         partidos_torneo_pend=partidos_torneo_pend,
         cant_torneo_partidos_pend=cant_torneo_partidos_pend,
+
+        # NUEVO para poder mostrar nombres humanos en propuestas de torneo
+        torneo_partidos_resultado_para_responder=torneo_partidos_resultado_para_responder,
+        jugadores_by_id=jugadores_by_id,
     )
+
 
 
 

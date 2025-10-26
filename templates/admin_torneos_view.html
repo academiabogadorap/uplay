@@ -3,15 +3,47 @@
 
 {% block content %}
 <style>
-  /* ===== Encabezado ===== */
-  .page-head{
-    display:flex; align-items:flex-end; justify-content:space-between; gap:10px; flex-wrap:wrap;
-    margin: 4px 0 10px;
+  /* ====== HERO (match con /mi) ====== */
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
   }
-  .page-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.2px; }
-  .page-sub{ margin:0; color:var(--muted,#9fb3c8); }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+         background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700; }
+  .dot{width:8px; height:8px; border-radius:50%;}
+  .dot.g{ background:var(--neon); } .dot.y{ background:var(--yellow); } .dot.b{ background:#6EA8FF; }
 
-  /* ===== Info del torneo ===== */
+  /* ===== Badges de estado ===== */
+  .badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:.8rem;
+          border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#e6edf3; }
+  .state-BORRADOR{ background:#2a2431; border-color:#5a4678; color:#e9d7ff; }
+  .state-CANCELADO{ background:#3b1b1b; border-color:#701a1a; color:#ffe1e1; }
+  .state-INSCRIPCION{ background:#1b2f3b; border-color:#1a4d70; color:#d6eaff; }
+  .state-INSCRIPCION_CERRADA{ background:#3b2f1b; border-color:#704d1a; color:#ffecc7; }
+  .state-EN_JUEGO{ background:#1b3b2a; border-color:#1a704d; color:#d7ffe9; }
+  .state-FINALIZADO{ background:#212121; border-color:#464646; color:#e6e6e6; }
+
+  /* ===== Botones y pills ===== */
+  .btn{ cursor:pointer; }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+  .btn-danger{ background:#3b1b1b; border:1px solid #701a1a; }
+  .pill{
+    display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+    font-size:.86rem; color:#e6edf3;
+  }
+  .pill *{ color:inherit; }
+
+  /* ===== Cards / info ===== */
   .torneo-info.card{ padding:10px 12px; }
   .info-grid{
     display:grid;
@@ -22,7 +54,6 @@
   .info-item{ background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:8px; }
   .info-item strong{ display:block; font-weight:800; font-size:.86rem; color:#cfe1ff; }
   .info-item span{ display:block; margin-top:2px; }
-
   .notes{
     margin-top:8px; padding:8px; border-radius:10px;
     background: rgba(255,255,255,.03); border:1px dashed rgba(255,255,255,.14);
@@ -30,17 +61,7 @@
     white-space:pre-wrap;
   }
 
-  /* ===== Badges de estado (con buen contraste) ===== */
-  .badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:.8rem;
-    border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#e6edf3; }
-  .state-BORRADOR{ background:#2a2431; border-color:#5a4678; color:#e9d7ff; }
-  .state-CANCELADO{ background:#3b1b1b; border-color:#701a1a; color:#ffe1e1; }
-  .state-INSCRIPCION{ background:#1b2f3b; border-color:#1a4d70; color:#d6eaff; }
-  .state-INSCRIPCION_CERRADA{ background:#3b2f1b; border-color:#704d1a; color:#ffecc7; }
-  .state-EN_JUEGO{ background:#1b3b2a; border-color:#1a704d; color:#d7ffe9; }
-  .state-FINALIZADO{ background:#212121; border-color:#464646; color:#e6e6e6; }
-
-  /* ===== Barra de acciones ===== */
+  /* ===== Acciones ===== */
   .actions.card{ padding:10px; }
   .actions-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .seg{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -51,20 +72,6 @@
     max-width:220px;
   }
   .spacer{ flex:1; }
-
-  /* Botones coherentes */
-  .btn{ cursor:pointer; }
-  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
-  .btn-danger{ background:#3b1b1b; border:1px solid #701a1a; }
-  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
-
-  /* Bloques auxiliares */
-  .pill{
-    display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px;
-    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
-    font-size:.86rem; color:#e6edf3;
-  }
-  .pill *{ color:inherit; }
 
   /* ===== Tabla de partidos ===== */
   .card.section{ padding:10px 12px; margin-top:12px; }
@@ -90,18 +97,35 @@
   }
 </style>
 
-<!-- ===== Encabezado ===== -->
-<div class="page-head">
-  <div>
-    <h2 class="page-title">{{ t.nombre }}</h2>
-    <p class="page-sub">
-      Estado:
-      <span class="badge state-{{ t.estado }}">{{ t.estado }}</span>
-    </p>
-  </div>
-  <div class="seg">
-    <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
-    <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
+<!-- ===== HERO (como /mi) ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h2 class="hero-title">{{ t.nombre }}</h2>
+      <div class="chips">
+        <span class="chip"><span class="dot b"></span> Estado: <span class="badge state-{{ t.estado }}" style="margin-left:6px;">{{ t.estado }}</span></span>
+        {% set raw_mod = (t.modalidad or t.formato or '') %}
+        {% set mod_up = raw_mod.upper() %}
+        <span class="chip"><span class="dot g"></span> {{ 'INDIVIDUAL' if mod_up == 'SINGLES'
+              else 'PAREJAS' if mod_up == 'DOBLES'
+              else (raw_mod or 'Modalidad -') }}</span>
+        {% set tipo_up = (t.tipo or '')|upper %}
+        <span class="chip"><span class="dot y"></span> {{ 'AMERICANO' if tipo_up == 'AMERICANO'
+              else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
+              else 'PLAYOFF' if tipo_up == 'PLAYOFF'
+              else (t.tipo or 'Formato -') }}</span>
+        {% if t.categoria %}
+          <span class="chip"><span class="dot b"></span> Cat: {{ t.categoria.nombre }}</span>
+        {% endif %}
+        {% if t.fecha_inicio %}
+          <span class="chip"><span class="dot g"></span> Inicio: {{ t.fecha_inicio }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="hero-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="{{ url_for('admin_torneos_list') }}" class="btn btn-ghost btn-slim">Volver</a>
+      <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Ver página pública</a>
+    </div>
   </div>
 </div>
 
@@ -155,17 +179,18 @@
 <!-- ===== Acciones ===== -->
 <div class="card actions" style="margin-top:10px;">
   <div class="actions-row">
+
     {% if t.estado in ('BORRADOR','CANCELADO') %}
       <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-        <button type="submit" class="btn">Abrir inscripción</button>
+        <button type="submit" class="btn btn-slim">Abrir inscripción</button>
       </form>
       <span class="pill" title="Disponible cuando cierre la inscripción">Generar fixture (bloqueado)</span>
 
     {% elif t.estado == 'INSCRIPCION' %}
       <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-        <button type="submit" class="btn btn-ghost">Cerrar inscripción</button>
+        <button type="submit" class="btn btn-ghost btn-slim">Cerrar inscripción</button>
       </form>
       <span class="pill" title="Primero cerrá inscripción">Generar fixture (bloqueado)</span>
 
@@ -204,7 +229,7 @@
           <option value="1">Sí</option>
         </select>
 
-        <button type="submit" class="btn">Generar fixture</button>
+        <button type="submit" class="btn btn-slim">Generar fixture</button>
         <small id="desc-modo" class="muted" style="margin-left:2px;">
           AMERICANO/PLAYOFF habilitados al cerrar inscripción. PLAYOFF_NEXT disponible en juego.
         </small>
