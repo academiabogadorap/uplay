@@ -6260,6 +6260,20 @@ def mi_panel():
     torneo_partidos_resultado_para_responder = []
     jug_ids_necesarios = set()
 
+    # === IDs para nombres en 'partidos_torneo_pend' ===
+    for tp in (partidos_torneo_pend or []):
+        try:
+            idsA = (helper_torneo(tp, 'A') if helper_torneo else (helper_generico(tp, 'A') if helper_generico else [])) or []
+            idsB = (helper_torneo(tp, 'B') if helper_torneo else (helper_generico(tp, 'B') if helper_generico else [])) or []
+        except TypeError:
+            idsA, idsB = [], []
+        idsA = [int(x) for x in idsA if x]
+        idsB = [int(x) for x in idsB if x]
+        setattr(tp, 'idsA', idsA)
+        setattr(tp, 'idsB', idsB)
+        jug_ids_necesarios.update(idsA)
+        jug_ids_necesarios.update(idsB)
+
     if TP and TPRP:
         # Query mínima: solo TPRP + TP, y "sin resultado definitivo" con NOT EXISTS
         pr_rows = db.session.execute(
@@ -6282,6 +6296,7 @@ def mi_panel():
                 ~exists(select(TPR.id).where(TPR.partido_id == TP.id))  # aún sin resultado final
             )
         ).all()
+
 
         for row in pr_rows:
             tp = db.session.get(TP, row.tp_id)  # carga puntual
@@ -6339,6 +6354,19 @@ def mi_panel():
         it['a_nombres'] = _join_nombres(it['idsA'])
         it['b_nombres'] = _join_nombres(it['idsB'])
 
+    # >>> NOMBRES PARA 'partidos_torneo_pend' (usa idsA/idsB cargados en el punto 1)
+    for tp in (partidos_torneo_pend or []):
+        try:
+            an = getattr(tp, 'a_nombres', None)
+            bn = getattr(tp, 'b_nombres', None)
+            if not an:
+                setattr(tp, 'a_nombres', _join_nombres(getattr(tp, 'idsA', []) or []))
+            if not bn:
+                setattr(tp, 'b_nombres', _join_nombres(getattr(tp, 'idsB', []) or []))
+        except Exception:
+            setattr(tp, 'a_nombres', an if an else '—')
+            setattr(tp, 'b_nombres', bn if bn else '—')
+
     # Aumentamos el contador de “para responder resultado” con los de torneo
     cant_partidos_resultado_para_responder += len(torneo_partidos_resultado_para_responder)
 
@@ -6348,6 +6376,7 @@ def mi_panel():
         + cant_partidos_resultado_para_responder
         + cant_propuestas_enviadas_pend
     )
+
 
     # =========================
     # === /BLOQUE: TORNEOS ===
@@ -8351,85 +8380,76 @@ def torneo_partido_detalle(partido_id: int):
 @app.route('/torneos/partidos/<int:partido_id>/proponer', methods=['GET', 'POST'])
 def torneo_partido_proponer(partido_id: int):
     """Crear/editar la propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
-    # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
-
-    # Usuario actual (requiere login)
     j = get_current_jugador()
     if not j:
         abort(403)
 
-    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
-    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+    # --- Detección robusta de lado ---
+    lado_user = None
+    try:
+        idsA = (_jugadores_del_lado_torneo(p, 'A') or [])
+        idsB = (_jugadores_del_lado_torneo(p, 'B') or [])
+        if j.id in idsA:
+            lado_user = 'A'
+        elif j.id in idsB:
+            lado_user = 'B'
+    except Exception:
+        pass
+    if lado_user is None:
+        try:
+            flags = _lado_flag_dict(p, j.id)  # {'A': bool, 'B': bool}
+            lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+        except Exception:
+            lado_user = None
 
     es_admin = bool(getattr(j, 'is_admin', False))
     es_participante = lado_user in ('A', 'B')
-
-    # Sólo admin o participantes pueden abrir/proponer
     if not (es_admin or es_participante):
         abort(403)
 
-    # Si ya está cerrado, no permitir nuevas propuestas
     if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Leer (si existe) propuesta actual para prellenar el form (SIEMPRE scoping por partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
 
     if request.method == 'GET':
-        # Mostrar form (permite ver/editar la propuesta existente si la hay)
         return render_template('torneo_partido_proponer.html', p=p, lado_user=lado_user, prop=prop)
 
-    # ----------------
-    # POST (submit)
-    # ----------------
+    # ---- POST ----
     ganador_lado = (request.form.get('ganador_lado') or '').strip().upper()
     sets_text = (request.form.get('sets_text') or '').strip() or None
 
-    # Validación del lado ganador y existencia de lados en el partido
     if ganador_lado not in ('A', 'B'):
         flash('Seleccioná el lado ganador (A o B).', 'error')
         return redirect(url_for('torneo_partido_proponer', partido_id=partido_id))
 
-    # (Opcional) Si querés validar que ambos lados tengan jugadores:
-    # _validar_lados_torneo(p)  # si tenés un helper, si no, podés omitir
-
     try:
-        # Crear/editar propuesta SIEMPRE aislado al partido p.id
         if prop is None:
             prop = TorneoPartidoResultadoPropuesto(
                 partido_id=p.id,
                 ganador_lado=ganador_lado,
                 sets_text=sets_text,
                 propuesto_por_jugador_id=j.id,
-                # auto-confirma SOLO el lado del proponente si es participante; admin no-participante no auto-confirma
+                # auto-confirma sólo el lado del proponente si participa
                 confirma_ladoA=True if lado_user == 'A' else None,
                 confirma_ladoB=True if lado_user == 'B' else None,
             )
             db.session.add(prop)
         else:
-            # Editar propuesta existente (manteniendo scoping por partido)
             prop.ganador_lado = ganador_lado
             prop.sets_text = sets_text
             prop.propuesto_por_jugador_id = j.id
-
-            # Si propone un participante, auto-confirma su lado y resetea el contrario a "pendiente" (si no estaba confirmado)
+            # ⚠️ NO tocar el lado rival: evitamos rulo
             if lado_user == 'A':
                 prop.confirma_ladoA = True
-                if prop.confirma_ladoB is not True:
-                    prop.confirma_ladoB = None
             elif lado_user == 'B':
                 prop.confirma_ladoB = True
-                if prop.confirma_ladoA is not True:
-                    prop.confirma_ladoA = None
-            # Si propone un admin que no participa, no se auto-confirma ningún lado
+            # admin no participante: no auto-confirma nada
 
-        # Marcar estado del partido como PROPUESTO (si no está ya cerrado)
         p.estado = 'PROPUESTO'
         db.session.commit()
-
         flash('Resultado propuesto enviado.', 'success')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
@@ -8444,51 +8464,50 @@ def torneo_partido_proponer(partido_id: int):
 @app.route('/torneos/partidos/<int:partido_id>/responder', methods=['GET', 'POST'])
 def torneo_partido_responder(partido_id: int):
     """Responder una propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
-    # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
-
-    # Usuario actual (requiere login)
     j = get_current_jugador()
     if not j:
         abort(403)
 
-    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
-    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+    # --- Detección robusta de lado ---
+    lado_user = None
+    try:
+        idsA = (_jugadores_del_lado_torneo(p, 'A') or [])
+        idsB = (_jugadores_del_lado_torneo(p, 'B') or [])
+        if j.id in idsA:
+            lado_user = 'A'
+        elif j.id in idsB:
+            lado_user = 'B'
+    except Exception:
+        pass
+    if lado_user is None:
+        try:
+            flags = _lado_flag_dict(p, j.id)
+            lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+        except Exception:
+            lado_user = None
 
     es_admin = bool(getattr(j, 'is_admin', False))
     es_participante = lado_user in ('A', 'B')
-
-    # Sólo admin o participantes pueden responder
     if not (es_admin or es_participante):
         abort(403)
 
-    # Si ya está cerrado, no permitir responder
     if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Debe existir una propuesta para poder responder (aislada a este partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
     if not prop:
         flash('No hay propuesta para responder.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
     if request.method == 'GET':
-        # Admin no participante puede elegir lado en el form
-        return render_template(
-            'torneo_partido_responder.html',
-            p=p, prop=prop, lado_user=lado_user, es_admin=es_admin
-        )
+        return render_template('torneo_partido_responder.html', p=p, prop=prop, lado_user=lado_user, es_admin=es_admin)
 
-    # ----------------
-    # POST (submit)
-    # ----------------
+    # ---- POST ----
     accion = (request.form.get('accion') or '').strip().lower()  # 'aceptar' | 'rechazar'
 
-    # Determinar qué lado responde:
-    # - Si el usuario participa, su lado queda fijado.
-    # - Si es admin y no participa, puede elegir 'lado' en el form.
+    # Determinar lado que responde
     working_lado = lado_user
     if working_lado not in ('A', 'B') and es_admin:
         lado_form = (request.form.get('lado') or '').strip().upper()
@@ -8501,40 +8520,37 @@ def torneo_partido_responder(partido_id: int):
 
     try:
         if accion == 'aceptar':
-            # Marcar confirmación del lado que responde
+            # marcar SOLAMENTE mi lado como True
             if working_lado == 'A':
                 prop.confirma_ladoA = True
             else:
                 prop.confirma_ladoB = True
 
-            # Si ambos confirmaron -> cerrar partido
+            # si ambos confirmaron → cerrar
             if prop.confirma_ladoA is True and prop.confirma_ladoB is True:
                 _finalizar_partido(
                     p,
                     prop.ganador_lado,
                     prop.sets_text,
-                    confirmado_por_jugador_id=j.id  # quien ejecutó la confirmación final
+                    confirmado_por_jugador_id=j.id
                 )
-                # Importante: limpiar SOLO la propuesta de ESTE partido
-                db.session.delete(prop)
+                db.session.delete(prop)  # borrar SOLO esta propuesta
                 db.session.commit()
                 flash('Partido cerrado como JUGADO.', 'success')
                 return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-            # Aún falta la otra confirmación
+            # aún falta el otro lado
             p.estado = 'PROPUESTO'
             db.session.commit()
             flash('Aceptaste la propuesta. Falta confirmación del rival.', 'info')
             return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
         elif accion == 'rechazar':
-            # Marcar rechazo del lado que responde (se mantiene la propuesta para auditoría)
+            # marcar SOLAMENTE mi lado como False (queda en revisión)
             if working_lado == 'A':
                 prop.confirma_ladoA = False
             else:
                 prop.confirma_ladoB = False
-
-            # Queda para revisión manual
             p.estado = 'EN_REVISION'
             db.session.commit()
             flash('Marcaste la propuesta como RECHAZADA. Se pasó a revisión.', 'warning')
@@ -8549,7 +8565,6 @@ def torneo_partido_responder(partido_id: int):
         current_app.logger.exception("Error al responder propuesta en torneo (partido_id=%s)", p.id)
         flash('No se pudo procesar la respuesta. Intentá nuevamente.', 'error')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
-
 
 
 
