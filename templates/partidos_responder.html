@@ -82,7 +82,7 @@
         {# si tenés el filtro localdt, usalo; si no, caé en strftime #}
         {% if partido.fecha.__class__.__name__ == 'datetime' and partido.fecha|default(None) %}
           <span class="badge" title="Fecha">
-            {{ partido.fecha|localdt('%Y-%m-%d %H:%M') if 'localdt' in globals() else partido.fecha.strftime('%Y-%m-%d %H:%M') }}
+            {% if partido.fecha %}{{ partido.fecha.strftime('%Y-%m-%d %H:%M') }}{% endif %}
           </span>
         {% else %}
           <span class="badge" title="Fecha">{{ partido.fecha }}</span>

@@ -349,16 +349,59 @@
     <h3>Partidos para responder (invitación)</h3>
     <ul class="list-clean">
       {% for p in partidos_para_responder %}
-        <li>
-          <span class="badge">#{{ p.id }}</span>
-          {% if p.categoria %}[{{ p.categoria.nombre }}]{% endif %}
-          — Propuesto por: {{ p.creador.nombre_completo if p.creador else '(creador desconocido)' }}<br>
-          Tu equipo:
-          {% if p.companero %}{{ jugador.nombre_completo }} + {{ p.companero.nombre_completo }}
-          {% else %}{{ jugador.nombre_completo }} + <span class="muted">(sin compañero)</span>{% endif %}<br>
-          Rivales: {% if p.rival1 and p.rival2 %}{{ p.rival1.nombre_completo }} + {{ p.rival2.nombre_completo }}{% else %}<span class="muted">(incompletos)</span>{% endif %}
-          <a href="{{ url_for('partidos_responder', partido_id=p.id) }}" class="btn btn-ok btn-slim" style="margin-left:6px;">Responder</a>
-        </li>
+<li>
+  <span class="badge">#{{ p.id }}</span>
+  {% if p.categoria %}[{{ p.categoria.nombre }}]{% endif %}
+  — Propuesto por: {{ p.creador.nombre_completo if p.creador else '(creador desconocido)' }}<br>
+
+  {# ==== Resolver equipos en función del usuario actual ==== #}
+  {% set me_id = jugador.id %}
+  {% set cr = p.creador %}
+  {% set co = p.companero %}
+  {% set r1 = p.rival1 %}
+  {% set r2 = p.rival2 %}
+
+  {% set cr_id = cr.id if cr else None %}
+  {% set co_id = co.id if co else None %}
+  {% set r1_id = r1.id if r1 else None %}
+  {% set r2_id = r2.id if r2 else None %}
+
+  {% set soy_creador = (me_id is not none and cr_id is not none and me_id == cr_id) %}
+  {% set soy_comp    = (me_id is not none and co_id is not none and me_id == co_id) %}
+  {% set soy_r1      = (me_id is not none and r1_id is not none and me_id == r1_id) %}
+  {% set soy_r2      = (me_id is not none and r2_id is not none and me_id == r2_id) %}
+
+  {# my_side: el equipo del usuario; opp_side: el otro equipo #}
+  {% if soy_r1 %}
+    {% set my1 = r1.nombre_completo %}
+    {% set my2 = r2.nombre_completo if r2 else '—' %}
+    {% set opp1 = cr.nombre_completo if cr else '—' %}
+    {% set opp2 = co.nombre_completo if co else '—' %}
+  {% elif soy_r2 %}
+    {% set my1 = r2.nombre_completo %}
+    {% set my2 = r1.nombre_completo if r1 else '—' %}
+    {% set opp1 = cr.nombre_completo if cr else '—' %}
+    {% set opp2 = co.nombre_completo if co else '—' %}
+  {% elif soy_comp %}
+    {% set my1 = jugador.nombre_completo %}
+    {% set my2 = cr.nombre_completo if cr else '—' %}
+    {% set opp1 = r1.nombre_completo if r1 else '—' %}
+    {% set opp2 = r2.nombre_completo if r2 else '—' %}
+  {% else %}
+    {# Por defecto (incluye caso soy creador) #}
+    {% set my1 = jugador.nombre_completo %}
+    {% set my2 = co.nombre_completo if co else '—' %}
+    {% set opp1 = r1.nombre_completo if r1 else '—' %}
+    {% set opp2 = r2.nombre_completo if r2 else '—' %}
+  {% endif %}
+
+  Tu equipo: {{ my1 }} + {{ my2 }}<br>
+  Rivales: {{ opp1 }} + {{ opp2 }}
+
+  <a href="{{ url_for('partidos_responder', partido_id=p.id) }}"
+     class="btn btn-ok btn-slim" style="margin-left:6px;">Responder</a>
+</li>
+
       {% endfor %}
     </ul>
   </div>
