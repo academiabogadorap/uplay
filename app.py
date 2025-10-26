@@ -8554,13 +8554,244 @@ def torneo_partido_responder(partido_id: int):
 
 
 # --- Público: tabla (americano / zonas) ---
-@app.route('/torneos/<int:torneo_id>/tabla', methods=['GET'])
-def torneo_public_tabla(torneo_id: int):
-    t = Torneo.query.get_or_404(torneo_id)
-    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
-        abort(404)
-    # Más adelante: calcular tabla. Por ahora, placeholder.
-    return render_template('torneo_tabla.html', torneo=t)
+@app.route('/torneos/<int:torneo_id>/tabla')
+def torneo_public_tabla(torneo_id):
+    from sqlalchemy import or_ as sa_or
+
+    t = get_or_404(Torneo, torneo_id)
+
+    # Traer partidos del torneo
+    partidos = (
+        db.session.query(TorneoPartido)
+        .filter(TorneoPartido.torneo_id == t.id)
+        .order_by(
+            TorneoPartido.ronda.asc().nulls_last(),
+            TorneoPartido.orden.asc().nulls_last(),
+            TorneoPartido.id.asc()
+        )
+        .all()
+    )
+
+    # Resultados confirmados (si no existe el modelo, tabla queda en 0)
+    try:
+        res_list = (
+            db.session.query(TorneoPartidoResultado)
+            .join(TorneoPartido, TorneoPartidoResultado.partido_id == TorneoPartido.id)
+            .filter(TorneoPartido.torneo_id == t.id)
+            .all()
+        )
+    except Exception:
+        res_list = []
+    res_map = {r.partido_id: r for r in res_list}
+
+    # Helper para obtener jugadores por lado (A/B)
+    helper_torneo = globals().get('_jugadores_del_lado_torneo')
+
+    # --------- Parser de sets (ej: "6-4 3-6 10-8") ----------
+    def parse_sets(texto):
+        sw = sl = gw = gl = 0
+        if not texto:
+            return sw, sl, gw, gl
+        # tokens por espacio
+        for tok in str(texto).strip().split():
+            if '-' not in tok:
+                continue
+            try:
+                a, b = tok.split('-', 1)
+                ga = int(a); gb = int(b)
+            except Exception:
+                continue
+            # quién ganó el set
+            if ga > gb:
+                sw += 1
+                gw += ga; gl += gb
+            elif gb > ga:
+                sl += 1
+                gw += ga; gl += gb
+                # (el que llama decidirá a qué lado sumar como "won/lost")
+            else:
+                # empates no deberían existir, igual contamos juegos
+                gw += ga; gl += gb
+        return sw, sl, gw, gl
+
+    # --------- Acumuladores por jugador ---------
+    # standings[jid] = dict con métricas
+    standings = {}
+    def ensure(jid):
+        if jid not in standings:
+            standings[jid] = dict(
+                PJ=0, G=0, P=0,
+                SW=0, SL=0, SD=0,   # Sets Won/Lost/Diff
+                GW=0, GL=0, GD=0,   # Games Won/Lost/Diff
+                PTS=0
+            )
+
+    # Reglas de puntaje (fallback: 2 por victoria, 0 por derrota)
+    # Si querés customizar, podés guardar en t.reglas_json = {"pts_victoria":3,"pts_derrota":0}
+    pts_v = 2
+    pts_d = 0
+    try:
+        import json
+        if t.reglas_json:
+            rj = json.loads(t.reglas_json) if isinstance(t.reglas_json, str) else (t.reglas_json or {})
+            pts_v = int(rj.get('pts_victoria', pts_v))
+            pts_d = int(rj.get('pts_derrota', pts_d))
+    except Exception:
+        pass
+
+    # Pre-cargar jugadores usados para nombres
+    all_ids = set()
+
+    # Recorremos partidos con resultado
+    for p in partidos:
+        r = res_map.get(p.id)
+        if not r:
+            continue
+
+        # Jugadores por LADO usando helper fuerte de torneo
+        a_ids = []
+        b_ids = []
+        try:
+            if helper_torneo:
+                a_ids = [int(x) for x in (helper_torneo(p, 'A') or []) if x]
+                b_ids = [int(x) for x in (helper_torneo(p, 'B') or []) if x]
+        except TypeError:
+            a_ids = []
+            b_ids = []
+
+        # Si no hay info de lados, saltamos (no podemos adjudicar victorias)
+        if not a_ids and not b_ids:
+            continue
+
+        all_ids.update(a_ids); all_ids.update(b_ids)
+
+        # Determinar ganador por lado
+        ganador_lado = getattr(r, 'ganador_lado', None)
+        ganador_pid = getattr(r, 'ganador_participante_id', None)
+        # Si no viene lado pero sí el participante_id, traducimos
+        if not ganador_lado and ganador_pid:
+            if getattr(p, 'participante_a_id', None) == ganador_pid:
+                ganador_lado = 'A'
+            elif getattr(p, 'participante_b_id', None) == ganador_pid:
+                ganador_lado = 'B'
+
+        # Parseo de sets para ambos lados
+        SW_A = SL_A = GW_A = GL_A = 0
+        SW_B = SL_B = GW_B = GL_B = 0
+
+        if r and r.sets_text:
+            # parse genérico desde perspectiva "texto", luego asignamos
+            # Nota: parse_sets suma SW cuando el lado "texto" gana el set y SL cuando lo pierde.
+            # Para que ambos lados queden consistentes, interpretamos sets desde A vs B:
+            # p.ej "6-4" => A ganó 1 set y B perdió 1; A ganó 6 juegos, B 4.
+            for tok in str(r.sets_text).strip().split():
+                if '-' not in tok:
+                    continue
+                try:
+                    a, b = tok.split('-', 1)
+                    ga = int(a); gb = int(b)
+                except Exception:
+                    continue
+                GW_A += ga; GL_A += gb
+                GW_B += gb; GL_B += ga
+                if ga > gb:
+                    SW_A += 1; SL_B += 1
+                elif gb > ga:
+                    SW_B += 1; SL_A += 1
+                # empates no cuentan sets (evitamos)
+
+        # Sin sets_text: igual computamos PJ + G/P
+        # Aseguramos existir en standings
+        for jid in a_ids + b_ids:
+            ensure(jid)
+
+        # Sumar PJ
+        for jid in a_ids:
+            standings[jid]['PJ'] += 1
+        for jid in b_ids:
+            standings[jid]['PJ'] += 1
+
+        # Sumar sets/juegos
+        for jid in a_ids:
+            standings[jid]['SW'] += SW_A
+            standings[jid]['SL'] += SL_A
+            standings[jid]['GW'] += GW_A
+            standings[jid]['GL'] += GL_A
+        for jid in b_ids:
+            standings[jid]['SW'] += SW_B
+            standings[jid]['SL'] += SL_B
+            standings[jid]['GW'] += GW_B
+            standings[jid]['GL'] += GL_B
+
+        # Ganador / Perdedor + puntos
+        if ganador_lado == 'A':
+            for jid in a_ids:
+                standings[jid]['G']  += 1
+                standings[jid]['PTS'] += pts_v
+            for jid in b_ids:
+                standings[jid]['P']  += 1
+                standings[jid]['PTS'] += pts_d
+        elif ganador_lado == 'B':
+            for jid in b_ids:
+                standings[jid]['G']  += 1
+                standings[jid]['PTS'] += pts_v
+            for jid in a_ids:
+                standings[jid]['P']  += 1
+                standings[jid]['PTS'] += pts_d
+        else:
+            # sin ganador claro: no sumamos G/P ni puntos
+            pass
+
+    # Armar difs y mapa de jugadores
+    jug_map = {}
+    if all_ids:
+        rows = (
+            db.session.query(Jugador)
+            .filter(Jugador.id.in_(list(all_ids)))
+            .all()
+        )
+        jug_map = {j.id: j for j in rows}
+
+    for jid, s in standings.items():
+        s['SD'] = s['SW'] - s['SL']
+        s['GD'] = s['GW'] - s['GL']
+
+    # Ordenar: PTS desc, SD desc, GD desc, G desc, PJ asc, nombre
+    def _name(j):
+        if not j:
+            return ''
+        return (j.nombre_completo or j.display_name or j.nombre or f'Jugador #{j.id}').upper()
+
+    sorted_rows = sorted(
+        standings.items(),
+        key=lambda kv: (
+            -kv[1]['PTS'],
+            -kv[1]['SD'],
+            -kv[1]['GD'],
+            -kv[1]['G'],
+            kv[1]['PJ'],
+            _name(jug_map.get(kv[0]))
+        )
+    )
+
+    # Preparar filas para template
+    tabla = []
+    pos = 1
+    for jid, s in sorted_rows:
+        jrow = jug_map.get(jid)
+        tabla.append(dict(
+            pos=pos,
+            jugador=jrow,
+            **s
+        ))
+        pos += 1
+
+    return render_template(
+        'torneo_tabla.html',
+        t=t,
+        tabla=tabla
+    )
+
 
 def calcular_tabla_americano(torneo_id: int):
     """

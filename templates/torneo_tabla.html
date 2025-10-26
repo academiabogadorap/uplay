@@ -1,12 +1,94 @@
 {% extends "base.html" %}
-{% block title %}{{ torneo.nombre }} — Tabla{% endblock %}
-{% block content %}
-<div class="container my-4">
-  <div class="d-flex align-items-center gap-2 mb-3">
-    <a href="{{ url_for('torneo_public_detail', torneo_id=torneo.id) }}" class="btn btn-sm btn-outline-secondary">Volver al torneo</a>
-    <h1 class="h4 mb-0">Tabla — {{ torneo.nombre }}</h1>
-  </div>
+{% block title %}Tabla — {{ t.nombre }}{% endblock %}
 
-  <div class="alert alert-info">La tabla de posiciones aparecerá aquí. (Placeholder)</div>
+{% block content %}
+<style>
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:12px;
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+         background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700; }
+  .muted{ color:var(--muted); }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+
+  .card.section{ padding:10px 12px; }
+  .table{ width:100%; border-collapse:collapse; }
+  .table th, .table td{ padding:8px; border-bottom:1px solid rgba(255,255,255,.08); }
+  .table th{ text-align:left; font-size:.85rem; color:var(--muted); font-weight:700; white-space:nowrap; }
+  .num{ text-align:right; font-variant-numeric: tabular-nums; }
+  .pos{ width:1%; white-space:nowrap; font-weight:800; }
+</style>
+
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h2 class="hero-title">Tabla de posiciones</h2>
+      <div class="chips">
+        <span class="chip">{{ t.nombre }}</span>
+        {% if t.categoria %}<span class="chip">{{ t.categoria.nombre }}</span>{% endif %}
+        {% if t.tipo %}<span class="chip">{{ t.tipo }}</span>{% endif %}
+        {% if t.modalidad %}<span class="chip">{{ t.modalidad }}</span>{% endif %}
+      </div>
+    </div>
+    <div>
+      <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Volver al torneo</a>
+    </div>
+  </div>
+</div>
+
+<div class="card section">
+  {% if tabla and tabla|length > 0 %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="pos">Pos</th>
+          <th>Jugador</th>
+          <th class="num">PJ</th>
+          <th class="num">G</th>
+          <th class="num">P</th>
+          <th class="num">Sets +</th>
+          <th class="num">Sets −</th>
+          <th class="num">Dif S</th>
+          <th class="num">Juegos +</th>
+          <th class="num">Juegos −</th>
+          <th class="num">Dif J</th>
+          <th class="num">Pts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in tabla %}
+          <tr>
+            <td class="pos">#{{ r.pos }}</td>
+            <td>
+              {% set j = r.jugador %}
+              {{ j.nombre_completo or j.display_name or j.nombre or ('Jugador #' ~ j.id) }}
+            </td>
+            <td class="num">{{ r.PJ }}</td>
+            <td class="num">{{ r.G }}</td>
+            <td class="num">{{ r.P }}</td>
+            <td class="num">{{ r.SW }}</td>
+            <td class="num">{{ r.SL }}</td>
+            <td class="num">{{ r.SD }}</td>
+            <td class="num">{{ r.GW }}</td>
+            <td class="num">{{ r.GL }}</td>
+            <td class="num">{{ r.GD }}</td>
+            <td class="num"><strong>{{ r.PTS }}</strong></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Todavía no hay resultados confirmados para calcular la tabla.</p>
+  {% endif %}
 </div>
 {% endblock %}
