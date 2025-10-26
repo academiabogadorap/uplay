@@ -235,13 +235,12 @@
                 {% if t.modalidad %} — {{ t.modalidad }}{% endif %}
               </div>
             </div>
-<div style="display:flex; gap:6px; flex-wrap:wrap;">
-  <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
-  <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}#inscripcion" class="btn btn-ghost btn-slim">Inscribirme</a>
-  <a href="{{ url_for('torneo_public_fixture', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Fixture</a>
-  <a href="{{ url_for('torneo_public_tabla', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Tabla</a>
-</div>
-
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}" class="btn btn-slim">Ver</a>
+              <a href="{{ url_for('torneo_public_detail', torneo_id=t.id) }}#inscripcion" class="btn btn-ghost btn-slim">Inscribirme</a>
+              <a href="{{ url_for('torneo_public_fixture', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Fixture</a>
+              <a href="{{ url_for('torneo_public_tabla', torneo_id=t.id) }}" class="btn btn-ghost btn-slim">Tabla</a>
+            </div>
           </li>
         {% endfor %}
       </ul>
@@ -437,11 +436,15 @@
         <li class="match-line">
           <div>
             <span class="badge">#{{ p.id }}</span>
+            <span class="match-teams">
+              — {{ p.a_nombres or '—' }} vs {{ p.b_nombres or '—' }}
+            </span>
             <span class="muted">
-              {% if p.ronda is not none %}Ronda {{ p.ronda }}{% endif %}
+              {% if p.ronda is not none %} · Ronda {{ p.ronda }}{% endif %}
               {% if p.orden is not none %} · Orden {{ p.orden }}{% endif %}
               {% if p.programado_en %} · {{ p.programado_en.strftime('%d/%m %H:%M') }}{% endif %}
               {% if p.cancha %} · Cancha: {{ p.cancha }}{% endif %}
+              {% if p.torneo %} · Torneo: {{ p.torneo.nombre }}{% endif %}
             </span>
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
