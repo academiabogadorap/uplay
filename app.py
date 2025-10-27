@@ -2660,73 +2660,51 @@ def _is_running_db_command():
     cmds = ("db", "migrate", "upgrade", "downgrade", "stamp", "current", "heads")
     return any(c in sys.argv for c in cmds)
 
+# --- Seed seguro (no correr en comandos de DB / Render deploy) ---
 def _run_seed_if_ready():
-    """
-    Ejecuta el seed solo si:
-    - NO estamos ejecutando un comando de DB (flask db ...), y
-    - la tabla 'jugadores' ya tiene las columnas críticas (evita crashear si la DB remota está vieja).
-    """
+    import sys, os, logging
     try:
-        if _is_running_db_command() or os.getenv("SEED_DISABLED") == "1":
-            print("[SEED] deshabilitado (comando DB o SEED_DISABLED=1); seed omitido")
+        argv = " ".join(sys.argv).lower()
+        if os.getenv("SEED_DISABLED") == "1":
+            print("[SEED] deshabilitado por SEED_DISABLED=1; seed omitido")
+            return
+        # no correr seed durante comandos de DB / alembic
+        if any(tok in argv for tok in (" db ", "alembic", "upgrade", "migrate", "stamp", "current", "heads")):
+            print("[SEED] deshabilitado (comando DB/aleembic); seed omitido")
             return
 
-        eng = db.engine
-        insp = inspect(eng)
+        from flask import current_app
+        with app.app_context():
+            # tu lógica de seed existente: crear admin si falta, etc.
+            admin_nombre = os.getenv('ADMIN_NOMBRE')
+            admin_pin = os.getenv('ADMIN_PIN')
+            if not admin_nombre or not admin_pin:
+                print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
+                return
 
-        # Si la tabla no existe aún, o faltan columnas nuevas, no corremos seed.
-        if "jugadores" not in insp.get_table_names():
-            print("[SEED] tabla 'jugadores' no existe aún; seed omitido")
-            return
+            # ejemplo: si no existe el admin, crearlo
+            adm = Jugador.query.filter(Jugador.nombre_completo == admin_nombre).first()
+            if not adm:
+                # OJO: acá NO referencies columnas nuevas si tu DB puede no tenerlas aún
+                adm = Jugador(
+                    nombre_completo=admin_nombre,
+                    pin=admin_pin,
+                    puntos=0,
+                    categoria_id=Categoria.query.first().id if Categoria.query.first() else 1,
+                    activo=True,
+                    is_admin=True,
+                )
+                db.session.add(adm)
+                db.session.commit()
+                print("[SEED] admin creado")
+            else:
+                print("[SEED] admin ya existe; seed omitido")
+    except Exception:
+        logging.exception("[SEED] error inesperado; seed omitido")
 
-        cols = {c["name"] for c in insp.get_columns("jugadores")}
-        # Con chequear 'pin' alcanza para evitar el error; si querés, incluí las nuevas también.
-        required = {"pin"}  # opcional: {"pin", "pais", "provincia", "ciudad", "fecha_nacimiento"}
-        if not required.issubset(cols):
-            print("[SEED] esquema incompleto (falta columnas en 'jugadores'); seed omitido")
-            return
-
-        # Seed real (ejemplo: crear admin si variables están seteadas)
-        admin_nombre = os.getenv("ADMIN_NOMBRE")
-        admin_pin    = os.getenv("ADMIN_PIN")
-        if not admin_nombre or not admin_pin:
-            print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
-            return
-
-        # ¿Existe ya ese admin?
-        ya = Jugador.query.filter_by(nombre_completo=admin_nombre).first()
-        if ya:
-            print("[SEED] admin ya existe; nada que hacer")
-            return
-
-        # Buscar alguna categoría para el admin (toma la de mayor puntos como hiciste en otras rutas)
-        cat = Categoria.query.order_by(Categoria.puntos_min.desc()).first()
-        if not cat:
-            print("[SEED] no hay categorías; seed omitido")
-            return
-
-        j = Jugador(
-            nombre_completo=admin_nombre,
-            email=None,
-            telefono=None,
-            puntos=cat.puntos_max,
-            categoria_id=cat.id,
-            activo=True,
-            is_admin=True,
-            pin=admin_pin
-        )
-        db.session.add(j)
-        db.session.commit()
-        print(f"[SEED] admin creado: {admin_nombre}")
-
-    except Exception as e:
-        # Nunca dejar que el seed falle el import del módulo
-        import traceback
-        print("[SEED] error inesperado; seed omitido")
-        traceback.print_exc()
-
-# Llamá al seed aquí (todavía estamos antes de definir las RUTAS)
+# IMPORTANTE: que esta llamada quede al final del módulo (pero con el guard activo arriba)
 _run_seed_if_ready()
+
 
 
 
