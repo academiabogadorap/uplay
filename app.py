@@ -2392,23 +2392,23 @@ class TorneoPartidoResultado(db.Model):
 
 
 
-# Crear DB si no existe
-with app.app_context():
-    db.create_all()
-    ensure_torneos_schema()  # ensure_torneos_schema()  # ← desactivado mientras usamos Alembic
+# --------------------------------------------------------------------
+# Bootstrap/seed legado: SOLO bajo guardias, nunca en import
+# Alembic es el dueño del esquema; no usamos create_all() aquí.
+# --------------------------------------------------------------------
+def _legacy_bootstrap_minimo():
+    """Seed mínimo: asegurar una categoría base y (opcional) crear admin."""
+    admin_nombre = os.getenv("ADMIN_NOMBRE")
+    admin_pin    = os.getenv("ADMIN_PIN")
 
-with app.app_context():
-    # --- Seed mínimo de datos para que la app funcione ---
-    # 1) Asegurar una categoría básica (la usa el index y el admin)
+    # Asegurar categoría base
     cat = Categoria.query.filter_by(nombre="7ma").first()
     if not cat:
         cat = Categoria(nombre="7ma", puntos_min=0, puntos_max=199)
         db.session.add(cat)
         db.session.commit()
 
-    # 2) Crear/asegurar un admin inicial desde variables de entorno
-    admin_nombre = os.getenv("ADMIN_NOMBRE")
-    admin_pin = os.getenv("ADMIN_PIN")
+    # Admin opcional (si está configurado por env)
     if admin_nombre and admin_pin:
         admin = Jugador.query.filter_by(nombre_completo=admin_nombre).first()
         if not admin:
@@ -2416,17 +2416,16 @@ with app.app_context():
                 nombre_completo=admin_nombre,
                 email=None,
                 telefono=None,
-                puntos=150,          # puntos de arranque razonables
-                categoria_id=cat.id, # asignado a la categoría básica
+                puntos=150,
+                categoria_id=cat.id,
                 activo=True,
                 is_admin=True,
-                pin=admin_pin        # tu modelo guarda PIN en texto (MVP)
+                pin=admin_pin
             )
             db.session.add(admin)
             db.session.commit()
             print(f"[SEED] Admin creado: {admin_nombre}")
         else:
-            # Aseguramos que siga siendo admin y tenga categoría si hiciera falta
             changed = False
             if not admin.is_admin:
                 admin.is_admin = True
@@ -2440,23 +2439,12 @@ with app.app_context():
     else:
         print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
 
+# NOTA: eliminamos completamente:
+# - db.create_all()
+# - ensure_torneos_schema()
+# - los PRAGMAs/ALTER TABLE manuales
+# porque ahora los maneja Alembic en migrations/.
 
-# --- Migraciones/ALTERs idempotentes para SQLite ---
-with app.app_context():
-    # Jugadores.activo
-    cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
-    if 'activo' not in cols:
-        # agrega columna y setea valor por defecto 1 (activo) para existentes
-        db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN activo INTEGER NOT NULL DEFAULT 1"))
-        # por si alguna fila quedó con NULL (según versión de sqlite)
-        db.session.execute(db.text("UPDATE jugadores SET activo = 1 WHERE activo IS NULL"))
-        db.session.commit()
-
-    # PartidoAbiertoJugador.partner_pref_id (por si aún no lo agregaste)
-    cols_paj = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(partido_abierto_jugadores)")).all()]
-    if 'partner_pref_id' not in cols_paj:
-        db.session.execute(db.text("ALTER TABLE partido_abierto_jugadores ADD COLUMN partner_pref_id INTEGER"))
-        db.session.commit()
 
 with app.app_context():
     cols_j = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
@@ -2660,50 +2648,96 @@ def _is_running_db_command():
     cmds = ("db", "migrate", "upgrade", "downgrade", "stamp", "current", "heads")
     return any(c in sys.argv for c in cmds)
 
-# --- Seed seguro (no correr en comandos de DB / Render deploy) ---
+# --- Seed seguro (no correr en comandos de DB / Alembic / esquema incompleto) ---
 def _run_seed_if_ready():
     import sys, os, logging
+    from sqlalchemy import text
+
     try:
         argv = " ".join(sys.argv).lower()
+
+        # 1) Kill-switch por env
         if os.getenv("SEED_DISABLED") == "1":
             print("[SEED] deshabilitado por SEED_DISABLED=1; seed omitido")
             return
-        # no correr seed durante comandos de DB / alembic
-        if any(tok in argv for tok in (" db ", "alembic", "upgrade", "migrate", "stamp", "current", "heads")):
+
+        # 2) No correr en comandos de DB/Alembic
+        blocked_tokens = (" db ", "alembic", "upgrade", "migrate", "stamp", "current", "heads")
+        if any(tok in argv for tok in blocked_tokens):
             print("[SEED] deshabilitado (comando DB/aleembic); seed omitido")
             return
 
-        from flask import current_app
+        # 3) Sólo correr cuando el esquema YA tiene las columnas nuevas (migración aplicada)
         with app.app_context():
-            # tu lógica de seed existente: crear admin si falta, etc.
+            try:
+                cols = [row[1] for row in db.session.execute(text("PRAGMA table_info(jugadores)")).all()]
+            except Exception:
+                print("[SEED] tabla 'jugadores' no accesible; seed omitido")
+                return
+
+            needed = {"pais", "provincia", "ciudad", "fecha_nacimiento"}
+            if not needed.issubset(set(cols)):
+                print("[SEED] esquema incompleto (faltan columnas nuevas en 'jugadores'); seed omitido")
+                return
+
+            # 4) Asegurar categoría base mínima (evita usar Jugador ORM para no hacer SELECT *)
+            #    Usamos ORM en Categoria porque su esquema no cambió con esta migración.
+            base_cat = Categoria.query.filter_by(nombre="7ma").first()
+            if not base_cat:
+                base_cat = Categoria(nombre="7ma", puntos_min=0, puntos_max=199)
+                db.session.add(base_cat)
+                db.session.commit()
+                print("[SEED] categoría base '7ma' creada")
+
+            # 5) Crear admin sólo si ADMIN_* está configurado y no existe
             admin_nombre = os.getenv('ADMIN_NOMBRE')
-            admin_pin = os.getenv('ADMIN_PIN')
+            admin_pin    = os.getenv('ADMIN_PIN')
             if not admin_nombre or not admin_pin:
                 print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
                 return
 
-            # ejemplo: si no existe el admin, crearlo
-            adm = Jugador.query.filter(Jugador.nombre_completo == admin_nombre).first()
-            if not adm:
-                # OJO: acá NO referencies columnas nuevas si tu DB puede no tenerlas aún
-                adm = Jugador(
+            # Chequeo de existencia SIN ORM (evita SELECT * de Jugador)
+            exists = db.session.execute(
+                text("SELECT 1 FROM jugadores WHERE nombre_completo = :n LIMIT 1"),
+                {"n": admin_nombre}
+            ).first()
+
+            if not exists:
+                # Crear admin con ORM (INSERT sólo incluye columnas seteadas; las nuevas son NULL por defecto)
+                admin = Jugador(
                     nombre_completo=admin_nombre,
-                    pin=admin_pin,
-                    puntos=0,
-                    categoria_id=Categoria.query.first().id if Categoria.query.first() else 1,
+                    email=None,
+                    telefono=None,
+                    puntos=150,
+                    categoria_id=base_cat.id,
                     activo=True,
                     is_admin=True,
+                    pin=admin_pin
                 )
-                db.session.add(adm)
+                db.session.add(admin)
                 db.session.commit()
-                print("[SEED] admin creado")
+                print(f"[SEED] admin creado: {admin_nombre}")
             else:
-                print("[SEED] admin ya existe; seed omitido")
+                # Asegurar flags básicos sin hacer un SELECT * completo: actualizamos por SQL crudo
+                db.session.execute(
+                    text("""
+                        UPDATE jugadores
+                        SET is_admin = 1,
+                            categoria_id = COALESCE(categoria_id, :catid),
+                            activo = COALESCE(activo, 1)
+                        WHERE nombre_completo = :n
+                    """),
+                    {"catid": base_cat.id, "n": admin_nombre}
+                )
+                db.session.commit()
+                print(f"[SEED] admin ya existía: {admin_nombre}")
+
     except Exception:
         logging.exception("[SEED] error inesperado; seed omitido")
 
-# IMPORTANTE: que esta llamada quede al final del módulo (pero con el guard activo arriba)
+# IMPORTANTE: mantener esta llamada al final del módulo
 _run_seed_if_ready()
+
 
 
 
