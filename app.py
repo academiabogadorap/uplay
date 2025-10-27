@@ -2651,6 +2651,84 @@ def jinja_utcms(dt):
     dt_utc = _assume_utc(dt)
     return int(dt_utc.timestamp() * 1000) if dt_utc else ""
 
+# ===== Seed seguro: solo si el esquema está listo y no estamos corriendo comandos de DB =====
+from sqlalchemy import inspect
+
+def _is_running_db_command():
+    """Detecta si el proceso actual está ejecutando un comando de migración (flask db ...)."""
+    import sys
+    cmds = ("db", "migrate", "upgrade", "downgrade", "stamp", "current", "heads")
+    return any(c in sys.argv for c in cmds)
+
+def _run_seed_if_ready():
+    """
+    Ejecuta el seed solo si:
+    - NO estamos ejecutando un comando de DB (flask db ...), y
+    - la tabla 'jugadores' ya tiene las columnas críticas (evita crashear si la DB remota está vieja).
+    """
+    try:
+        if _is_running_db_command() or os.getenv("SEED_DISABLED") == "1":
+            print("[SEED] deshabilitado (comando DB o SEED_DISABLED=1); seed omitido")
+            return
+
+        eng = db.engine
+        insp = inspect(eng)
+
+        # Si la tabla no existe aún, o faltan columnas nuevas, no corremos seed.
+        if "jugadores" not in insp.get_table_names():
+            print("[SEED] tabla 'jugadores' no existe aún; seed omitido")
+            return
+
+        cols = {c["name"] for c in insp.get_columns("jugadores")}
+        # Con chequear 'pin' alcanza para evitar el error; si querés, incluí las nuevas también.
+        required = {"pin"}  # opcional: {"pin", "pais", "provincia", "ciudad", "fecha_nacimiento"}
+        if not required.issubset(cols):
+            print("[SEED] esquema incompleto (falta columnas en 'jugadores'); seed omitido")
+            return
+
+        # Seed real (ejemplo: crear admin si variables están seteadas)
+        admin_nombre = os.getenv("ADMIN_NOMBRE")
+        admin_pin    = os.getenv("ADMIN_PIN")
+        if not admin_nombre or not admin_pin:
+            print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
+            return
+
+        # ¿Existe ya ese admin?
+        ya = Jugador.query.filter_by(nombre_completo=admin_nombre).first()
+        if ya:
+            print("[SEED] admin ya existe; nada que hacer")
+            return
+
+        # Buscar alguna categoría para el admin (toma la de mayor puntos como hiciste en otras rutas)
+        cat = Categoria.query.order_by(Categoria.puntos_min.desc()).first()
+        if not cat:
+            print("[SEED] no hay categorías; seed omitido")
+            return
+
+        j = Jugador(
+            nombre_completo=admin_nombre,
+            email=None,
+            telefono=None,
+            puntos=cat.puntos_max,
+            categoria_id=cat.id,
+            activo=True,
+            is_admin=True,
+            pin=admin_pin
+        )
+        db.session.add(j)
+        db.session.commit()
+        print(f"[SEED] admin creado: {admin_nombre}")
+
+    except Exception as e:
+        # Nunca dejar que el seed falle el import del módulo
+        import traceback
+        print("[SEED] error inesperado; seed omitido")
+        traceback.print_exc()
+
+# Llamá al seed aquí (todavía estamos antes de definir las RUTAS)
+_run_seed_if_ready()
+
+
 
 # ----------------------------
 # RUTAS
