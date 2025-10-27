@@ -123,8 +123,12 @@
           <div style="min-width:110px;">
             <div style="display:flex; align-items:center; gap:6px;">
               <span class="form-label" style="margin:0; color:var(--muted)">País</span>
-              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="\\d{1,4}"
-                     value="54" maxlength="4" class="form-input" style="width:90px;" aria-label="Código de país">
+              <!-- FIX: pattern compatible y ayuda -->
+              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric"
+                     pattern="[0-9]{1,4}" maxlength="4" value="54"
+                     class="form-input" style="width:90px;" aria-label="Código de país"
+                     placeholder="País (ej: 54)"
+                     title="Ingresá solo dígitos (1 a 4). Ej: 54 para Argentina">
             </div>
           </div>
           <div style="flex:1;">
@@ -231,7 +235,7 @@
   }
 
   // Teléfono: permitir solo dígitos en tel_cc y tel_local
-  const onlyDigits = (s) => (s || '').replace(/\\D+/g, '');
+  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');  // FIX: regex correcta
   function sanitizeNumericInput(el, maxLen){
     if (!el) return;
     el.addEventListener('input', () => {
