@@ -1,51 +1,286 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}{% endblock %}
+
 {% block content %}
-  <h2>{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}</h2>
+<style>
+  /* ===== Hero / cabecera (igual que login) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  <form method="post" action="{{ request.path }}" style="max-width:520px;">
-    <label>Nombre completo</label>
-    <input name="nombre_completo" required value="{{ jugador.nombre_completo if jugador else '' }}">
+  /* ===== Chips / info (igual que login) ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-blue{background:#6EA8FF;}
+  .muted{ color:var(--muted,#98a2b3); }
 
-    <label>Email (opcional)</label>
-    <input name="email" type="email" value="{{ jugador.email if jugador else '' }}">
+  /* ===== Card / controles (igual que login) ===== */
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
 
-    <label>Teléfono (opcional)</label>
-    <input name="telefono" value="{{ jugador.telefono if jugador else '' }}">
+  /* Asegurar legibilidad en selects (evita “texto blanco sobre fondo blanco”) */
+  select, input, textarea { color: var(--text,#fff); background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:10px; padding:10px 12px; }
+  select:focus, input:focus, textarea:focus { outline: none; border-color: rgba(16,185,129,.45); box-shadow:0 0 0 3px rgba(16,185,129,.18); }
 
-    <label>Puntos</label>
-    <input name="puntos" required type="number" value="{{ jugador.puntos if jugador else '' }}">
+  /* Layout responsivo tipo login (una sola columna angosta) */
+  .form-grid{ display:grid; gap:10px; }
+  @media (min-width: 860px){
+    .form-grid.two-cols{ grid-template-columns: 1fr 1fr; }
+  }
+</style>
 
-    <label>Categoría</label>
-    <select name="categoria_id" required>
-      <option value="">-- Elegí categoría --</option>
-      {% for c in categorias %}
-        <option value="{{ c.id }}" {% if jugador and jugador.categoria_id == c.id %}selected{% endif %}>
-          {{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})
-        </option>
-      {% endfor %}
-    </select>
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}</h1>
+      <p class="hero-tag">{{ 'Actualizá los datos del jugador' if jugador else 'Alta manual (admin)' }}</p>
+    </div>
+    <div class="hero-actions">
+      <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost btn-slim">Volver a jugadores</a>
+    </div>
+  </div>
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>{{ 'Modificá los campos necesarios' if jugador else 'Completá todos los datos requeridos' }}</span>
+  </div>
+</div>
 
-    <!-- PIN: asignar al crear o cambiar al editar -->
-    <label>PIN (4–6 dígitos)</label>
-    <input name="pin" type="password" placeholder="{{ 'Dejar vacío para mantener' if jugador else 'Ej: 1234' }}">
+<!-- ===== FORMULARIO ===== -->
+<div class="card" style="max-width:760px;">
+  <form method="post" action="{{ request.path }}" class="form-grid" novalidate>
+    <!-- Nombre -->
+    <div>
+      <label for="nombre_completo" class="muted" style="display:block; margin-bottom:4px;">Nombre completo</label>
+      <input id="nombre_completo" name="nombre_completo" required
+             value="{{ jugador.nombre_completo if jugador else '' }}" placeholder="EJ: JUAN PÉREZ" style="width:100%;">
+      <div class="muted" style="margin:.35rem 0 0; font-size:.92rem;">Se recomienda guardar en MAYÚSCULAS.</div>
+    </div>
 
+    <!-- Email -->
+    <div>
+      <label for="email" class="muted" style="display:block; margin-bottom:4px;">Email (opcional)</label>
+      <input id="email" name="email" type="email"
+             value="{{ jugador.email if jugador else '' }}" placeholder="tucorreo@ejemplo.com" autocomplete="email" style="width:100%;">
+    </div>
+
+    <!-- Teléfono partido -->
+    <div>
+      <label class="muted" style="display:block; margin-bottom:4px;">Teléfono (opcional)</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" maxlength="4" placeholder="País (ej: 54)" style="min-width:110px;">
+        <input id="tel_local" name="tel_local" type="text" inputmode="numeric" maxlength="18" placeholder="Número local (sin +)" style="flex:1;">
+      </div>
+      <div class="muted" style="margin:.35rem 0 0; font-size:.9rem;">Se guardará como <code>+CCNNN…</code>. Si dejás ambos vacíos, se toma el campo “Teléfono (compat)”.</div>
+    </div>
+
+    <!-- Teléfono compat -->
+    <div>
+      <label for="telefono_compat" class="muted" style="display:block; margin-bottom:4px;">Teléfono (compat)</label>
+      <input id="telefono_compat" name="telefono"
+             value="{{ jugador.telefono if jugador else '' }}" placeholder="+54911... o 011..." style="width:100%;">
+      <div class="muted" style="margin:.35rem 0 0; font-size:.9rem;">Compatibilidad con formularios antiguos.</div>
+    </div>
+
+    <!-- País / Provincia -->
+    <div>
+      <label for="pais" class="muted" style="display:block; margin-bottom:4px;">País</label>
+      <input id="pais" name="pais" value="{{ jugador.pais if jugador else '' }}" placeholder="Argentina" style="width:100%;">
+    </div>
+    <div>
+      <label for="provincia" class="muted" style="display:block; margin-bottom:4px;">Provincia / Estado</label>
+      <input id="provincia" name="provincia" value="{{ jugador.provincia if jugador else '' }}" placeholder="Buenos Aires" style="width:100%;">
+    </div>
+
+    <!-- Ciudad / Fecha -->
+    <div>
+      <label for="ciudad" class="muted" style="display:block; margin-bottom:4px;">Ciudad</label>
+      <input id="ciudad" name="ciudad" value="{{ jugador.ciudad if jugador else '' }}" placeholder="La Plata" style="width:100%;">
+    </div>
+    <div>
+      <label for="fecha_nacimiento" class="muted" style="display:block; margin-bottom:4px;">Fecha de nacimiento</label>
+      <input id="fecha_nacimiento" name="fecha_nacimiento" type="date"
+             value="{% if jugador and jugador.fecha_nacimiento %}{{ jugador.fecha_nacimiento.strftime('%Y-%m-%d') }}{% endif %}" style="width:100%;">
+    </div>
+
+    <!-- Categoría -->
+    <div>
+      <label for="categoria_id" class="muted" style="display:block; margin-bottom:4px;">Categoría</label>
+      <select id="categoria_id" name="categoria_id" required style="width:100%;">
+        <option value="">-- Elegí categoría --</option>
+        {% for c in categorias %}
+          <option value="{{ c.id }}"
+                  data-min="{{ c.puntos_min }}" data-max="{{ c.puntos_max }}"
+                  {% if jugador and jugador.categoria_id == c.id %}selected{% endif %}>
+            {{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Puntos -->
+    <div>
+      <label for="puntos" class="muted" style="display:block; margin-bottom:4px;">Puntos</label>
+      <input id="puntos" name="puntos" required type="number" value="{{ jugador.puntos if jugador else '' }}" style="width:100%;">
+      <div id="puntos-ayuda" class="muted" style="margin:.35rem 0 0; font-size:.9rem;">Definí la categoría para ver el rango.</div>
+    </div>
+
+    <!-- PIN -->
+    <div>
+      <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN (4–6 dígitos)</label>
+      <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
+             placeholder="{{ 'Dejar vacío para mantener' if jugador else 'Ej: 1234' }}" style="width:100%;">
+      {% if jugador %}
+        <div class="muted" style="margin:.35rem 0 0; font-size:.9rem;">Si no querés cambiar el PIN, dejá el campo vacío.</div>
+      {% endif %}
+    </div>
+
+    <!-- Admin checkbox (solo cuando edita y el actual es admin) -->
     {% if current_jugador and current_jugador.is_admin and jugador %}
-      <label style="margin-top:8px;">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <label class="muted" style="margin:0;">
         <input type="checkbox" name="is_admin" value="1" {% if jugador.is_admin %}checked{% endif %}>
         Administrador
       </label>
+    </div>
     {% endif %}
 
-    <div style="margin-top:10px;">
-      <button type="submit">{{ 'Guardar cambios' if jugador else 'Crear jugador' }}</button>
-      <a href="{{ url_for('jugadores_list') }}" style="margin-left:8px;">Cancelar</a>
+    <!-- Acciones -->
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+      <button type="submit" class="btn">{{ 'Guardar cambios' if jugador else 'Crear jugador' }}</button>
+      <a href="{{ url_for('jugadores_list') }}" class="btn btn-ghost">Cancelar</a>
     </div>
   </form>
+</div>
 
-  {% if jugador %}
-    <p style="margin-top:10px; color:#666;">
-      Tip: si no querés cambiar el PIN, dejá el campo vacío.
-    </p>
-  {% endif %}
+<!-- Nota inferior (igual estilo que login) -->
+<div class="card" style="border-style:dashed; margin-top:10px; max-width:760px;">
+  <p style="margin:0;">
+    {%- if jugador -%}
+      Tip: verificá que los <strong>puntos</strong> estén dentro del rango de la categoría seleccionada.
+    {%- else -%}
+      Recordá asignar <strong>puntos</strong> acordes a la categoría inicial del jugador.
+    {%- endif -%}
+  </p>
+</div>
+
+<script>
+  // --- Nombre a MAYÚSCULAS manteniendo el cursor (igual enfoque que usamos en otros forms)
+  (function(){
+    const $n = document.getElementById('nombre_completo');
+    if($n){
+      $n.addEventListener('input', () => {
+        const pos = $n.selectionStart;
+        $n.value = ($n.value || '').toUpperCase();
+        try{ $n.setSelectionRange(pos,pos);}catch(_){}
+      }, {passive:true});
+    }
+  })();
+
+  // --- Sólo dígitos en teléfono partido
+  (function(){
+    const onlyDigits = s => (s||'').replace(/\D+/g,'');
+    const cc = document.getElementById('tel_cc');
+    const local = document.getElementById('tel_local');
+    if(cc){ cc.addEventListener('input', ()=> cc.value = onlyDigits(cc.value).slice(0,4), {passive:true}); }
+    if(local){ local.addEventListener('input', ()=> local.value = onlyDigits(local.value).slice(0,18), {passive:true}); }
+  })();
+
+  // --- Prefill tel_cc/tel_local desde teléfono compat si viene como +CC...
+  (function(){
+    const compat = document.getElementById('telefono_compat');
+    const cc = document.getElementById('tel_cc');
+    const local = document.getElementById('tel_local');
+    if(compat && compat.value && /^\+?\d{7,}$/.test(compat.value)){
+      const digits = (compat.value.match(/\d+/g) || []).join('');
+      // Heurística: CC 1–4 dígitos (preferimos 2–3 por AR=54)
+      let bestCC = '';
+      for(const ccLen of [3,2,4,1]){
+        if(digits.length > ccLen + 6){ bestCC = digits.slice(0,ccLen); break; }
+      }
+      if(!bestCC) bestCC = digits.slice(0,2);
+      const rest = digits.slice(bestCC.length);
+      if(cc && !cc.value) cc.value = bestCC;
+      if(local && !local.value) local.value = rest;
+    }
+  })();
+
+  // --- Rango dinámico de puntos según categoría
+  (function(){
+    const sel = document.getElementById('categoria_id');
+    const pts = document.getElementById('puntos');
+    const help = document.getElementById('puntos-ayuda');
+
+    function updateRange(){
+      const opt = sel.options[sel.selectedIndex];
+      const min = Number(opt?.dataset?.min || 0);
+      const max = Number(opt?.dataset?.max || 0);
+      if(min && max){
+        pts.min = String(min);
+        pts.max = String(max);
+        if(!pts.value){ pts.value = max; }
+        let v = Number(pts.value);
+        if(v < min) v = min;
+        if(v > max) v = max;
+        pts.value = String(v);
+        help.textContent = `Rango permitido: ${min}–${max} pts.`;
+      }else{
+        pts.removeAttribute('min');
+        pts.removeAttribute('max');
+        help.textContent = 'Definí la categoría para ver el rango.';
+      }
+    }
+    if(sel && pts){
+      sel.addEventListener('change', updateRange, {passive:true});
+      updateRange();
+    }
+  })();
+</script>
+{% endblock %}
+
+{% block help_content %}
+<section class="help-section">
+  <h4 style="margin:0 0 8px;">¿Qué puedo hacer en <strong>{{ 'Editar jugador' if jugador else 'Nuevo jugador' }}</strong>?</h4>
+
+  <ul style="margin:0 0 10px 18px; padding:0; line-height:1.3;">
+    <li><strong>Completar datos personales</strong>: email/teléfono ayudan a coordinar partidos.</li>
+    <li><strong>Asignar categoría y puntos</strong>: el rango permitido se muestra según la categoría.</li>
+    <li><strong>PIN</strong>: al editar, dejalo vacío para mantener el actual.</li>
+    {% if current_jugador and current_jugador.is_admin %}
+      <li><strong>Administrador</strong>: podés marcar/desmarcar el rol si estás editando.</li>
+    {% endif %}
+  </ul>
+
+  <div style="margin:10px 0 0; font-size:.95rem; opacity:.95;">
+    <strong>Tip:</strong> usá el teléfono con código de país para armar grupos y coordinar más fácil.
+  </div>
+</section>
+{{ super() }}
 {% endblock %}

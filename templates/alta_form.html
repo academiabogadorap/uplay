@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  /* ===== Hero / cabecera (mismo que index) ===== */
+  /* ===== Hero / cabecera (mismo que index/login) ===== */
   .hero{
     position:relative; overflow:hidden;
     border-radius:16px; padding:14px;
@@ -27,7 +27,7 @@
   }
   .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  /* ===== Chips / stats (por consistencia, aunque acá no se usan) ===== */
+  /* ===== Chips / stats (consistencia) ===== */
   .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
   .chip{
     display:inline-flex; align-items:center; gap:8px;
@@ -39,13 +39,6 @@
   .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
   .dot-blue{background:#6EA8FF;}
 
-  /* ===== Variables de tarjetas/botones (mismo set) ===== */
-  :root{
-    --card-h: 200px;
-    --cta-btn-w: 200px;
-    --cta-btn-h: 44px;
-  }
-
   /* ===== Layout de contenido ===== */
   .page-wrap{
     display:grid; gap:10px; margin-top:12px;
@@ -53,11 +46,11 @@
   }
 
   /* Tarjeta formulario */
-  .card-form{
-    max-width: 720px;
-  }
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
+  .card-form{ max-width: 720px; }
 
-  /* ===== Inputs coherentes con el resto ===== */
+  /* ===== Inputs/Selects coherentes y legibles ===== */
   .form-row{ display:block; }
   .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
   .form-input, .form-select{
@@ -66,7 +59,7 @@
     padding:10px 12px;
     background:rgba(255,255,255,.06);
     border:1px solid rgba(255,255,255,.14);
-    color:var(--text, #fff);
+    color:#fff; /* texto claro cuando el select está cerrado */
     outline:none;
   }
   .form-input:focus, .form-select:focus{
@@ -74,30 +67,26 @@
     box-shadow: 0 0 0 3px rgba(16,185,129,.18);
   }
 
+  /* ====== Mejora visual y legibilidad de <select> ====== */
+  .form-select{
+    -webkit-appearance:none; -moz-appearance:none; appearance:none;
+    padding-right:38px; /* espacio para el chevron */
+    background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position: right 10px center; background-size: 18px 18px;
+  }
+  .form-select option{ color:#111; background:#fff; }
+  .form-select option[disabled]{ color:#9aa3af; }
+  .form-select::-ms-expand{ display:none; }
+
   .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
   .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
   .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; }
   .btn:focus{ outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 
-  /* Ayuda consistente con index */
   .help-note{ color:var(--muted); margin:6px 0 0; font-size:.92rem; }
-
-  /* Modal base (si alguna vez lo necesitás aquí también) */
-  .backdrop{position:fixed; inset:0; display:none; z-index:1001; background:rgba(1,18,34,.65);}
-  .dialog{
-    background:linear-gradient(180deg, var(--panel), var(--panel-2));
-    color:var(--text);
-    width:min(560px, 94vw); margin:8vh auto; border-radius:14px;
-    border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
-  }
-  .dialog-header{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);}
-  .dialog-title{margin:0; font-size:1.02rem; font-weight:800;}
-  .dialog-body{padding:14px;}
-  .dialog-footer{padding:12px 14px; border-top:1px solid rgba(255,255,255,.10); display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);}
-  .close-btn{background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);}
 </style>
 
-<!-- ===== HERO (igual estilo que index) ===== -->
+<!-- ===== HERO ===== -->
 <div class="hero">
   <div class="hero-top">
     <div>
@@ -133,8 +122,8 @@
         <div style="display:flex; gap:8px; align-items:center;">
           <div style="min-width:110px;">
             <div style="display:flex; align-items:center; gap:6px;">
-              <span class="muted">País</span>
-              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="\d{1,4}"
+              <span class="form-label" style="margin:0; color:var(--muted)">País</span>
+              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="\\d{1,4}"
                      value="54" maxlength="4" class="form-input" style="width:90px;" aria-label="Código de país">
             </div>
           </div>
@@ -143,15 +132,58 @@
                    placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)" class="form-input">
           </div>
         </div>
-        <small class="muted">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>11 12345678</strong> → se guarda como <code>+541112345678</code>.</small>
+        <small class="help-note">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>11 12345678</strong> → se guarda como <code>+541112345678</code>.</small>
         <!-- Compat backend anterior -->
         <input type="hidden" name="telefono" id="telefono_compat" value="">
       </div>
 
+      <!-- ====== Datos personales ====== -->
+      <div class="form-row" style="margin-top:6px;">
+        <label class="form-label" style="font-weight:800;">Datos personales</label>
+        <div style="display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <!-- País -->
+          <div>
+            <label for="pais" class="form-label">País</label>
+            <select id="pais" name="pais" class="form-select">
+              <option value="">-- Seleccioná --</option>
+              <option value="Argentina" selected>Argentina</option>
+              <option value="Brasil">Brasil</option>
+              <option value="Chile">Chile</option>
+              <option value="Uruguay">Uruguay</option>
+              <option value="Paraguay">Paraguay</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+
+          <!-- Provincia / Estado -->
+          <div>
+            <label for="provincia" class="form-label">Provincia / Estado</label>
+            <select id="provincia" name="provincia" class="form-select">
+              <option value="">-- Seleccioná --</option>
+            </select>
+            <small class="help-note" id="provincia-ayuda">Si tu país no es Argentina, podés dejarlo vacío o indicar tu estado en “Ciudad”.</small>
+          </div>
+
+          <!-- Ciudad -->
+          <div>
+            <label for="ciudad" class="form-label">Ciudad</label>
+            <input id="ciudad" name="ciudad" type="text" placeholder="Ej: Viedma" class="form-input" />
+          </div>
+
+          <!-- Fecha de nacimiento -->
+          <div>
+            <label for="fecha_nacimiento" class="form-label">Fecha de nacimiento</label>
+            <input id="fecha_nacimiento" name="fecha_nacimiento" type="date" class="form-input" />
+            <small class="help-note">Usamos esta info para categorías y reportes (opcional).</small>
+          </div>
+        </div>
+      </div>
+      <!-- ====== /Datos personales ====== -->
+
       <div class="form-row">
         <label for="categoria_id" class="form-label">Categoría</label>
         <select id="categoria_id" name="categoria_id" required class="form-select">
-          <option value="">-- Elegí categoría --</option>
+          <option value="" disabled selected>-- Elegí categoría --</option>
           {% for c in categorias %}
             <option value="{{ c.id }}">{{ c.nombre }} ({{ c.puntos_min }}–{{ c.puntos_max }})</option>
           {% endfor %}
@@ -174,7 +206,7 @@
     </form>
   </div>
 
-  <!-- Bloque informativo (similar a la sección pública del index) -->
+  <!-- Bloque informativo -->
   <div class="card" style="border-style:dashed;">
     <h3 style="margin:0 0 6px;">¿Cómo sigue?</h3>
     <ol style="margin:0; padding-left:18px;">
@@ -186,7 +218,7 @@
 
 </div>
 
-<!-- JS: mayúsculas en nombre + sanitizar teléfono (conservado) -->
+<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha -->
 <script>
   // Nombre en MAYÚSCULAS (mantiene acentos)
   const $nombre = document.getElementById('nombre_completo');
@@ -199,7 +231,7 @@
   }
 
   // Teléfono: permitir solo dígitos en tel_cc y tel_local
-  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
+  const onlyDigits = (s) => (s || '').replace(/\\D+/g, '');
   function sanitizeNumericInput(el, maxLen){
     if (!el) return;
     el.addEventListener('input', () => {
@@ -214,6 +246,46 @@
   // Compat: mantener hidden "telefono" vacío
   const $compat = document.getElementById('telefono_compat');
   if ($compat) $compat.value = '';
+
+  // ===== Provincias (Argentina) + límite de fecha de nacimiento =====
+  (function(){
+    const $pais = document.getElementById('pais');
+    const $prov = document.getElementById('provincia');
+    const $dob  = document.getElementById('fecha_nacimiento');
+
+    const PROVINCIAS_AR = [
+      "Buenos Aires","CABA","Catamarca","Chaco","Chubut","Córdoba","Corrientes",
+      "Entre Ríos","Formosa","Jujuy","La Pampa","La Rioja","Mendoza","Misiones",
+      "Neuquén","Río Negro","Salta","San Juan","San Luis","Santa Cruz",
+      "Santa Fe","Santiago del Estero","Tierra del Fuego","Tucumán"
+    ];
+
+    function cargarProvincias(paisActual){
+      if (!$prov) return;
+      $prov.innerHTML = '<option value="">-- Seleccioná --</option>';
+      if (paisActual === 'Argentina'){
+        PROVINCIAS_AR.forEach(p => {
+          const o = document.createElement('option');
+          o.value = p; o.textContent = p;
+          $prov.appendChild(o);
+        });
+      }
+    }
+
+    if ($pais) {
+      cargarProvincias($pais.value);
+      $pais.addEventListener('change', () => cargarProvincias($pais.value));
+    }
+
+    if ($dob){
+      const hoy = new Date();
+      const yyyy = hoy.getFullYear();
+      const mm = String(hoy.getMonth() + 1).padStart(2,'0');
+      const dd = String(hoy.getDate()).padStart(2,'0');
+      $dob.max = `${yyyy}-${mm}-${dd}`;
+      $dob.min = `1900-01-01`;
+    }
+  })();
 </script>
 {% endblock %}
 
@@ -285,10 +357,10 @@
         </h4>
         <ul class="help-ul">
           <li><strong>Nombre completo</strong>: tal como querés figurar en ranking.</li>
-          <li><strong>Email</strong>: para contacto y avisos.</li>
-          <li><strong>Teléfono</strong>: con código de país (ej.: +54 9 …).</li>
-          <li><strong>Categoría</strong>: elegí la que te corresponde por nivel.</li>
-          <li><strong>Mensaje</strong>: datos útiles (días/horarios, club, nivel).</li>
+          <li><strong>Email</strong> y <strong>Teléfono</strong> para contacto.</li>
+          <li><strong>País</strong>, <strong>Provincia/Estado</strong>, <strong>Ciudad</strong>.</li>
+          <li><strong>Fecha de nacimiento</strong> (opcional) para estadísticas/categorías.</li>
+          <li><strong>Categoría</strong> según tu nivel. <em>Mensaje</em> con info útil.</li>
         </ul>
       </section>
 

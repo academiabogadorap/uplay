@@ -1,35 +1,204 @@
 {% extends "base.html" %}
 {% block title %}Aprobar solicitud{% endblock %}
+
 {% block content %}
-  <h2>Aprobar solicitud</h2>
+<style>
+  /* ===== Hero / cabecera (consistente) ===== */
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem,1.6vw,.92rem);
+    background:linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 0 .15em rgba(0,0,0,.25));
+  }
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700;}
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-blue{background:#6EA8FF;} .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
 
-  <div style="border:1px solid #ddd; padding:10px; border-radius:8px; max-width:620px;">
-    <p><strong>{{ sol.nombre_completo }}</strong></p>
-    <p>
-      {% if sol.email %}📧 {{ sol.email }}{% endif %}
-      {% if sol.telefono %}<br>📱 {{ sol.telefono }}{% endif %}
-    </p>
-    <p>Categoría solicitada: <strong>{{ sol.categoria.nombre if sol.categoria else '-' }}</strong></p>
-    {% if sol.mensaje %}<p>Mensaje: <em>{{ sol.mensaje }}</em></p>{% endif %}
+  /* ===== Layout principal ===== */
+  .page{ display:grid; gap:10px; grid-template-columns: 1fr; }
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:12px; }
+  .grid2{ display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 
-    <form method="post">
-      <label for="puntos">Puntos iniciales</label>
-      <input id="puntos" name="puntos" type="number" required value="{{ puntos_sugeridos }}">
+  .label{ color:var(--muted,#98a2b3); font-size:.92rem; }
+  .val{ font-weight:700; }
+  .muted{ color:var(--muted,#98a2b3); }
 
-      <!-- Opción 1: PIN automático por email -->
-      <div style="margin:12px 0; padding:10px; background:#F8FAFC; border:1px solid #E5E7EB; border-radius:8px;">
+  .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
+  .form-input{
+    width:100%; border-radius:10px; padding:10px 12px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); color:#fff; outline:none;
+  }
+  .form-input:focus{ border-color: rgba(16,185,129,.45); box-shadow: 0 0 0 3px rgba(16,185,129,.18); }
+
+  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); border-radius:10px; padding:8px 12px; font-weight:700; }
+  .danger{ border-color:#e11d48; color:#e11d48; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Aprobar solicitud</h1>
+      <p class="hero-tag">Alta de jugador</p>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="{{ url_for('admin_solicitudes_list') }}" class="btn-ghost">Volver a solicitudes</a>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>{{ sol.nombre_completo }}</span>
+    <span class="chip"><span class="dot dot-green"></span>Cat: {{ sol.categoria.nombre if sol.categoria else '-' }}</span>
+    {% if sol.email %}<span class="chip"><span class="dot dot-yellow"></span>{{ sol.email }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Datos de la solicitud -->
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Datos de la solicitud</h3>
+    <div class="grid2">
+      <div>
+        <div class="label">Nombre</div>
+        <div class="val">{{ sol.nombre_completo }}</div>
+      </div>
+      <div>
+        <div class="label">Email</div>
+        <div class="val">{{ sol.email or '-' }}</div>
+      </div>
+      <div>
+        <div class="label">Teléfono</div>
+        <div class="val">{{ sol.telefono or '-' }}</div>
+      </div>
+      <div>
+        <div class="label">Categoría solicitada</div>
+        <div class="val">{{ sol.categoria.nombre if sol.categoria else '-' }}</div>
+        {% if sol.categoria %}
+          <div class="muted">Rango: {{ sol.categoria.puntos_min }}–{{ sol.categoria.puntos_max }} pts</div>
+        {% endif %}
+      </div>
+
+      <!-- Nuevos campos -->
+      <div>
+        <div class="label">País</div>
+        <div class="val">{{ sol.pais or '-' }}</div>
+      </div>
+      <div>
+        <div class="label">Provincia / Estado</div>
+        <div class="val">{{ sol.provincia or '-' }}</div>
+      </div>
+      <div>
+        <div class="label">Ciudad</div>
+        <div class="val">{{ sol.ciudad or '-' }}</div>
+      </div>
+      <div>
+        <div class="label">Fecha de nacimiento</div>
+        <div class="val">{{ sol.fecha_nacimiento.strftime('%Y-%m-%d') if sol.fecha_nacimiento else '-' }}</div>
+      </div>
+    </div>
+
+    {% if sol.mensaje %}
+      <div style="margin-top:8px;">
+        <div class="label">Mensaje</div>
+        <div class="val" style="white-space:pre-wrap;">{{ sol.mensaje }}</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Aprobar -->
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Aprobación</h3>
+
+    <!-- Form principal: aprobar y enviar código -->
+    <form method="post" style="display:grid; gap:10px;">
+      <div>
+        <label for="puntos" class="form-label">Puntos iniciales</label>
+        <input id="puntos"
+               name="puntos"
+               type="number"
+               class="form-input"
+               value="{{ puntos_sugeridos }}"
+               min="{{ sol.categoria.puntos_min if sol.categoria else 0 }}"
+               max="{{ sol.categoria.puntos_max if sol.categoria else 9999 }}"
+               required>
+        {% if sol.categoria %}
+          <div class="muted" style="margin-top:4px;">
+            Rango permitido: {{ sol.categoria.puntos_min }}–{{ sol.categoria.puntos_max }} puntos.
+          </div>
+        {% endif %}
+      </div>
+
+      <div style="margin:4px 0; padding:10px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:10px;">
         <strong>PIN inicial</strong>
-        <p style="margin:6px 0 0; color:#334155; font-size:14px;">
+        <p class="muted" style="margin:6px 0 0;">
           No hace falta ingresarlo: generamos un <em>código de activación</em> y se lo enviamos por email.
           Con ese código (válido por <strong>24 h</strong>) el jugador creará su propio PIN en el primer ingreso.
         </p>
       </div>
 
-      <!-- Mantengo el parámetro 'pin' por compatibilidad, pero oculto y vacío -->
+      <!-- Compat: mantener 'pin' oculto y vacío -->
       <input name="pin" type="hidden" value="">
 
-      <button type="submit">Crear jugador y aprobar</button>
-      <a href="{{ url_for('admin_solicitudes_list') }}" style="margin-left:8px;">Cancelar</a>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="submit" class="btn">Aprobar y enviar código</button>
+        <a href="{{ url_for('admin_solicitudes_list') }}" class="btn-ghost">Cancelar</a>
+      </div>
+    </form>
+
+    <!-- Rechazar: form independiente (no anidar forms) -->
+    <form method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=sol.id) }}" style="margin-top:8px;">
+      <button type="submit" class="btn-ghost danger">Rechazar solicitud</button>
     </form>
   </div>
+
+</div>
+
+<script>
+  // Asistencia para mantener 'puntos' dentro de rango
+  (function(){
+    const inp = document.getElementById('puntos');
+    if(!inp) return;
+    function clamp(){
+      const min = Number(inp.min || 0);
+      const max = Number(inp.max || 999999);
+      let val = Number(inp.value || min);
+      if (val < min) val = min;
+      if (val > max) val = max;
+      inp.value = val;
+    }
+    inp.addEventListener('change', clamp, { passive:true });
+    inp.addEventListener('blur', clamp, { passive:true });
+  })();
+</script>
+{% endblock %}
+
+{% block help_content %}
+<section class="help-section">
+  <h4>Aprobar solicitud — guía rápida</h4>
+  <ul style="margin:6px 0; padding-left:18px;">
+    <li>Revisá los datos del jugador (contacto y ubicación).</li>
+    <li>Definí los <strong>puntos iniciales</strong> dentro del rango de la categoría.</li>
+    <li>Al aprobar, se envía un <strong>código</strong> para que el jugador cree su PIN (24 h de validez).</li>
+    <li>Si no corresponde, podés <strong>rechazar</strong> la solicitud.</li>
+  </ul>
+</section>
+{{ super() }}
 {% endblock %}

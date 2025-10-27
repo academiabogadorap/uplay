@@ -1,71 +1,189 @@
 {% extends "base.html" %}
 {% block title %}Solicitudes de alta{% endblock %}
+
 {% block content %}
-  <h2>Solicitudes de alta</h2>
+<style>
+  /* ===== Hero / cabecera ===== */
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem,1.6vw,.92rem);
+    background:linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 0 .15em rgba(0,0,0,.25));
+  }
 
-  <h3 style="margin-top:6px;">Pendientes</h3>
-  {% if pendientes %}
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>Contacto</th>
-          <th>Categoría</th>
-          <th>Mensaje</th>
-          <th>Creada</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in pendientes %}
-          <tr>
-            <td>{{ s.nombre_completo }}</td>
-            <td>
-              {% if s.email %}📧 {{ s.email }}{% endif %}
-              {% if s.telefono %}<br>📱 {{ s.telefono }}{% endif %}
-            </td>
-            <td>{{ s.categoria.nombre if s.categoria else '-' }}</td>
-            <td>{{ s.mensaje or '—' }}</td>
-            <td>{{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
-            <td class="actions">
-              <a href="{{ url_for('admin_solicitudes_aprobar', sid=s.id) }}">Aprobar</a>
-              <form method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=s.id) }}" style="display:inline;">
-                <button type="submit">Rechazar</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>No hay pendientes.</p>
-  {% endif %}
+  /* ===== Listas y tarjetas ===== */
+  .section-title{ margin:6px 0 6px; font-size:1.02rem; font-weight:800; }
+  .list{ display:grid; gap:10px; }
+  .card{
+    border-radius:14px; border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:12px;
+  }
+  .row{ display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:center; }
+  .title{ margin:0; font-size:1.02rem; font-weight:800; letter-spacing:.2px; }
+  .sub{ margin:0; color:var(--muted,#98a2b3); font-size:.92rem; }
+  .meta{ display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; font-size:.88rem; color:var(--muted,#98a2b3); }
+  .right{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 
-  <h3 style="margin-top:12px;">Historial (últimas 50)</h3>
-  {% if historial %}
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>Categoría</th>
-          <th>Estado</th>
-          <th>Creada</th>
-          <th>Resuelta</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in historial %}
-          <tr>
-            <td>{{ s.nombre_completo }}</td>
-            <td>{{ s.categoria.nombre if s.categoria else '-' }}</td>
-            <td>{{ s.estado }}</td>
-            <td>{{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}</td>
-            <td>{{ s.resuelto_en.strftime('%Y-%m-%d %H:%M') if s.resuelto_en else '—' }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>Sin historial aún.</p>
-  {% endif %}
+  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:10px; font-weight:800; padding:8px 12px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); border-radius:10px; padding:8px 12px; font-weight:700; }
+  .danger{ border-color:#e11d48; color:#e11d48; }
+
+  /* Chips */
+  .chips{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); font-size:.84rem; font-weight:700;
+  }
+  .chip .dot{ width:8px; height:8px; border-radius:50%; background:#6EA8FF; }
+  .chip.ok{ background:rgba(16,185,129,.10); border-color:rgba(16,185,129,.35); }
+  .chip.warn{ background:rgba(234,179,8,.10); border-color:rgba(234,179,8,.35); }
+  .muted{ color:var(--muted,#98a2b3); }
+
+  /* Historial: layout compacto */
+  .hist-list .title{ font-size:.98rem; }
+  .hist-list .card{ padding:10px; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Solicitudes de alta</h1>
+      <p class="hero-tag">Revisión y aprobación</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PENDIENTES ===== -->
+<h3 class="section-title">Pendientes</h3>
+
+{% if pendientes and pendientes|length > 0 %}
+  <div class="list">
+    {% for s in pendientes %}
+      <div class="card">
+        <div class="row">
+          <div>
+            <h3 class="title">{{ s.nombre_completo }}</h3>
+            <p class="sub">
+              {% if s.email %}📧 {{ s.email }}{% else %}—{% endif %}
+              {% if s.telefono %} · 📱 {{ s.telefono }}{% endif %}
+            </p>
+
+            <!-- Chips (categoría, ubicación y fecha de nacimiento) -->
+            <div class="chips">
+              <!-- Categoría -->
+              <span class="chip">
+                <span class="dot"></span>
+                Cat: {{ s.categoria.nombre if s.categoria else '-' }}
+                {% if s.categoria %}&nbsp;<span class="muted">({{ s.categoria.puntos_min }}–{{ s.categoria.puntos_max }})</span>{% endif %}
+              </span>
+
+              <!-- Ubicación -->
+              <span class="chip">
+                🌎 {{ s.pais or '—' }}
+                {% if s.provincia %} / {{ s.provincia }}{% endif %}
+                {% if s.ciudad %} / {{ s.ciudad }}{% endif %}
+              </span>
+
+              <!-- Fecha de nacimiento -->
+              {% if s.fecha_nacimiento %}
+                <span class="chip ok">🎂 {{ s.fecha_nacimiento.strftime('%Y-%m-%d') }}</span>
+              {% else %}
+                <span class="chip warn">🎂 Sin fecha</span>
+              {% endif %}
+
+              <!-- Creada -->
+              <span class="chip">
+                🕒 {{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}
+              </span>
+            </div>
+
+            {% if s.mensaje %}
+              <div class="meta">
+                <span>📝 {{ s.mensaje }}</span>
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="right">
+            <a class="btn" href="{{ url_for('admin_solicitudes_aprobar', sid=s.id) }}">Aprobar</a>
+            <form method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=s.id) }}" style="margin:0;">
+              <button type="submit" class="btn-ghost danger">Rechazar</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <p class="muted" style="margin:0;">No hay pendientes.</p>
+  </div>
+{% endif %}
+
+<!-- ===== HISTORIAL ===== -->
+<h3 class="section-title" style="margin-top:12px;">Historial (últimas 50)</h3>
+
+{% if historial and historial|length > 0 %}
+  <div class="list hist-list">
+    {% for s in historial %}
+      <div class="card">
+        <div class="row">
+          <div>
+            <h4 class="title" style="margin:0 0 4px;">{{ s.nombre_completo }}</h4>
+            <div class="chips" style="margin-top:4px;">
+              <span class="chip">
+                <span class="dot"></span>
+                Cat: {{ s.categoria.nombre if s.categoria else '-' }}
+              </span>
+              <span class="chip">
+                Estado: {{ s.estado }}
+              </span>
+              <span class="chip">
+                Creada: {{ s.creado_en.strftime('%Y-%m-%d %H:%M') }}
+              </span>
+              <span class="chip">
+                Resuelta: {{ s.resuelto_en.strftime('%Y-%m-%d %H:%M') if s.resuelto_en else '—' }}
+              </span>
+            </div>
+          </div>
+          <div class="right">
+            <!-- En historial generalmente no hay acciones, pero dejamos un enlace si querés ver detalle -->
+            <a class="btn-ghost" href="{{ url_for('admin_solicitudes_aprobar', sid=s.id) }}">Ver</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <p class="muted" style="margin:0;">Sin historial aún.</p>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block help_content %}
+<section class="help-section">
+  <h4>Solicitudes — guía rápida</h4>
+  <ul style="margin:6px 0; padding-left:18px;">
+    <li>Revisá contacto y <strong>ubicación</strong> desde las chips (País/Provincia/Ciudad).</li>
+    <li>Si ves 🎂 <strong>Sin fecha</strong>, la fecha de nacimiento no fue declarada.</li>
+    <li>Usá <strong>Aprobar</strong> para definir puntos y enviar el código de PIN (24 h de validez).</li>
+    <li><strong>Rechazar</strong> cierra la solicitud y la mueve al historial.</li>
+  </ul>
+</section>
+{{ super() }}
 {% endblock %}

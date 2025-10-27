@@ -1193,12 +1193,19 @@ class Jugador(db.Model):
     puntos = db.Column(db.Integer, nullable=False)
     categoria_id = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
-    activo = db.Column(db.Boolean, nullable=False, default=True)  # ya lo tenés
+    activo = db.Column(db.Boolean, nullable=False, default=True)
     # en class Jugador(...)
     is_admin = db.Column(db.Boolean, nullable=False, default=False)
 
-    # NUEVO: PIN simple para login MVP
+    # ===== Nuevos campos opcionales =====
+    pais = db.Column(db.String(100), nullable=True)
+    provincia = db.Column(db.String(120), nullable=True)
+    ciudad = db.Column(db.String(120), nullable=True)
+    fecha_nacimiento = db.Column(db.Date, nullable=True)
+
+    # NUEVO: PIN simple para login MVP (ya lo tenías)
     pin = db.Column(db.String(10), nullable=False, default='0000')
+
 
 class JugadorEstado(db.Model):
     __tablename__ = 'jugador_estado'
@@ -1209,6 +1216,7 @@ class JugadorEstado(db.Model):
     actualizado_en = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     jugador = db.relationship('Jugador', backref=db.backref('estado', uselist=False))
+
 
 class Pareja(db.Model):
     __tablename__ = 'parejas'
@@ -2671,6 +2679,27 @@ def alta_publica():
         tel_cc = (request.form.get('tel_cc') or '').strip() or '54'   # AR por defecto
         tel_local = (request.form.get('tel_local') or '').strip()
 
+        # ===== NUEVO: Datos personales opcionales =====
+        # Helpers locales para normalizar/parsear sin tocar el resto de la app
+        def _safe_title(s: str | None):
+            if not s:
+                return None
+            return " ".join(w.capitalize() for w in s.strip().split())
+
+        def _parse_date_yyyy_mm_dd(s: str | None):
+            if not s:
+                return None
+            try:
+                return datetime.strptime(s, "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+        pais = _safe_title(request.form.get('pais'))
+        provincia = _safe_title(request.form.get('provincia'))
+        ciudad = _safe_title(request.form.get('ciudad'))
+        fecha_nacimiento = _parse_date_yyyy_mm_dd(request.form.get('fecha_nacimiento'))
+        # ==============================================
+
         # --- Validaciones obligatorias ---
         if not nombre:
             flash('El nombre es obligatorio.', 'error')
@@ -2739,14 +2768,19 @@ def alta_publica():
         # --- Normalizar nombre a MAYÚSCULAS (mantiene acentos) ---
         nombre_upper = nombre.upper()
 
-        # Crear solicitud
+        # Crear solicitud (se agregan los nuevos campos)
         s = SolicitudAlta(
             nombre_completo=nombre_upper,
             email=email,
             telefono=telefono_final,
             categoria_id=cat.id,
             mensaje=mensaje or None,
-            estado='PENDIENTE'
+            estado='PENDIENTE',
+            # ===== NUEVOS CAMPOS =====
+            pais=pais,
+            provincia=provincia,
+            ciudad=ciudad,
+            fecha_nacimiento=fecha_nacimiento,
         )
         db.session.add(s)
         db.session.commit()
@@ -2756,12 +2790,18 @@ def alta_publica():
             admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
             if admin_emails:
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
+                # armamos líneas opcionales limpias
+                linea_loc = f"Ubicación: {pais or '-'} / {provincia or '-'} / {ciudad or '-'}\n"
+                linea_fn  = f"Fecha de nacimiento: {fecha_nacimiento.strftime('%Y-%m-%d') if fecha_nacimiento else '-'}\n"
+
                 body = (
                     "Se recibió una nueva solicitud de ALTA.\n\n"
                     f"Nombre:   {nombre_upper}\n"
                     f"Email:    {email}\n"
                     f"Teléfono: {telefono_final}\n"
                     f"Categoría solicitada: {cat.nombre} (id {cat.id})\n"
+                    f"{linea_loc}"
+                    f"{linea_fn}"
                     f"Mensaje:  {mensaje or '-'}\n"
                     f"Fecha/Hora (AR): {ahora_ar}\n\n"
                     "Revisar en: /admin/solicitudes"
@@ -3011,10 +3051,34 @@ def jugadores_new():
     if request.method == 'POST':
         nombre = (request.form.get('nombre_completo') or '').strip()
         email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        telefono_compat = (request.form.get('telefono') or '').strip()  # compat: campo viejo
         puntos = request.form.get('puntos')
         categoria_id = request.form.get('categoria_id')
 
+        # NUEVO: teléfono partido (opcional)
+        tel_cc = (request.form.get('tel_cc') or '').strip()
+        tel_local = (request.form.get('tel_local') or '').strip()
+
+        # NUEVO: ubicación + fecha de nacimiento (opcionales)
+        pais = (request.form.get('pais') or '').strip() or None
+        provincia = (request.form.get('provincia') or '').strip() or None
+        ciudad = (request.form.get('ciudad') or '').strip() or None
+        fn_raw = (request.form.get('fecha_nacimiento') or '').strip()
+
+        # === Helpercitos locales (no tocan el resto de tu app) ===
+        def only_digits(s: str) -> str:
+            return ''.join(ch for ch in (s or '') if ch.isdigit())
+
+        def parse_fecha_yyyy_mm_dd(s: str):
+            if not s:
+                return None
+            try:
+                from datetime import datetime
+                return datetime.strptime(s, '%Y-%m-%d').date()
+            except Exception:
+                return None
+
+        # === Validaciones originales ===
         if not nombre or not puntos or not categoria_id:
             flash('Nombre, puntos y categoría son obligatorios.', 'error')
             return redirect(url_for('jugadores_new'))
@@ -3030,20 +3094,51 @@ def jugadores_new():
             flash('Categoría inválida.', 'error')
             return redirect(url_for('jugadores_new'))
 
-        # Validar que los puntos estén dentro del rango de la categoría
+        # Validar rango de puntos (igual que antes)
         if not (cat.puntos_min <= pts <= cat.puntos_max):
             flash(f'Los puntos {pts} no están dentro del rango de la categoría {cat.nombre} ({cat.rango()}).', 'error')
             return redirect(url_for('jugadores_new'))
 
+        # === Armar teléfono final (opcional) ===
+        telefono_final = None
+        if tel_local:
+            cc_digits = only_digits(tel_cc)
+            local_digits = only_digits(tel_local)
+            if cc_digits and len(local_digits) >= 7:
+                telefono_final = f'+{cc_digits}{local_digits}'
+            else:
+                # si no es válido, no bloqueamos el alta porque antes era opcional
+                # podrías flashear aviso suave si querés:
+                # flash('Teléfono ingresado incompleto, se guarda vacío.', 'warning')
+                telefono_final = None
+        elif telefono_compat:
+            # compat: si viene el viejo, normalizamos lo que se pueda
+            tel_digits = only_digits(telefono_compat)
+            if telefono_compat.startswith('+') and tel_digits:
+                telefono_final = '+' + tel_digits
+            else:
+                # si no empieza con +, lo dejamos como estaba (opcional) o None si no hay dígitos
+                telefono_final = '+' + tel_digits if tel_digits else None
+
+        # === Parse fecha de nacimiento (opcional) ===
+        fecha_nacimiento = parse_fecha_yyyy_mm_dd(fn_raw)
+
+        # === Crear jugador (misma semántica que tenías) ===
         jug = Jugador(
             nombre_completo=nombre,
             email=email or None,
-            telefono=telefono or None,
+            telefono=telefono_final,
             puntos=pts,
-            categoria_id=cat.id
+            categoria_id=cat.id,
+            # NUEVOS CAMPOS (opcionales)
+            pais=pais,
+            provincia=provincia,
+            ciudad=ciudad,
+            fecha_nacimiento=fecha_nacimiento,
         )
         db.session.add(jug)
         db.session.commit()
+
         flash('Jugador creado.', 'ok')
         return redirect(url_for('jugadores_list'))
 
@@ -3056,14 +3151,26 @@ def jugadores_edit(jugador_id):
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
     if request.method == 'POST':
+        # --- Campos básicos
         nombre = (request.form.get('nombre_completo') or '').strip()
         email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        telefono_compat = (request.form.get('telefono') or '').strip()  # compat
         puntos = request.form.get('puntos')
         categoria_id = request.form.get('categoria_id')
         pin = (request.form.get('pin') or '').strip()  # opcional
         is_admin_form = request.form.get('is_admin')   # '1' si viene marcado
 
+        # --- Teléfono partido
+        tel_cc = (request.form.get('tel_cc') or '').strip()
+        tel_local = (request.form.get('tel_local') or '').strip()
+
+        # --- Nuevos datos personales
+        pais = (request.form.get('pais') or '').strip() or None
+        provincia = (request.form.get('provincia') or '').strip() or None
+        ciudad = (request.form.get('ciudad') or '').strip() or None
+        fecha_nacimiento_raw = (request.form.get('fecha_nacimiento') or '').strip()
+
+        # --- Validaciones mínimas
         if not nombre or not puntos or not categoria_id:
             flash('Nombre, puntos y categoría son obligatorios.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
@@ -3075,12 +3182,12 @@ def jugadores_edit(jugador_id):
             flash('Los puntos y la categoría deben ser válidos.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
 
-        cat = db.session.get(Categoria, int(cat_id)) if cat_id is not None else None
+        cat = db.session.get(Categoria, cat_id) if cat_id is not None else None
         if not cat:
             flash('Categoría inválida.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
 
-        # Validar que los puntos estén dentro del rango de la categoría elegida
+        # Rango de puntos de la categoría
         if not (cat.puntos_min <= pts <= cat.puntos_max):
             flash(f'Los puntos {pts} no están dentro del rango de la categoría {cat.nombre} ({cat.puntos_min}–{cat.puntos_max}).', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
@@ -3092,12 +3199,49 @@ def jugadores_edit(jugador_id):
                 return redirect(url_for('jugadores_edit', jugador_id=j.id))
             j.pin = pin  # actualizar PIN
 
-        # Guardar cambios básicos
-        j.nombre_completo = nombre
+        # --- Teléfono: priorizamos tel_cc + tel_local; si no, usamos compat
+        def only_digits(s: str) -> str:
+            return ''.join(ch for ch in s if ch.isdigit())
+
+        telefono_final = None
+        if tel_cc or tel_local:
+            cc = only_digits(tel_cc) if tel_cc else ''
+            local = only_digits(tel_local) if tel_local else ''
+            if not local or len(local) < 7:
+                flash('Ingresá un teléfono válido: el número local debe tener al menos 7 dígitos.', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+            if not cc:
+                flash('Ingresá un código de país válido (1–4 dígitos).', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+            telefono_final = f'+{cc}{local}'
+        else:
+            tel_dig = only_digits(telefono_compat)
+            if tel_dig:
+                # si ya venía con +, preservamos + y dígitos; si no, guardamos como +<digits>
+                telefono_final = ('+' + tel_dig) if telefono_compat.strip().startswith('+') else ('+' + tel_dig)
+            else:
+                telefono_final = None  # teléfono opcional al editar
+
+        # --- Fecha de nacimiento
+        fecha_nacimiento = None
+        if fecha_nacimiento_raw:
+            try:
+                fecha_nacimiento = datetime.strptime(fecha_nacimiento_raw, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Fecha de nacimiento inválida.', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+
+        # --- Guardar cambios
+        j.nombre_completo = nombre.upper()
         j.email = email or None
-        j.telefono = telefono or None
+        j.telefono = telefono_final
         j.puntos = pts
         j.categoria_id = cat.id
+
+        j.pais = pais
+        j.provincia = provincia
+        j.ciudad = ciudad
+        j.fecha_nacimiento = fecha_nacimiento
 
         # Solo un admin puede cambiar el flag de admin
         cur = get_current_jugador()
@@ -6692,7 +6836,12 @@ def admin_solicitudes_aprobar(sid):
             telefono=s.telefono,
             puntos=puntos,
             categoria_id=s.categoria_id,
-            activo=True
+            activo=True,
+            # --- NUEVOS CAMPOS copiados desde la solicitud (si existen) ---
+            pais=getattr(s, 'pais', None),
+            provincia=getattr(s, 'provincia', None),
+            ciudad=getattr(s, 'ciudad', None),
+            fecha_nacimiento=getattr(s, 'fecha_nacimiento', None),
             # no seteamos 'pin' aquí (opción 1)
         )
         db.session.add(j)
@@ -6723,6 +6872,18 @@ def admin_solicitudes_aprobar(sid):
             login_url = request.url_root.rstrip('/') + '/login'
 
         subject = "¡Bienvenido a UPLAY! Activá tu cuenta creando tu PIN"
+
+        # Líneas opcionales (ubicación / fecha de nacimiento) si existen en la solicitud
+        def _fmt_loc(_s):
+            p = getattr(_s, 'pais', None) or '-'
+            pr = getattr(_s, 'provincia', None) or '-'
+            c = getattr(_s, 'ciudad', None) or '-'
+            return f"Ubicación: {p} / {pr} / {c}\n"
+
+        def _fmt_fn(_s):
+            fn = getattr(_s, 'fecha_nacimiento', None)
+            return f"Fecha de nacimiento: {fn.strftime('%Y-%m-%d') if fn else '-'}\n"
+
         # Fallback texto plano (si no renderiza HTML)
         body = (
             f"Hola {j.nombre_completo},\n\n"
@@ -6731,11 +6892,14 @@ def admin_solicitudes_aprobar(sid):
             f"Crear PIN: {confirmar_url}\n\n"
             f"También podés iniciar sesión luego aquí: {login_url}\n\n"
             f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
-            f"Puntos iniciales: {j.puntos}\n\n"
-            "— Equipo UPLAY"
+            f"Puntos iniciales: {j.puntos}\n"
+            + _fmt_loc(s)
+            + _fmt_fn(s)
+            + "\n— Equipo UPLAY"
         )
 
         # HTML con logo inline (CID) + botón
+        # (Incluye datos opcionales si están presentes)
         html_body = f"""\
 <!doctype html>
 <html lang="es">
@@ -6782,7 +6946,23 @@ def admin_solicitudes_aprobar(sid):
               <p style="margin:0 0 6px;color:#334155;">Datos iniciales</p>
               <ul style="margin:0 0 10px 18px;padding:0;color:#334155;">
                 <li>Categoría: {j.categoria.nombre if j.categoria else '-'}</li>
-                <li>Puntos: {j.puntos}</li>
+                <li>Puntos: {j.puntos}</li>"""
+
+        # Sección extra opcional en HTML: ubicación y fecha de nacimiento
+        loc_items = []
+        if getattr(s, 'pais', None):
+            loc_items.append(f"<li>País: {s.pais}</li>")
+        if getattr(s, 'provincia', None):
+            loc_items.append(f"<li>Provincia/Estado: {s.provincia}</li>")
+        if getattr(s, 'ciudad', None):
+            loc_items.append(f"<li>Ciudad: {s.ciudad}</li>")
+        fn_text = s.fecha_nacimiento.strftime('%Y-%m-%d') if getattr(s, 'fecha_nacimiento', None) else None
+        if fn_text:
+            loc_items.append(f"<li>Fecha de nacimiento: {fn_text}</li>")
+        html_extra = ("\n".join(loc_items)) if loc_items else ""
+
+        html_body += f"""
+                {html_extra}
               </ul>
               <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Luego podrás iniciar sesión aquí: {login_url}</p>
             </td>
@@ -6818,6 +6998,7 @@ def admin_solicitudes_aprobar(sid):
     # GET -> sugerir puntos = puntos_max
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
+
 
 
 @app.route('/admin/solicitudes/<int:sid>/rechazar', methods=['POST'])
@@ -9201,6 +9382,30 @@ def _kwargs_ronda_o_jornada(model, valor):
 # ========= GENERADOR PLAYOFF (ELIMINACIÓN DIRECTA) =========
 
 from math import log2, ceil
+
+
+def _safe_upper(s):
+    if not s: return None
+    return s.strip().upper()
+
+def _safe_title(s):
+    if not s: return None
+    return " ".join(w.capitalize() for w in s.strip().split())
+
+def _parse_date_yyyy_mm_dd(s):
+    if not s: return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def _merge_phone(cc, local):
+    cc = "".join([c for c in (cc or "") if c.isdigit()])
+    local = "".join([c for c in (local or "") if c.isdigit()])
+    if not cc and not local:
+        return None
+    return f"+{cc}{local}"
+
 
 
 def _get_or_create_grupo_llaves(torneo: 'Torneo', fase: 'TorneoFase') -> 'TorneoGrupo':
