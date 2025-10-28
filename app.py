@@ -72,6 +72,28 @@ db = SQLAlchemy(app)
 # ← NUEVO: conectar Flask-Migrate (una sola línea)
 migrate = Migrate(app, db)
 
+# --- Migraciones/ALTERs idempotentes (SQLite) para solicitudes_alta ---
+with app.app_context():
+    try:
+        cols_sa = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(solicitudes_alta)")).all()]
+
+        def add_col_if_missing_sa(col_name, col_type):
+            if col_name not in cols_sa:
+                db.session.execute(db.text(f"ALTER TABLE solicitudes_alta ADD COLUMN {col_name} {col_type}"))
+                db.session.commit()
+                cols_sa.append(col_name)
+
+        add_col_if_missing_sa('pais',             'TEXT')
+        add_col_if_missing_sa('provincia',        'TEXT')
+        add_col_if_missing_sa('ciudad',           'TEXT')
+        add_col_if_missing_sa('fecha_nacimiento', 'TEXT')
+        add_col_if_missing_sa('resuelto_en',      'TEXT')  # por si faltara en algún deploy
+
+    except Exception:
+        import logging
+        logging.exception("[ALTER solicitudes_alta] Error aplicando columnas")
+
+
 # ---- SQLite: auto-migración mínima para 'torneos' ----
 def ensure_torneos_schema():
     """
