@@ -10219,6 +10219,11 @@ def inject_csrf_token():
     return dict(csrf_token=lambda: generate_csrf())
 
 
+@app.route('/healthz')
+def healthz():
+    return "ok", 200
+
+
 
 
 if __name__ == '__main__':
