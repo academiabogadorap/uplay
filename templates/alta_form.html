@@ -14,9 +14,7 @@
     border:1px solid rgba(255,255,255,.12);
     box-shadow:0 14px 40px rgba(0,0,0,.28);
   }
-  .hero-top{
-    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
-  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
   .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
   .hero-tag{
     margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
@@ -27,7 +25,7 @@
   }
   .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  /* ===== Chips / stats (consistencia) ===== */
+  /* ===== Chips / stats ===== */
   .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
   .chip{
     display:inline-flex; align-items:center; gap:8px;
@@ -40,17 +38,14 @@
   .dot-blue{background:#6EA8FF;}
 
   /* ===== Layout de contenido ===== */
-  .page-wrap{
-    display:grid; gap:10px; margin-top:12px;
-    grid-template-columns: minmax(280px, 1fr);
-  }
+  .page-wrap{ display:grid; gap:10px; margin-top:12px; grid-template-columns: minmax(280px, 1fr); }
 
-  /* Tarjeta formulario */
+  /* Tarjeta */
   .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
          background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
   .card-form{ max-width: 720px; }
 
-  /* ===== Inputs/Selects coherentes y legibles ===== */
+  /* ===== Inputs/Selects ===== */
   .form-row{ display:block; }
   .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
   .form-input, .form-select{
@@ -59,7 +54,7 @@
     padding:10px 12px;
     background:rgba(255,255,255,.06);
     border:1px solid rgba(255,255,255,.14);
-    color:#fff; /* texto claro cuando el select está cerrado */
+    color:#fff;
     outline:none;
   }
   .form-input:focus, .form-select:focus{
@@ -67,10 +62,9 @@
     box-shadow: 0 0 0 3px rgba(16,185,129,.18);
   }
 
-  /* ====== Mejora visual y legibilidad de <select> ====== */
   .form-select{
     -webkit-appearance:none; -moz-appearance:none; appearance:none;
-    padding-right:38px; /* espacio para el chevron */
+    padding-right:38px;
     background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     background-repeat:no-repeat; background-position: right 10px center; background-size: 18px 18px;
   }
@@ -104,16 +98,17 @@
 <div class="page-wrap">
 
   <div class="card card-form">
-    <form method="post" style="display:grid; gap:10px;">
+    <!-- Hacemos explícito el action hacia la ruta correcta -->
+    <form method="post" action="{{ url_for('alta_publica') }}" style="display:grid; gap:10px;">
       <div class="form-row">
         <label for="nombre_completo" class="form-label">Nombre completo</label>
-        <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" class="form-input">
+        <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" class="form-input" autocomplete="name" autofocus>
         <small class="muted">Se guardará en mayúsculas.</small>
       </div>
 
       <div class="form-row">
         <label for="email" class="form-label">Email</label>
-        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email">
+        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email" inputmode="email">
       </div>
 
       <!-- Teléfono dividido: código de país + número local -->
@@ -123,21 +118,25 @@
           <div style="min-width:110px;">
             <div style="display:flex; align-items:center; gap:6px;">
               <span class="form-label" style="margin:0; color:var(--muted)">País</span>
-              <!-- FIX: pattern compatible y ayuda -->
+              <!-- CC: 1–4 dígitos, por defecto 54 -->
               <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric"
-                     pattern="[0-9]{1,4}" maxlength="4" value="54"
+                     pattern="[0-9]{1,4}" maxlength="4" value="54" autocomplete="tel-country-code"
                      class="form-input" style="width:90px;" aria-label="Código de país"
-                     placeholder="País (ej: 54)"
+                     placeholder="Ej: 54"
                      title="Ingresá solo dígitos (1 a 4). Ej: 54 para Argentina">
             </div>
           </div>
           <div style="flex:1;">
-            <input id="tel_local" name="tel_local" type="text" inputmode="numeric" maxlength="18"
-                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)" class="form-input">
+            <!-- Local: 7–15 dígitos (sin +). Backend exige mínimo 7 -->
+            <input id="tel_local" name="tel_local" type="text" inputmode="numeric"
+                   pattern="[0-9]{7,15}" maxlength="18" required
+                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)"
+                   class="form-input" autocomplete="tel-national"
+                   title="Ingresá solo dígitos (7 a 15). Ej: 1112345678">
           </div>
         </div>
-        <small class="help-note">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>11 12345678</strong> → se guarda como <code>+541112345678</code>.</small>
-        <!-- Compat backend anterior -->
+        <small class="help-note">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>1112345678</strong> → se guarda como <code>+541112345678</code>.</small>
+        <!-- Compat backend anterior: lo dejamos vacío (el server usa tel_cc+tel_local) -->
         <input type="hidden" name="telefono" id="telefono_compat" value="">
       </div>
 
@@ -148,7 +147,7 @@
           <!-- País -->
           <div>
             <label for="pais" class="form-label">País</label>
-            <select id="pais" name="pais" class="form-select">
+            <select id="pais" name="pais" class="form-select" autocomplete="country-name">
               <option value="">-- Seleccioná --</option>
               <option value="Argentina" selected>Argentina</option>
               <option value="Brasil">Brasil</option>
@@ -162,7 +161,7 @@
           <!-- Provincia / Estado -->
           <div>
             <label for="provincia" class="form-label">Provincia / Estado</label>
-            <select id="provincia" name="provincia" class="form-select">
+            <select id="provincia" name="provincia" class="form-select" autocomplete="address-level1">
               <option value="">-- Seleccioná --</option>
             </select>
             <small class="help-note" id="provincia-ayuda">Si tu país no es Argentina, podés dejarlo vacío o indicar tu estado en “Ciudad”.</small>
@@ -171,7 +170,7 @@
           <!-- Ciudad -->
           <div>
             <label for="ciudad" class="form-label">Ciudad</label>
-            <input id="ciudad" name="ciudad" type="text" placeholder="Ej: Viedma" class="form-input" />
+            <input id="ciudad" name="ciudad" type="text" placeholder="Ej: Viedma" class="form-input" autocomplete="address-level2" />
           </div>
 
           <!-- Fecha de nacimiento -->
@@ -196,11 +195,11 @@
 
       <div class="form-row">
         <label for="mensaje" class="form-label">Mensaje (opcional)</label>
-        <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." class="form-input">
+        <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." class="form-input" autocomplete="off">
       </div>
 
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
-        <button type="submit" class="btn">Enviar solicitud</button>
+        <button id="btn-submit" type="submit" class="btn">Enviar solicitud</button>
         <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Cancelar</a>
       </div>
 
@@ -222,7 +221,7 @@
 
 </div>
 
-<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha -->
+<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha + evitar doble submit -->
 <script>
   // Nombre en MAYÚSCULAS (mantiene acentos)
   const $nombre = document.getElementById('nombre_completo');
@@ -235,7 +234,7 @@
   }
 
   // Teléfono: permitir solo dígitos en tel_cc y tel_local
-  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');  // FIX: regex correcta
+  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
   function sanitizeNumericInput(el, maxLen){
     if (!el) return;
     el.addEventListener('input', () => {
@@ -244,12 +243,26 @@
       if (raw !== digits) el.value = digits;
     }, { passive: true });
   }
-  sanitizeNumericInput(document.getElementById('tel_cc'), 4);
-  sanitizeNumericInput(document.getElementById('tel_local'), 18);
+  const $cc = document.getElementById('tel_cc');
+  const $local = document.getElementById('tel_local');
+  sanitizeNumericInput($cc, 4);
+  sanitizeNumericInput($local, 18);
 
   // Compat: mantener hidden "telefono" vacío
   const $compat = document.getElementById('telefono_compat');
   if ($compat) $compat.value = '';
+
+  // Evitar doble submit
+  (function(){
+    const $form = document.querySelector('form[action="{{ url_for("alta_publica") }}"]');
+    const $btn = document.getElementById('btn-submit');
+    if ($form && $btn){
+      $form.addEventListener('submit', () => {
+        $btn.disabled = true;
+        $btn.textContent = 'Enviando...';
+      });
+    }
+  })();
 
   // ===== Provincias (Argentina) + límite de fecha de nacimiento =====
   (function(){
