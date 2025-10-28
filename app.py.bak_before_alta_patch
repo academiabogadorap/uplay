@@ -1526,26 +1526,17 @@ class PartidoAbiertoSuplente(db.Model):
 
 class SolicitudAlta(db.Model):
     __tablename__ = 'solicitudes_alta'
-
-    id              = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     nombre_completo = db.Column(db.String(120), nullable=False)
-    email           = db.Column(db.String(120))
-    telefono        = db.Column(db.String(50))
-    categoria_id    = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
-    mensaje         = db.Column(db.String(300))
-    estado          = db.Column(db.String(20), nullable=False, default='PENDIENTE')  # PENDIENTE | APROBADA | RECHAZADA
-    creado_en       = db.Column(db.DateTime, default=datetime.utcnow)
-    resuelto_en     = db.Column(db.DateTime)
-
-    # ====== NUEVOS CAMPOS (opcionales) ======
-    pais             = db.Column(db.String(80), nullable=True)
-    provincia        = db.Column(db.String(80), nullable=True)
-    ciudad           = db.Column(db.String(120), nullable=True)
-    # En SQLite, db.Date se guarda como TEXT 'YYYY-MM-DD' sin problema
-    fecha_nacimiento = db.Column(db.Date, nullable=True)
+    email = db.Column(db.String(120))
+    telefono = db.Column(db.String(50))
+    categoria_id = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
+    mensaje = db.Column(db.String(300))
+    estado = db.Column(db.String(20), nullable=False, default='PENDIENTE')  # PENDIENTE | APROBADA | RECHAZADA
+    creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+    resuelto_en = db.Column(db.DateTime)
 
     categoria = db.relationship('Categoria')
-
 
 class PinReset(db.Model):
     __tablename__ = 'pin_resets'
@@ -2742,7 +2733,6 @@ def alta_publica():
 
         # ===== NUEVO: Datos personales opcionales =====
         # Helpers locales para normalizar/parsear sin tocar el resto de la app
-        from datetime import datetime  # (local por si en tu módulo ya está importado)
         def _safe_title(s: str | None):
             if not s:
                 return None
@@ -2849,15 +2839,12 @@ def alta_publica():
 
         # ==== Aviso por email a administradores (usando send_mail) ====
         try:
-            from zoneinfo import ZoneInfo  # (local por si ya lo tenés importado arriba)
             admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
             if admin_emails:
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
                 # armamos líneas opcionales limpias
                 linea_loc = f"Ubicación: {pais or '-'} / {provincia or '-'} / {ciudad or '-'}\n"
-                # blindaje: si fecha_nacimiento es None, mostramos '-'
-                fn_str = fecha_nacimiento.strftime('%Y-%m-%d') if fecha_nacimiento else '-'
-                linea_fn  = f"Fecha de nacimiento: {fn_str}\n"
+                linea_fn  = f"Fecha de nacimiento: {fecha_nacimiento.strftime('%Y-%m-%d') if fecha_nacimiento else '-'}\n"
 
                 body = (
                     "Se recibió una nueva solicitud de ALTA.\n\n"

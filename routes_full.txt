@@ -1,0 +1,75 @@
+[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido
+Endpoint                                              Methods    Rule                                                
+----------------------------------------------------  ---------  ----------------------------------------------------
+abiertos_armar                                        POST       /abiertos/<int:pa_id>/armar                         
+abiertos_cancelar                                     POST       /abiertos/<int:pa_id>/cancelar                      
+abiertos_eliminar                                     POST       /abiertos/<int:pa_id>/eliminar                      
+abiertos_join                                         POST       /abiertos/<int:pa_id>/unirse                        
+abiertos_leave                                        POST       /abiertos/<int:pa_id>/salir                         
+abiertos_list                                         GET        /abiertos                                           
+abiertos_new                                          POST       /abiertos/nuevo                                     
+abiertos_suplente                                     POST       /abiertos/<int:pa_id>/suplente                      
+abiertos_suplente_quitar                              POST       /abiertos/<int:pa_id>/suplente/quitar               
+admin_abiertos_cancelar                               POST       /admin/abiertos/<int:pa_id>/cancelar                
+admin_abiertos_cerrar                                 POST       /admin/abiertos/<int:pa_id>/cerrar                  
+admin_abiertos_eliminar                               POST       /admin/abiertos/<int:pa_id>/eliminar                
+admin_desafios_eliminar                               POST       /admin/desafios/<int:desafio_id>/eliminar           
+admin_home                                            GET        /admin                                              
+admin_partido_resultado_editar                        GET, POST  /admin/partidos/<int:partido_id>/resultado/editar   
+admin_partidos_eliminar                               POST       /admin/partidos/<int:partido_id>/eliminar           
+admin_solicitudes_aprobar                             GET, POST  /admin/solicitudes/<int:sid>/aprobar                
+admin_solicitudes_list                                GET        /admin/solicitudes                                  
+admin_solicitudes_rechazar                            POST       /admin/solicitudes/<int:sid>/rechazar               
+admin_torneo_abrir_inscripcion                        POST       /admin/torneos/<int:tid>/abrir_inscripcion          
+admin_torneo_cerrar_inscripcion                       POST       /admin/torneos/<int:tid>/cerrar_inscripcion         
+admin_torneo_eliminar                                 POST       /admin/torneos/<int:tid>/eliminar                   
+admin_torneo_partido_resultado                        POST       /admin/torneos/partidos/<int:pid>/resultado         
+admin_torneos_cambiar_estado                          POST       /admin/torneos/<int:tid>/estado                     
+admin_torneos_generar_fixture                         POST       /admin/torneos/<int:tid>/generar_fixture            
+admin_torneos_list                                    GET        /admin/torneos                                      
+admin_torneos_new                                     GET, POST  /admin/torneos/new                                  
+admin_torneos_partido_resultado_editar                POST       /admin/torneos/partidos/<int:pid>/resultado/editar  
+admin_torneos_partido_resultado_eliminar              POST       /admin/torneos/partidos/<int:pid>/resultado/eliminar
+admin_torneos_view                                    GET        /admin/torneos/<int:tid>                            
+alta_publica                                          GET, POST  /alta                                               
+categorias_delete                                     POST       /categorias/<int:cat_id>/eliminar                   
+categorias_edit                                       GET, POST  /categorias/<int:cat_id>/editar                     
+categorias_list                                       GET        /categorias                                         
+categorias_new                                        GET, POST  /categorias/nueva                                   
+desafios_list                                         GET        /desafios                                           
+desafios_new                                          GET, POST  /desafios/nuevo                                     
+desafios_programar                                    POST       /desafios/<int:desafio_id>/programar                
+desafios_responder                                    GET, POST  /desafios/<int:desafio_id>/responder                
+home                                                  GET        /                                                   
+jugadores_activate                                    POST       /jugadores/<int:jugador_id>/reactivar               
+jugadores_deactivate                                  POST       /jugadores/<int:jugador_id>/desactivar              
+jugadores_delete                                      POST       /jugadores/<int:jugador_id>/eliminar                
+jugadores_edit                                        GET, POST  /jugadores/<int:jugador_id>/editar                  
+jugadores_list                                        GET        /jugadores                                          
+jugadores_new                                         GET, POST  /jugadores/nuevo                                    
+login                                                 GET, POST  /login                                              
+logout                                                POST       /logout                                             
+mi_cambiar_pin                                        GET, POST  /mi/pin                                             
+mi_panel                                              GET        /mi                                                 
+olvide_pin                                            GET, POST  /olvide-pin                                         
+olvide_pin_confirmar                                  GET, POST  /olvide-pin/confirmar                               
+parejas_list                                          GET        /parejas                                            
+parejas_new                                           GET, POST  /parejas/nueva                                      
+partidos_confirmar_resultado                          GET, POST  /partidos/<int:partido_id>/confirmar-resultado      
+partidos_list                                         GET        /partidos                                           
+partidos_new                                          GET, POST  /partidos/nuevo                                     
+partidos_responder                                    GET, POST  /partidos/<int:partido_id>/responder                
+partidos_resultado                                    GET, POST  /partidos/<int:partido_id>/resultado                
+ranking                                               GET        /ranking                                            
+static                                                GET        /static/<path:filename>                             
+tareas_autocerrar_propuestas_vencidas                 POST       /tareas/propuestas/autocerrar                       
+tareas_autocerrar_propuestas_vencidas_get_deprecated  GET        /tareas/propuestas/autocerrar                       
+torneo_inscribirme                                    GET, POST  /torneos/<int:tid>/inscribirme                      
+torneo_partido_detalle                                GET        /torneos/partidos/<int:partido_id>                  
+torneo_partido_proponer                               GET, POST  /torneos/partidos/<int:partido_id>/proponer         
+torneo_partido_responder                              GET, POST  /torneos/partidos/<int:partido_id>/responder        
+torneo_public_detail                                  GET        /torneos/<int:torneo_id>                            
+torneo_public_detail_legacy                           GET        /torneo/<int:torneo_id>                             
+torneo_public_fixture                                 GET        /torneos/<int:torneo_id>/fixture                    
+torneo_public_tabla                                   GET        /torneos/<int:torneo_id>/tabla                      
+torneos_public_list                                   GET        /torneos                                            
