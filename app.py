@@ -3050,21 +3050,27 @@ def categorias_delete(cat_id):
 
 
 # --- Jugadores ---
+from sqlalchemy import func
+
 @app.route('/jugadores')
 def jugadores_list():
-    # Filtros existentes
+    # ====== Parámetros GET (manteniendo lo que ya tenías) ======
     mostrar_inactivos = request.args.get('inactivos', default=0, type=int)  # 1 = incluir inactivos
+    q_text        = (request.args.get('q') or '').strip()
+    categoria_id  = request.args.get('categoria_id', type=int)
+    solo_mi_cat   = request.args.get('solo_mi_cat', type=int) == 1
 
-    # NUEVOS filtros
-    q_text = (request.args.get('q') or '').strip()
-    categoria_id = request.args.get('categoria_id', type=int)
-    solo_mi_cat = request.args.get('solo_mi_cat', type=int) == 1
+    # NUEVOS filtros de ubicación
+    provincia     = (request.args.get('provincia') or '').strip()
+    ciudad        = (request.args.get('ciudad') or '').strip()
 
+    # ====== Mantener estado de jugadores (tu helper) ======
     asegurar_estado_jugadores()
 
+    # ====== Base query ======
     base = db.session.query(Jugador)
 
-    # Activos / inactivos
+    # Activos / inactivos (igual que antes)
     if mostrar_inactivos != 1:
         base = base.filter(Jugador.activo.is_(True))
 
@@ -3072,31 +3078,67 @@ def jugadores_list():
     if categoria_id:
         base = base.filter(Jugador.categoria_id == categoria_id)
     elif solo_mi_cat:
-        # Intentamos leer el jugador actual desde g (o adaptalo a tu helper/context processor)
+        # Intento original por g.current_jugador; con fallback a helper si existiera
         from flask import g
         current_jugador = getattr(g, 'current_jugador', None)
-        if current_jugador and current_jugador.categoria_id:
+        if not current_jugador and 'get_current_jugador' in globals():
+            try:
+                current_jugador = get_current_jugador()
+            except Exception:
+                current_jugador = None
+        if current_jugador and getattr(current_jugador, 'categoria_id', None):
             base = base.filter(Jugador.categoria_id == current_jugador.categoria_id)
 
-    # Orden original por nombre
+    # Buscador por nombre (ahora en DB, case-insensitive)
+    if q_text:
+        like = f"%{q_text}%"
+        base = base.filter(Jugador.nombre_completo.ilike(like))
+
+    # ====== NUEVO: filtros de ubicación ======
+    # (solo aplican si vienen con valor)
+    if provincia:
+        # Evitamos espacios/None en DB comparando exacto
+        base = base.filter(Jugador.provincia == provincia)
+    if ciudad:
+        base = base.filter(Jugador.ciudad == ciudad)
+
+    # Orden original por nombre (preservado)
     base = base.order_by(Jugador.nombre_completo.asc())
 
     jugadores = base.all()
 
-    # Buscador por nombre (case-insensitive, seguro)
-    if q_text:
-        ql = q_text.lower()
-        jugadores = [j for j in jugadores if ql in (j.nombre_completo or '').lower()]
-
-    # Para el combo de categorías
+    # ====== Combo de categorías (como tenías) ======
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
-    # Zona de ascenso (tu lógica original)
+    # ====== NUEVO: listas únicas para filtros de ubicación ======
+    # Las construimos en base a la misma política de "inactivos" para coherencia
+    base_distinct = db.session.query(Jugador)
+    if mostrar_inactivos != 1:
+        base_distinct = base_distinct.filter(Jugador.activo.is_(True))
+
+    # Provincias disponibles (no nulas ni vacías)
+    provincias = [
+        r[0] for r in base_distinct
+            .with_entities(func.distinct(Jugador.provincia))
+            .filter(Jugador.provincia.isnot(None), Jugador.provincia != '')
+            .order_by(Jugador.provincia.asc())
+            .all()
+    ]
+
+    # Ciudades disponibles (si hay provincia seleccionada, se acota a esa; si no, todas)
+    ciudades_q = base_distinct.with_entities(func.distinct(Jugador.ciudad)) \
+                              .filter(Jugador.ciudad.isnot(None), Jugador.ciudad != '')
+    if provincia:
+        ciudades_q = ciudades_q.filter(Jugador.provincia == provincia)
+    ciudades = [r[0] for r in ciudades_q.order_by(Jugador.ciudad.asc()).all()]
+
+    # ====== Zona de ascenso (tu lógica original) ======
     zona_ascenso = {}
     for j in jugadores:
         cat = j.categoria
         zona_ascenso[j.id] = bool(cat and j.puntos is not None and j.puntos <= cat.puntos_min)
 
+    # ====== Render ======
     return render_template(
         'jugadores_list.html',
         jugadores=jugadores,
@@ -3105,8 +3147,16 @@ def jugadores_list():
         mostrar_inactivos=mostrar_inactivos,
         q=q_text,
         categoria_id=categoria_id,
-        solo_mi_cat=1 if solo_mi_cat else 0
+        solo_mi_cat=1 if solo_mi_cat else 0,
+        # NUEVO: contexto para filtros de ubicación
+        provincia=provincia,
+        ciudad=ciudad,
+        provincias=provincias,
+        ciudades=ciudades,
+        # Si tu template usa current_jugador, pasamos el mismo objeto
+        current_jugador=locals().get('current_jugador', None)
     )
+
 
 
 @app.route('/jugadores/nuevo', methods=['GET', 'POST'])

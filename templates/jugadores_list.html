@@ -15,9 +15,7 @@
     box-shadow:0 14px 40px rgba(0,0,0,.28);
     margin-bottom:10px;
   }
-  .hero-top{
-    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
-  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
   .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
   .hero-tag{
     margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
@@ -39,7 +37,7 @@
   .chip .dot{width:8px; height:8px; border-radius:50%;}
   .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);} .dot-blue{background:#6EA8FF;}
 
-  /* ===== Botones consistentes ===== */
+  /* ===== Botones ===== */
   .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
   .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
 
@@ -63,6 +61,21 @@
   }
   .filters .actions{ display:flex; gap:8px; flex-wrap:wrap; }
   .filters .hint{ grid-column: 1 / -1; margin:2px 0 0; color:var(--muted,#9fb3c8); }
+
+  /* --- FIX: opciones visibles en selects (tema oscuro) --- */
+  .filters select{
+    color-scheme: light; /* fuerza popup claro donde sea posible */
+  }
+  .filters select option,
+  .filters select optgroup{
+    color:#111 !important;
+    background:#fff !important;
+  }
+  .filters select option:checked,
+  .filters select option:hover{
+    background:#e5e7eb !important; /* gris claro */
+    color:#111 !important;
+  }
 
   /* ===== Tabla ===== */
   .card.table-card{ padding:0; border-radius:14px; border:1px solid rgba(255,255,255,.12);
@@ -97,9 +110,11 @@
   .actions-row{ display:flex; flex-wrap:wrap; gap:6px; }
 
   /* Responsive: ocultar columnas menos críticas */
-  @media (max-width:900px){
+  @media (max-width:1000px){
+    .players thead th:nth-child(9), .players tbody td:nth-child(9){ display:none; } /* Creado */
+  }
+  @media (max-width:820px){
     .players thead th:nth-child(6), .players tbody td:nth-child(6){ display:none; } /* Asc./Desc. */
-    .players thead th:nth-child(8), .players tbody td:nth-child(8){ display:none; } /* Creado */
   }
   @media (max-width:680px){
     .players thead th:nth-child(5), .players tbody td:nth-child(5){ display:none; } /* Zona ascenso */
@@ -160,6 +175,26 @@
   </div>
 
   <div>
+    <label for="provincia">Provincia / Estado</label>
+    <select id="provincia" name="provincia">
+      <option value="">Todas</option>
+      {% for p in provincias %}
+        <option value="{{ p }}" {% if provincia and provincia == p %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label for="ciudad">Ciudad</label>
+    <select id="ciudad" name="ciudad">
+      <option value="">Todas</option>
+      {% for c in ciudades %}
+        <option value="{{ c }}" {% if ciudad and ciudad == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
     <label for="q">Buscar por nombre</label>
     <input id="q" name="q" placeholder="Ej: Juan Pérez" value="{{ q or '' }}">
   </div>
@@ -186,6 +221,7 @@
             <th>Zona ascenso</th>
             <th>Asc./Desc.</th>
             <th>Contacto</th>
+            <th>Ubicación</th>
             <th>Creado</th>
             <th style="width:260px;">Acción</th>
           </tr>
@@ -217,6 +253,13 @@
                 {% if j.email %}<small>📧 {{ j.email }}</small>{% endif %}
                 {% if j.telefono %}<small>📱 {{ j.telefono }}</small>{% endif %}
               </td>
+              <td>
+                {% if j.ciudad or j.provincia %}
+                  <small>{{ j.ciudad or '-' }}, {{ j.provincia or '-' }}</small>
+                {% else %}
+                  <small>—</small>
+                {% endif %}
+              </td>
               <td><small>{{ j.creado_en.strftime('%Y-%m-%d %H:%M') }}</small></td>
               <td class="actions-cell">
                 <div class="actions-row">
@@ -242,7 +285,7 @@
                     <form method="post"
                           action="{{ url_for('jugadores_delete', jugador_id=j.id) }}"
                           onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE a {{ j.nombre_completo }}? Esta acción no se puede deshacer.');">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button type="submit" class="btn-ghost btn-slim">Eliminar</button>
                     </form>
                   {% endif %}
