@@ -1,43 +1,45 @@
 from __future__ import annotations
+
+# --- Stdlib ---
 import os
 import logging
 import smtplib, ssl
 import secrets
 import string
-import re  # ← agregado para EMAIL_RE
+import re
 import unicodedata
-import sqlalchemy as sa
 import hmac
-
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
-
 from functools import wraps
 from zoneinfo import ZoneInfo
+from itertools import islice
+from typing import Optional, List, Tuple
 
+# --- Flask & Extensiones ---
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    flash, session, abort, jsonify, current_app  # ← agregado current_app para logs
+    flash, session, abort, jsonify, current_app
 )
-
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError, generate_csrf
-
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import and_, or_, exists  # ← agregado exists
-from sqlalchemy import func, CheckConstraint, UniqueConstraint, Index
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import column_property
-from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy.orm import synonym
-from sqlalchemy import event
-from sqlalchemy.orm import joinedload
-from sqlalchemy.orm import load_only
-from sqlalchemy.orm.exc import NoResultFound
-from flask_migrate import Migrate  # ← NUEVO
-from sqlalchemy import func
+from flask_migrate import Migrate
 from werkzeug.routing import BuildError
-from itertools import islice
+
+# --- SQLAlchemy ---
+import sqlalchemy as sa
+from sqlalchemy import (
+    and_, or_, exists, select, text, func,
+    CheckConstraint, UniqueConstraint, Index, event
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import (
+    column_property, joinedload, load_only, synonym
+)
+from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.orm.exc import NoResultFound
+
 
 
 AUTOCRON_ENABLED = os.getenv('AUTOCRON_ENABLED', '0').lower() in ('1','true','yes','on')
@@ -92,6 +94,59 @@ with app.app_context():
     except Exception:
         import logging
         logging.exception("[ALTER solicitudes_alta] Error aplicando columnas")
+
+# --- bootstrap tabla codigos_login (idempotente) ---
+from sqlalchemy import text
+
+def _ensure_codigos_login_table():
+    DDL = """
+    CREATE TABLE IF NOT EXISTS codigos_login (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      email   TEXT NOT NULL UNIQUE,
+      code    TEXT NOT NULL,
+      expira  TIMESTAMP NOT NULL,
+      usado   INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_codigos_login_expira ON codigos_login(expira);
+    """
+    for stmt in DDL.strip().split(";"):
+        s = stmt.strip()
+        if s:
+            db.session.execute(text(s))
+    db.session.commit()
+
+with app.app_context():
+    _ensure_codigos_login_table()
+
+# --- Helper: emitir código de login (6 dígitos + expira) ---
+import random
+
+MINUTOS_VIGENCIA_PIN = 20  # podés ajustar
+
+def emitir_codigo(email: str, minutos: int = MINUTOS_VIGENCIA_PIN) -> str:
+    """
+    Genera un PIN de 6 dígitos (string, conserva ceros a la izquierda),
+    lo guarda/actualiza en la tabla codigos_login y devuelve el PIN.
+    La expiración se setea en la DB con CURRENT_TIMESTAMP para evitar problemas de TZ.
+    """
+    email = (email or "").strip().lower()
+    code = str(random.randint(0, 999999)).zfill(6)
+
+    # Usamos la DB para calcular expira: datetime(CURRENT_TIMESTAMP, '+N minutes')
+    delta = f"+{int(minutos)} minutes"
+
+    db.session.execute(text("""
+        INSERT INTO codigos_login(email, code, expira, usado)
+        VALUES (:email, :code, datetime(CURRENT_TIMESTAMP, :delta), 0)
+        ON CONFLICT(email) DO UPDATE SET
+            code   = excluded.code,
+            expira = datetime(CURRENT_TIMESTAMP, :delta),
+            usado  = 0
+    """), {"email": email, "code": code, "delta": delta})
+    db.session.commit()
+    return code
+
+
 
 
 # ---- SQLite: auto-migración mínima para 'torneos' ----
@@ -1569,16 +1624,40 @@ class SolicitudAlta(db.Model):
     categoria = db.relationship('Categoria')
 
 
-class PinReset(db.Model):
-    __tablename__ = 'pin_resets'
-    id = db.Column(db.Integer, primary_key=True)
-    jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=False)
-    code = db.Column(db.String(6), nullable=False)
-    created_en = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_en = db.Column(db.DateTime, nullable=False)
-    used = db.Column(db.Boolean, default=False)
+from datetime import datetime, timezone
 
-    jugador = db.relationship('Jugador')
+class PinReset(db.Model):
+    __tablename__ = "pin_resets"
+
+    id          = db.Column(db.Integer, primary_key=True)
+
+    # Puede generarse un PIN aunque el Jugador aún no exista → nullable=True
+    jugador_id  = db.Column(db.Integer, db.ForeignKey("jugadores.id"),
+                            nullable=True, index=True)
+
+    # NUEVO: para poder validar por email si aún no hay jugador
+    email       = db.Column(db.Text, nullable=True, index=True)
+
+    # Guardar como texto para no perder ceros a la izquierda
+    code        = db.Column(db.String(6), nullable=False)
+
+    # Timestamps "aware" en UTC para evitar errores de TZ
+    created_en  = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc)
+    )
+    expires_en  = db.Column(db.DateTime(timezone=True), nullable=False)
+
+    used        = db.Column(db.Boolean, nullable=False, default=False,
+                            server_default=db.text("0"))
+
+    # Relación (puede no existir si el PIN fue emitido solo con email)
+    jugador     = db.relationship("Jugador", lazy="joined")
+
+    def __repr__(self):
+        return f"<PinReset id={self.id} email={self.email} jugador_id={self.jugador_id} used={self.used}>"
+
 
 # ===== Torneos: modelos base (MVP) =====
 
@@ -2730,6 +2809,103 @@ def _run_seed_if_ready():
 
 # IMPORTANTE: mantener esta llamada al final del módulo
 _run_seed_if_ready()
+
+# --- Rutas de login por PIN (enviar y validar) ---
+from flask import request, flash, redirect, url_for, session
+import re
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+@app.post("/login/enviar_pin")
+def login_enviar_pin():
+    email = (request.form.get("email") or "").strip().lower()
+    if not email or not EMAIL_RE.match(email):
+        flash("Ingresá un email válido.", "error")
+        return redirect(url_for("login"))
+
+    try:
+        pin = emitir_codigo(email)
+        # TODO: enviar email real con tu función de correo
+        # send_mail(email, "Tu código de acceso", f"Tu PIN es: {pin}")
+        # Para debug local, si querés: print("DEBUG PIN", pin)
+        flash("Te enviamos un código de 6 dígitos. Revisá tu correo.", "success")
+    except Exception as e:
+        # Log opcional
+        # current_app.logger.exception("Error emitiendo PIN")
+        flash("No pudimos emitir el código. Intentá de nuevo en unos minutos.", "error")
+
+    return redirect(url_for("login"))
+
+
+@app.post("/login/validar_pin")
+def login_validar_pin():
+    from flask import request, flash, redirect, url_for, session
+    from sqlalchemy import text
+
+    # Normalizar entradas
+    email = (request.form.get("email") or "").strip().lower()
+    pin   = (request.form.get("pin")   or "").strip()
+
+    if not email or not pin:
+        flash("Completá email y código.", "error")
+        return redirect(url_for("login"))
+
+    # --- Validación en SQL (case-insensitive + fecha robusta) ---
+    # Usamos lower(email) y comparamos fechas con julianday() para evitar issues de TZ/parsing.
+    row = db.session.execute(text("""
+        SELECT id
+          FROM codigos_login
+         WHERE lower(email) = :email
+           AND code         = :pin
+           AND IFNULL(usado, 0) = 0
+           AND julianday(expira) > julianday('now')
+         ORDER BY id DESC
+         LIMIT 1
+    """), {"email": email, "pin": pin}).first()
+
+    if not row:
+        flash("Código inválido o vencido.", "error")
+        return redirect(url_for("login"))
+
+    # --- Marcar ÚNICAMENTE este código como usado (one-time) ---
+    try:
+        db.session.execute(text("""
+            UPDATE codigos_login
+               SET usado = 1
+             WHERE id = :id
+        """), {"id": row.id})
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash("Ocurrió un problema validando el código. Probá de nuevo.", "error")
+        return redirect(url_for("login"))
+
+    # --- Resolver jugador y setear sesión coherente con el resto de la app ---
+    row_j = db.session.execute(text("""
+        SELECT id
+          FROM jugadores
+         WHERE lower(email) = :email
+         LIMIT 1
+    """), {"email": email}).first()
+
+    # Limpiar posibles restos de sesión
+    session.pop("jugador_id", None)
+    session.pop("auth_email", None)
+
+    if row_j:
+        session["jugador_id"] = row_j.id
+        flash("¡Bienvenido!", "success")
+        return redirect(url_for("mi_panel"))
+    else:
+        # Si aún no existe jugador para ese email, guardamos para completar perfil
+        session["auth_email"] = email
+        flash("Código verificado. Completá tu perfil para continuar.", "info")
+        # Podés redirigir a alta_publica si querés forzar completar datos:
+        # return redirect(url_for("alta_publica"))
+        return redirect(url_for("mi_panel"))
+
+
+
 
 
 
@@ -6875,7 +7051,7 @@ def inject_current_jugador():
 
 # Endpoints públicos (pueden entrar sin sesión)
 PUBLIC_ENDPOINTS = {
-    'home','login','alta_publica','static','ranking','categorias_list',
+    'home','login','alta_publica','healthz','static','ranking','categorias_list',
     'olvide_pin','olvide_pin_confirmar',
     # + torneos públicos
     'torneos_public_list','torneo_public_detail','torneo_public_detail_legacy',
@@ -6971,7 +7147,7 @@ def admin_solicitudes_aprobar(sid):
                 flash(f'Ya existe un jugador con el email {s.email}. No se puede duplicar.', 'error')
                 return redirect(url_for('admin_solicitudes_list'))
 
-        # Crear jugador activo (sin PIN inicial; lo creará con el código)
+        # Crear jugador activo (sin PIN persistente; usaremos PIN one-time de codigos_login)
         j = Jugador(
             nombre_completo=s.nombre_completo,
             email=s.email,
@@ -6984,36 +7160,31 @@ def admin_solicitudes_aprobar(sid):
             provincia=getattr(s, 'provincia', None),
             ciudad=getattr(s, 'ciudad', None),
             fecha_nacimiento=getattr(s, 'fecha_nacimiento', None),
-            # no seteamos 'pin' aquí (opción 1)
+            # no seteamos 'pin' aquí (flujo PIN one-time por email)
         )
         db.session.add(j)
-        db.session.flush()  # obtener j.id antes del commit para el PinReset
-
-        # Generar código de activación (PinReset) - vence en 24 h
-        code = _gen_code(6)
-        pr = PinReset(
-            jugador_id=j.id,
-            code=code,
-            created_en=datetime.utcnow(),
-            expires_en=datetime.utcnow() + timedelta(hours=24),
-            used=False
-        )
-        db.session.add(pr)
+        db.session.flush()  # obtener j.id antes del commit si se necesitara
 
         # Cerrar solicitud
         s.estado = 'APROBADA'
+        # si tu modelo tiene 'resuelto_en' (lo estás usando), lo sellamos; si fuera 'resuelta_en', ajusta el nombre
         s.resuelto_en = datetime.utcnow()
         db.session.commit()
 
-        # URLs para el email
+        # Generar PIN one-time (6 dígitos) que vence según tu config MINUTOS_VIGENCIA_PIN
         try:
-            confirmar_url = url_for('olvide_pin_confirmar', _external=True)
+            pin_emitido = emitir_codigo(s.email)  # guarda/actualiza en codigos_login (usado=0, expira futura)
+        except Exception as ex:
+            flash(f"Solicitud aprobada, pero no se pudo generar el PIN automáticamente ({ex}).", "warning")
+            return redirect(url_for('admin_solicitudes_list'))
+
+        # URLs para el email (login directo)
+        try:
             login_url = url_for('login', _external=True)
         except Exception:
-            confirmar_url = request.url_root.rstrip('/') + '/olvide-pin-confirmar'
             login_url = request.url_root.rstrip('/') + '/login'
 
-        subject = "¡Bienvenido a UPLAY! Activá tu cuenta creando tu PIN"
+        subject = "¡Bienvenido a UPLAY! Tu PIN de acceso"
 
         # Líneas opcionales (ubicación / fecha de nacimiento) si existen en la solicitud
         def _fmt_loc(_s):
@@ -7026,13 +7197,13 @@ def admin_solicitudes_aprobar(sid):
             fn = getattr(_s, 'fecha_nacimiento', None)
             return f"Fecha de nacimiento: {fn.strftime('%Y-%m-%d') if fn else '-'}\n"
 
-        # Fallback texto plano (si no renderiza HTML)
+        # Fallback texto plano
         body = (
             f"Hola {j.nombre_completo},\n\n"
-            "¡Tu alta fue aprobada! Para empezar, creá tu PIN.\n\n"
-            f"Código: {code} (vence en 24 horas)\n"
-            f"Crear PIN: {confirmar_url}\n\n"
-            f"También podés iniciar sesión luego aquí: {login_url}\n\n"
+            "¡Tu alta fue aprobada! Este es tu PIN de acceso (válido por tiempo limitado):\n\n"
+            f"PIN: {pin_emitido}\n\n"
+            f"Para ingresar, andá a: {login_url}\n"
+            "Elegí tu nombre y poné este PIN.\n\n"
             f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
             f"Puntos iniciales: {j.puntos}\n"
             + _fmt_loc(s)
@@ -7040,8 +7211,7 @@ def admin_solicitudes_aprobar(sid):
             + "\n— Equipo UPLAY"
         )
 
-        # HTML con logo inline (CID) + botón
-        # (Incluye datos opcionales si están presentes)
+        # HTML con logo inline (CID) + PIN + botón a login
         html_body = f"""\
 <!doctype html>
 <html lang="es">
@@ -7070,18 +7240,15 @@ def admin_solicitudes_aprobar(sid):
           <tr>
             <td class="card" style="background:#ffffff;border-radius:14px;padding:24px 22px;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
               <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;">¡Bienvenido/a a UPLAY!</h1>
-              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, para empezar creá tu PIN.</p>
-              <p style="margin:0 0 8px;color:#334155;">Usá este código (vence en <strong>24 horas</strong>):</p>
+              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, tu alta fue aprobada. Este es tu <strong>PIN de acceso</strong> (válido por tiempo limitado):</p>
               <div style="margin:8px 0 16px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
-                {code}
+                {pin_emitido}
               </div>
               <div style="text-align:center;margin-bottom:16px;">
-                <a href="{confirmar_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
-                  Crear mi PIN
+                <a href="{login_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
+                  Iniciar sesión
                 </a>
               </div>
-              <p class="muted" style="margin:0 0 8px;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace:</p>
-              <p style="margin:0 0 16px;word-break:break-all;font-size:12px;color:#334155;">{confirmar_url}</p>
 
               <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0 16px;">
 
@@ -7106,7 +7273,7 @@ def admin_solicitudes_aprobar(sid):
         html_body += f"""
                 {html_extra}
               </ul>
-              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Luego podrás iniciar sesión aquí: {login_url}</p>
+              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace: {login_url}</p>
             </td>
           </tr>
           <tr>
@@ -7127,19 +7294,21 @@ def admin_solicitudes_aprobar(sid):
             send_mail(
                 subject=subject,
                 body=body,                 # fallback texto plano
-                html_body=html_body,       # HTML con botón + código + logo
+                html_body=html_body,       # HTML con botón + PIN + logo
                 to=[j.email],
                 inline_images={"uplay-logo": "static/logo/uplay.png"}  # usa el PNG que subiste
             )
             flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
         except Exception as e:
-            flash(f'Jugador creado, pero falló el envío de email: {e}', 'warning')
+            # El PIN ya está generado; si falla el email, el usuario puede pedir otro desde /login → "Olvidé mi PIN"
+            flash(f'Jugador creado. No se pudo enviar email: {e}', 'warning')
 
         return redirect(url_for('admin_solicitudes_list'))
 
     # GET -> sugerir puntos = puntos_max
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
+
 
 
 
