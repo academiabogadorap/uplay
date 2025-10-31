@@ -1,42 +1,49 @@
 from __future__ import annotations
+
+# --- Stdlib ---
 import os
 import logging
 import smtplib, ssl
 import secrets
 import string
-import re  # ← agregado para EMAIL_RE
+import re
 import unicodedata
-import sqlalchemy as sa
 import hmac
-
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
-
 from functools import wraps
 from zoneinfo import ZoneInfo
+from itertools import islice
+from typing import Optional, List, Tuple
 
+# --- Flask & Extensiones ---
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    flash, session, abort, jsonify, current_app  # ← agregado current_app para logs
+    flash, session, abort, jsonify, current_app
 )
-
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError, generate_csrf
-
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import and_, or_, exists  # ← agregado exists
-from sqlalchemy import func, CheckConstraint, UniqueConstraint, Index
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import column_property
-from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy.orm import synonym
-from sqlalchemy import event
-from sqlalchemy.orm import joinedload
-from sqlalchemy.orm.exc import NoResultFound
-from flask_migrate import Migrate  # ← NUEVO
-from sqlalchemy import func
+from flask_migrate import Migrate
 from werkzeug.routing import BuildError
-from itertools import islice
+
+# --- SQLAlchemy ---
+import sqlalchemy as sa
+from sqlalchemy import (
+    and_, or_, exists, select, text, func,
+    CheckConstraint, UniqueConstraint, Index, event
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import (
+    column_property, joinedload, load_only, synonym
+)
+from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.orm.exc import NoResultFound
+
+
+
+AUTOCRON_ENABLED = os.getenv('AUTOCRON_ENABLED', '0').lower() in ('1','true','yes','on')
+_last_autocierre_run = {'ts': None}
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -66,6 +73,81 @@ db = SQLAlchemy(app)
 
 # ← NUEVO: conectar Flask-Migrate (una sola línea)
 migrate = Migrate(app, db)
+
+# --- Migraciones/ALTERs idempotentes (SQLite) para solicitudes_alta ---
+with app.app_context():
+    try:
+        cols_sa = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(solicitudes_alta)")).all()]
+
+        def add_col_if_missing_sa(col_name, col_type):
+            if col_name not in cols_sa:
+                db.session.execute(db.text(f"ALTER TABLE solicitudes_alta ADD COLUMN {col_name} {col_type}"))
+                db.session.commit()
+                cols_sa.append(col_name)
+
+        add_col_if_missing_sa('pais',             'TEXT')
+        add_col_if_missing_sa('provincia',        'TEXT')
+        add_col_if_missing_sa('ciudad',           'TEXT')
+        add_col_if_missing_sa('fecha_nacimiento', 'TEXT')
+        add_col_if_missing_sa('resuelto_en',      'TEXT')  # por si faltara en algún deploy
+
+    except Exception:
+        import logging
+        logging.exception("[ALTER solicitudes_alta] Error aplicando columnas")
+
+# --- bootstrap tabla codigos_login (idempotente) ---
+from sqlalchemy import text
+
+def _ensure_codigos_login_table():
+    DDL = """
+    CREATE TABLE IF NOT EXISTS codigos_login (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      email   TEXT NOT NULL UNIQUE,
+      code    TEXT NOT NULL,
+      expira  TIMESTAMP NOT NULL,
+      usado   INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_codigos_login_expira ON codigos_login(expira);
+    """
+    for stmt in DDL.strip().split(";"):
+        s = stmt.strip()
+        if s:
+            db.session.execute(text(s))
+    db.session.commit()
+
+with app.app_context():
+    _ensure_codigos_login_table()
+
+# --- Helper: emitir código de login (6 dígitos + expira) ---
+import random
+
+MINUTOS_VIGENCIA_PIN = 20  # podés ajustar
+
+def emitir_codigo(email: str, minutos: int = MINUTOS_VIGENCIA_PIN) -> str:
+    """
+    Genera un PIN de 6 dígitos (string, conserva ceros a la izquierda),
+    lo guarda/actualiza en la tabla codigos_login y devuelve el PIN.
+    La expiración se setea en la DB con CURRENT_TIMESTAMP para evitar problemas de TZ.
+    """
+    email = (email or "").strip().lower()
+    code = str(random.randint(0, 999999)).zfill(6)
+
+    # Usamos la DB para calcular expira: datetime(CURRENT_TIMESTAMP, '+N minutes')
+    delta = f"+{int(minutos)} minutes"
+
+    db.session.execute(text("""
+        INSERT INTO codigos_login(email, code, expira, usado)
+        VALUES (:email, :code, datetime(CURRENT_TIMESTAMP, :delta), 0)
+        ON CONFLICT(email) DO UPDATE SET
+            code   = excluded.code,
+            expira = datetime(CURRENT_TIMESTAMP, :delta),
+            usado  = 0
+    """), {"email": email, "code": code, "delta": delta})
+    db.session.commit()
+    return code
+
+
+
 
 # ---- SQLite: auto-migración mínima para 'torneos' ----
 def ensure_torneos_schema():
@@ -1188,12 +1270,19 @@ class Jugador(db.Model):
     puntos = db.Column(db.Integer, nullable=False)
     categoria_id = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
-    activo = db.Column(db.Boolean, nullable=False, default=True)  # ya lo tenés
+    activo = db.Column(db.Boolean, nullable=False, default=True)
     # en class Jugador(...)
     is_admin = db.Column(db.Boolean, nullable=False, default=False)
 
-    # NUEVO: PIN simple para login MVP
+    # ===== Nuevos campos opcionales =====
+    pais = db.Column(db.String(100), nullable=True)
+    provincia = db.Column(db.String(120), nullable=True)
+    ciudad = db.Column(db.String(120), nullable=True)
+    fecha_nacimiento = db.Column(db.Date, nullable=True)
+
+    # NUEVO: PIN simple para login MVP (ya lo tenías)
     pin = db.Column(db.String(10), nullable=False, default='0000')
+
 
 class JugadorEstado(db.Model):
     __tablename__ = 'jugador_estado'
@@ -1204,6 +1293,7 @@ class JugadorEstado(db.Model):
     actualizado_en = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     jugador = db.relationship('Jugador', backref=db.backref('estado', uselist=False))
+
 
 class Pareja(db.Model):
     __tablename__ = 'parejas'
@@ -1513,28 +1603,61 @@ class PartidoAbiertoSuplente(db.Model):
 
 class SolicitudAlta(db.Model):
     __tablename__ = 'solicitudes_alta'
-    id = db.Column(db.Integer, primary_key=True)
+
+    id              = db.Column(db.Integer, primary_key=True)
     nombre_completo = db.Column(db.String(120), nullable=False)
-    email = db.Column(db.String(120))
-    telefono = db.Column(db.String(50))
-    categoria_id = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
-    mensaje = db.Column(db.String(300))
-    estado = db.Column(db.String(20), nullable=False, default='PENDIENTE')  # PENDIENTE | APROBADA | RECHAZADA
-    creado_en = db.Column(db.DateTime, default=datetime.utcnow)
-    resuelto_en = db.Column(db.DateTime)
+    email           = db.Column(db.String(120))
+    telefono        = db.Column(db.String(50))
+    categoria_id    = db.Column(db.Integer, db.ForeignKey('categorias.id'), nullable=False)
+    mensaje         = db.Column(db.String(300))
+    estado          = db.Column(db.String(20), nullable=False, default='PENDIENTE')  # PENDIENTE | APROBADA | RECHAZADA
+    creado_en       = db.Column(db.DateTime, default=datetime.utcnow)
+    resuelto_en     = db.Column(db.DateTime)
+
+    # ====== NUEVOS CAMPOS (opcionales) ======
+    pais             = db.Column(db.String(80), nullable=True)
+    provincia        = db.Column(db.String(80), nullable=True)
+    ciudad           = db.Column(db.String(120), nullable=True)
+    # En SQLite, db.Date se guarda como TEXT 'YYYY-MM-DD' sin problema
+    fecha_nacimiento = db.Column(db.Date, nullable=True)
 
     categoria = db.relationship('Categoria')
 
-class PinReset(db.Model):
-    __tablename__ = 'pin_resets'
-    id = db.Column(db.Integer, primary_key=True)
-    jugador_id = db.Column(db.Integer, db.ForeignKey('jugadores.id'), nullable=False)
-    code = db.Column(db.String(6), nullable=False)
-    created_en = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_en = db.Column(db.DateTime, nullable=False)
-    used = db.Column(db.Boolean, default=False)
 
-    jugador = db.relationship('Jugador')
+from datetime import datetime, timezone
+
+class PinReset(db.Model):
+    __tablename__ = "pin_resets"
+
+    id          = db.Column(db.Integer, primary_key=True)
+
+    # Puede generarse un PIN aunque el Jugador aún no exista → nullable=True
+    jugador_id  = db.Column(db.Integer, db.ForeignKey("jugadores.id"),
+                            nullable=True, index=True)
+
+    # NUEVO: para poder validar por email si aún no hay jugador
+    email       = db.Column(db.Text, nullable=True, index=True)
+
+    # Guardar como texto para no perder ceros a la izquierda
+    code        = db.Column(db.String(6), nullable=False)
+
+    # Timestamps "aware" en UTC para evitar errores de TZ
+    created_en  = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc)
+    )
+    expires_en  = db.Column(db.DateTime(timezone=True), nullable=False)
+
+    used        = db.Column(db.Boolean, nullable=False, default=False,
+                            server_default=db.text("0"))
+
+    # Relación (puede no existir si el PIN fue emitido solo con email)
+    jugador     = db.relationship("Jugador", lazy="joined")
+
+    def __repr__(self):
+        return f"<PinReset id={self.id} email={self.email} jugador_id={self.jugador_id} used={self.used}>"
+
 
 # ===== Torneos: modelos base (MVP) =====
 
@@ -2379,23 +2502,23 @@ class TorneoPartidoResultado(db.Model):
 
 
 
-# Crear DB si no existe
-with app.app_context():
-    db.create_all()
-    ensure_torneos_schema()  # ensure_torneos_schema()  # ← desactivado mientras usamos Alembic
+# --------------------------------------------------------------------
+# Bootstrap/seed legado: SOLO bajo guardias, nunca en import
+# Alembic es el dueño del esquema; no usamos create_all() aquí.
+# --------------------------------------------------------------------
+def _legacy_bootstrap_minimo():
+    """Seed mínimo: asegurar una categoría base y (opcional) crear admin."""
+    admin_nombre = os.getenv("ADMIN_NOMBRE")
+    admin_pin    = os.getenv("ADMIN_PIN")
 
-with app.app_context():
-    # --- Seed mínimo de datos para que la app funcione ---
-    # 1) Asegurar una categoría básica (la usa el index y el admin)
+    # Asegurar categoría base
     cat = Categoria.query.filter_by(nombre="7ma").first()
     if not cat:
         cat = Categoria(nombre="7ma", puntos_min=0, puntos_max=199)
         db.session.add(cat)
         db.session.commit()
 
-    # 2) Crear/asegurar un admin inicial desde variables de entorno
-    admin_nombre = os.getenv("ADMIN_NOMBRE")
-    admin_pin = os.getenv("ADMIN_PIN")
+    # Admin opcional (si está configurado por env)
     if admin_nombre and admin_pin:
         admin = Jugador.query.filter_by(nombre_completo=admin_nombre).first()
         if not admin:
@@ -2403,17 +2526,16 @@ with app.app_context():
                 nombre_completo=admin_nombre,
                 email=None,
                 telefono=None,
-                puntos=150,          # puntos de arranque razonables
-                categoria_id=cat.id, # asignado a la categoría básica
+                puntos=150,
+                categoria_id=cat.id,
                 activo=True,
                 is_admin=True,
-                pin=admin_pin        # tu modelo guarda PIN en texto (MVP)
+                pin=admin_pin
             )
             db.session.add(admin)
             db.session.commit()
             print(f"[SEED] Admin creado: {admin_nombre}")
         else:
-            # Aseguramos que siga siendo admin y tenga categoría si hiciera falta
             changed = False
             if not admin.is_admin:
                 admin.is_admin = True
@@ -2427,180 +2549,131 @@ with app.app_context():
     else:
         print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
 
+# NOTA: eliminamos completamente:
+# - db.create_all()
+# - ensure_torneos_schema()
+# - los PRAGMAs/ALTER TABLE manuales
+# porque ahora los maneja Alembic en migrations/.
 
-# --- Migraciones/ALTERs idempotentes para SQLite ---
-with app.app_context():
-    # Jugadores.activo
-    cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
-    if 'activo' not in cols:
-        # agrega columna y setea valor por defecto 1 (activo) para existentes
-        db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN activo INTEGER NOT NULL DEFAULT 1"))
-        # por si alguna fila quedó con NULL (según versión de sqlite)
-        db.session.execute(db.text("UPDATE jugadores SET activo = 1 WHERE activo IS NULL"))
-        db.session.commit()
 
-    # PartidoAbiertoJugador.partner_pref_id (por si aún no lo agregaste)
-    cols_paj = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(partido_abierto_jugadores)")).all()]
-    if 'partner_pref_id' not in cols_paj:
-        db.session.execute(db.text("ALTER TABLE partido_abierto_jugadores ADD COLUMN partner_pref_id INTEGER"))
-        db.session.commit()
-
-with app.app_context():
-    cols_j = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
-    if 'pin' not in cols_j:
-        db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN pin TEXT NOT NULL DEFAULT '0000'"))
-        db.session.commit()
-
-# --- Migraciones/ALTERs idempotentes (SQLite) para propuesta/confirmación de resultado ---
-with app.app_context():
-    cols_p = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(partidos)")).all()]
-
-    def add_col_if_missing(col_name, col_type):
-        if col_name not in cols_p:
-            db.session.execute(db.text(f"ALTER TABLE partidos ADD COLUMN {col_name} {col_type}"))
+# === Compat / Bootstrap de esquema idempotente (SQLite) ===
+def _ensure_schema():
+    from sqlalchemy import text
+    with app.app_context():
+        # --- JUGADORES: pin ---
+        cols_j = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
+        if 'pin' not in cols_j:
+            db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN pin TEXT NOT NULL DEFAULT '0000'"))
             db.session.commit()
 
-    # Campos del workflow de resultados
-    # Nota: BOOLEAN en SQLite = INTEGER (0/1/NULL)
-    add_col_if_missing('resultado_propuesto_ganador_pareja_id', 'INTEGER')
-    add_col_if_missing('resultado_propuesto_sets_text',         'TEXT')
-    add_col_if_missing('resultado_propuesto_por_id',            'INTEGER')
-    add_col_if_missing('resultado_propuesto_en',                'TIMESTAMP')
-    add_col_if_missing('confirmo_pareja1',                      'INTEGER')
-    add_col_if_missing('confirmo_pareja2',                      'INTEGER')
+        # --- PARTIDOS: columnas para propuesta/confirmación de resultado ---
+        cols_p = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(partidos)")).all()]
 
-    # (Opcional) Si querés normalizar estados antiguos:
-    # - Mantener los existentes tal cual está OK; el flujo nuevo funciona igual.
-    # - Si querés forzar POR_CONFIRMAR solo en los que estén esperando rivales:
-    # db.session.execute(db.text("""
-    #     UPDATE partidos
-    #     SET estado = 'POR_CONFIRMAR'
-    #     WHERE estado = 'PENDIENTE'
-    #       AND (rival1_acepto IS NULL OR rival2_acepto IS NULL)
-    # """))
-    # db.session.commit()
+        def add_col_if_missing(col_name, col_type):
+            nonlocal cols_p
+            if col_name not in cols_p:
+                db.session.execute(db.text(f"ALTER TABLE partidos ADD COLUMN {col_name} {col_type}"))
+                db.session.commit()
+                # refrescar cache local por si más abajo lo volvemos a usar
+                cols_p = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(partidos)")).all()]
 
-with app.app_context():
-    db.session.execute(db.text("""
-        CREATE INDEX IF NOT EXISTS ix_partidos_resultado_propuesto_en
-        ON partidos(resultado_propuesto_en)
-    """))
-    db.session.commit()
+        # Campos del workflow de resultados
+        add_col_if_missing('resultado_propuesto_ganador_pareja_id', 'INTEGER')
+        add_col_if_missing('resultado_propuesto_sets_text',         'TEXT')
+        add_col_if_missing('resultado_propuesto_por_id',            'INTEGER')
+        add_col_if_missing('resultado_propuesto_en',                'TIMESTAMP')
+        add_col_if_missing('confirmo_pareja1',                      'INTEGER')  # BOOLEAN = INTEGER en SQLite
+        add_col_if_missing('confirmo_pareja2',                      'INTEGER')
 
-
-# --- ALTER column para 'partner_pref_id' si no existe (SQLite) ---
-with app.app_context():
-    cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(partido_abierto_jugadores)")).all()]
-    if 'partner_pref_id' not in cols:
-        db.session.execute(db.text("ALTER TABLE partido_abierto_jugadores ADD COLUMN partner_pref_id INTEGER"))
-        db.session.commit()
-
-with app.app_context():
-    cols_j = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
-    if 'is_admin' not in cols_j:
-        db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"))
-        db.session.commit()
-
-with app.app_context():
-    # Emails a minúscula para evitar duplicados por mayúsculas/minúsculas (opcional pero recomendable)
-    db.session.execute(db.text("UPDATE jugadores SET email = LOWER(email) WHERE email IS NOT NULL"))
-    db.session.commit()
-
-    # Índice único sólo cuando email NO es NULL
-    db.session.execute(db.text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_jugadores_email
-        ON jugadores(email)
-        WHERE email IS NOT NULL
-    """))
-    db.session.commit()
-
-with app.app_context():
-    cols_p = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(partidos)")).all()]
-
-    def add_col_if_missing(col_name, col_type):
-        if col_name not in cols_p:
-            db.session.execute(db.text(f"ALTER TABLE partidos ADD COLUMN {col_name} {col_type}"))
-            db.session.commit()
-
-    # Nuevas columnas (idempotentes)
-    add_col_if_missing('creador_id',   'INTEGER')
-    add_col_if_missing('companero_id', 'INTEGER')
-    add_col_if_missing('rival1_id',    'INTEGER')
-    add_col_if_missing('rival2_id',    'INTEGER')
-    # BOOLEAN en SQLite = INTEGER (0/1/NULL)
-    add_col_if_missing('rival1_acepto','INTEGER')
-    add_col_if_missing('rival2_acepto','INTEGER')
-
-    # Índices idempotentes para acelerar consultas por rivales/creador/estado
-    db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_rival1   ON partidos(rival1_id)"))
-    db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_rival2   ON partidos(rival2_id)"))
-    db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_creador  ON partidos(creador_id)"))
-    db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_estado   ON partidos(estado)"))
-    db.session.commit()
-
-# --- NUEVO: flags de aceptación individual en Desafios ---
-with app.app_context():
-    cols_d = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(desafios)")).all()]
-    if 'rival1_acepto' not in cols_d:
-        db.session.execute(db.text(
-            "ALTER TABLE desafios ADD COLUMN rival1_acepto INTEGER NOT NULL DEFAULT 0"
-        ))
-        db.session.commit()
-    if 'rival2_acepto' not in cols_d:
-        db.session.execute(db.text(
-            "ALTER TABLE desafios ADD COLUMN rival2_acepto INTEGER NOT NULL DEFAULT 0"
-        ))
-        db.session.commit()
-
-    # Backfill: si ya había desafíos aceptados o jugados, asumimos que ambos rivales habían aceptado
-    db.session.execute(db.text(
-        "UPDATE desafios SET rival1_acepto=1, rival2_acepto=1 WHERE estado IN ('ACEPTADO','JUGADO')"
-    ))
-    db.session.commit()
-
-# --- Migraciones/ALTERs para INVITACIONES de Partido ---
-with app.app_context():
-    cols_p = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(partidos)")).all()]
-    # Datos de los 4 jugadores involucrados en el armado directo
-    if 'creador_id' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN creador_id INTEGER"))
-    if 'companero_id' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN companero_id INTEGER"))
-    if 'rival1_id' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN rival1_id INTEGER"))
-    if 'rival2_id' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN rival2_id INTEGER"))
-    # Aceptaciones de los rivales (NULL = sin responder, 1 = aceptó, 0 = rechazó)
-    if 'rival1_acepto' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN rival1_acepto INTEGER"))
-    if 'rival2_acepto' not in cols_p:
-        db.session.execute(db.text("ALTER TABLE partidos ADD COLUMN rival2_acepto INTEGER"))
-    db.session.commit()
-
-with app.app_context():
-    # ¿existe la tabla?
-    tables = [r[0] for r in db.session.execute(db.text("SELECT name FROM sqlite_master WHERE type='table'")).all()]
-    if 'partido_resultado_propuesto' not in tables:
+        # Índice para orden temporal de propuestas
         db.session.execute(db.text("""
-            CREATE TABLE partido_resultado_propuesto (
-                id INTEGER PRIMARY KEY,
-                partido_id INTEGER NOT NULL UNIQUE,
-                propuesto_por_pareja_id INTEGER NOT NULL,
-                ganador_pareja_id INTEGER NOT NULL,
-                sets_text TEXT,
-                creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(partido_id) REFERENCES partidos(id),
-                FOREIGN KEY(propuesto_por_pareja_id) REFERENCES parejas(id),
-                FOREIGN KEY(ganador_pareja_id) REFERENCES parejas(id)
-            )
+            CREATE INDEX IF NOT EXISTS ix_partidos_resultado_propuesto_en
+            ON partidos(resultado_propuesto_en)
         """))
         db.session.commit()
 
-with app.app_context():
-    db.session.execute(db.text("""
-        CREATE INDEX IF NOT EXISTS ix_prp_creado_en ON partido_resultado_propuesto(creado_en)
-    """))
-    db.session.commit()
+        # --- PARTIDO_ABIERTO_JUGADORES: partner_pref_id ---
+        cols = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(partido_abierto_jugadores)")).all()]
+        if 'partner_pref_id' not in cols:
+            db.session.execute(db.text("ALTER TABLE partido_abierto_jugadores ADD COLUMN partner_pref_id INTEGER"))
+            db.session.commit()
+
+        # --- JUGADORES: is_admin + normalización de email + índice parcial único ---
+        cols_j = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(jugadores)")).all()]
+        if 'is_admin' not in cols_j:
+            db.session.execute(db.text("ALTER TABLE jugadores ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+
+        db.session.execute(db.text("UPDATE jugadores SET email = LOWER(email) WHERE email IS NOT NULL"))
+        db.session.commit()
+
+        db.session.execute(db.text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_jugadores_email
+            ON jugadores(email)
+            WHERE email IS NOT NULL
+        """))
+        db.session.commit()
+
+        # --- PARTIDOS: invitaciones (4 jugadores + flags de aceptación) ---
+        add_col_if_missing('creador_id',   'INTEGER')
+        add_col_if_missing('companero_id', 'INTEGER')
+        add_col_if_missing('rival1_id',    'INTEGER')
+        add_col_if_missing('rival2_id',    'INTEGER')
+        add_col_if_missing('rival1_acepto','INTEGER')  # NULL=sin responder, 1=aceptó, 0=rechazó
+        add_col_if_missing('rival2_acepto','INTEGER')
+
+        db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_rival1   ON partidos(rival1_id)"))
+        db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_rival2   ON partidos(rival2_id)"))
+        db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_creador  ON partidos(creador_id)"))
+        db.session.execute(db.text("CREATE INDEX IF NOT EXISTS ix_partidos_estado   ON partidos(estado)"))
+        db.session.commit()
+
+        # --- DESAFIOS: flags de aceptación individual + backfill ---
+        cols_d = [row[1] for row in db.session.execute(db.text("PRAGMA table_info(desafios)")).all()]
+        if 'rival1_acepto' not in cols_d:
+            db.session.execute(db.text("ALTER TABLE desafios ADD COLUMN rival1_acepto INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+        if 'rival2_acepto' not in cols_d:
+            db.session.execute(db.text("ALTER TABLE desafios ADD COLUMN rival2_acepto INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+
+        db.session.execute(db.text(
+            "UPDATE desafios SET rival1_acepto=1, rival2_acepto=1 WHERE estado IN ('ACEPTADO','JUGADO')"
+        ))
+        db.session.commit()
+
+        # --- PARTIDO_RESULTADO_PROPUESTO: crear tabla si falta + índice ---
+        tables = [r[0] for r in db.session.execute(db.text("SELECT name FROM sqlite_master WHERE type='table'")).all()]
+        if 'partido_resultado_propuesto' not in tables:
+            db.session.execute(db.text("""
+                CREATE TABLE partido_resultado_propuesto (
+                    id INTEGER PRIMARY KEY,
+                    partido_id INTEGER NOT NULL UNIQUE,
+                    propuesto_por_pareja_id INTEGER NOT NULL,
+                    ganador_pareja_id INTEGER NOT NULL,
+                    sets_text TEXT,
+                    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(partido_id) REFERENCES partidos(id),
+                    FOREIGN KEY(propuesto_por_pareja_id) REFERENCES parejas(id),
+                    FOREIGN KEY(ganador_pareja_id) REFERENCES parejas(id)
+                )
+            """))
+            db.session.commit()
+
+        db.session.execute(db.text("""
+            CREATE INDEX IF NOT EXISTS ix_prp_creado_en ON partido_resultado_propuesto(creado_en)
+        """))
+        db.session.commit()
+
+    print("[ensure-schema] compat/DDL aplicado OK")
+    
+
+# === Comando CLI para ejecutarlo post-migraciones ===
+@app.cli.command("ensure-schema")
+def ensure_schema_cmd():
+    """Aplica compat/DDL idempotente tras alembic upgrade."""
+    _ensure_schema()
+
 
 
 # Config puntos (ajustable)
@@ -2638,6 +2711,205 @@ def jinja_utcms(dt):
     dt_utc = _assume_utc(dt)
     return int(dt_utc.timestamp() * 1000) if dt_utc else ""
 
+# ===== Seed seguro: solo si el esquema está listo y no estamos corriendo comandos de DB =====
+from sqlalchemy import inspect
+
+def _is_running_db_command():
+    """Detecta si el proceso actual está ejecutando un comando de migración (flask db ...)."""
+    import sys
+    cmds = ("db", "migrate", "upgrade", "downgrade", "stamp", "current", "heads")
+    return any(c in sys.argv for c in cmds)
+
+# --- Seed seguro (no correr en comandos de DB / Alembic / esquema incompleto) ---
+def _run_seed_if_ready():
+    import sys, os, logging
+    from sqlalchemy import text
+
+    try:
+        argv = " ".join(sys.argv).lower()
+
+        # 1) Kill-switch por env
+        if os.getenv("SEED_DISABLED") == "1":
+            print("[SEED] deshabilitado por SEED_DISABLED=1; seed omitido")
+            return
+
+        # 2) No correr en comandos de DB/Alembic
+        blocked_tokens = (" db ", "alembic", "upgrade", "migrate", "stamp", "current", "heads")
+        if any(tok in argv for tok in blocked_tokens):
+            print("[SEED] deshabilitado (comando DB/aleembic); seed omitido")
+            return
+
+        # 3) Sólo correr cuando el esquema YA tiene las columnas nuevas (migración aplicada)
+        with app.app_context():
+            try:
+                cols = [row[1] for row in db.session.execute(text("PRAGMA table_info(jugadores)")).all()]
+            except Exception:
+                print("[SEED] tabla 'jugadores' no accesible; seed omitido")
+                return
+
+            needed = {"pais", "provincia", "ciudad", "fecha_nacimiento"}
+            if not needed.issubset(set(cols)):
+                print("[SEED] esquema incompleto (faltan columnas nuevas en 'jugadores'); seed omitido")
+                return
+
+            # 4) Asegurar categoría base mínima (evita usar Jugador ORM para no hacer SELECT *)
+            #    Usamos ORM en Categoria porque su esquema no cambió con esta migración.
+            base_cat = Categoria.query.filter_by(nombre="7ma").first()
+            if not base_cat:
+                base_cat = Categoria(nombre="7ma", puntos_min=0, puntos_max=199)
+                db.session.add(base_cat)
+                db.session.commit()
+                print("[SEED] categoría base '7ma' creada")
+
+            # 5) Crear admin sólo si ADMIN_* está configurado y no existe
+            admin_nombre = os.getenv('ADMIN_NOMBRE')
+            admin_pin    = os.getenv('ADMIN_PIN')
+            if not admin_nombre or not admin_pin:
+                print("[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido")
+                return
+
+            # Chequeo de existencia SIN ORM (evita SELECT * de Jugador)
+            exists = db.session.execute(
+                text("SELECT 1 FROM jugadores WHERE nombre_completo = :n LIMIT 1"),
+                {"n": admin_nombre}
+            ).first()
+
+            if not exists:
+                # Crear admin con ORM (INSERT sólo incluye columnas seteadas; las nuevas son NULL por defecto)
+                admin = Jugador(
+                    nombre_completo=admin_nombre,
+                    email=None,
+                    telefono=None,
+                    puntos=150,
+                    categoria_id=base_cat.id,
+                    activo=True,
+                    is_admin=True,
+                    pin=admin_pin
+                )
+                db.session.add(admin)
+                db.session.commit()
+                print(f"[SEED] admin creado: {admin_nombre}")
+            else:
+                # Asegurar flags básicos sin hacer un SELECT * completo: actualizamos por SQL crudo
+                db.session.execute(
+                    text("""
+                        UPDATE jugadores
+                        SET is_admin = 1,
+                            categoria_id = COALESCE(categoria_id, :catid),
+                            activo = COALESCE(activo, 1)
+                        WHERE nombre_completo = :n
+                    """),
+                    {"catid": base_cat.id, "n": admin_nombre}
+                )
+                db.session.commit()
+                print(f"[SEED] admin ya existía: {admin_nombre}")
+
+    except Exception:
+        logging.exception("[SEED] error inesperado; seed omitido")
+
+# IMPORTANTE: mantener esta llamada al final del módulo
+_run_seed_if_ready()
+
+# --- Rutas de login por PIN (enviar y validar) ---
+from flask import request, flash, redirect, url_for, session
+import re
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+@app.post("/login/enviar_pin")
+def login_enviar_pin():
+    email = (request.form.get("email") or "").strip().lower()
+    if not email or not EMAIL_RE.match(email):
+        flash("Ingresá un email válido.", "error")
+        return redirect(url_for("login"))
+
+    try:
+        pin = emitir_codigo(email)
+        # TODO: enviar email real con tu función de correo
+        # send_mail(email, "Tu código de acceso", f"Tu PIN es: {pin}")
+        # Para debug local, si querés: print("DEBUG PIN", pin)
+        flash("Te enviamos un código de 6 dígitos. Revisá tu correo.", "success")
+    except Exception as e:
+        # Log opcional
+        # current_app.logger.exception("Error emitiendo PIN")
+        flash("No pudimos emitir el código. Intentá de nuevo en unos minutos.", "error")
+
+    return redirect(url_for("login"))
+
+
+@app.post("/login/validar_pin")
+def login_validar_pin():
+    from flask import request, flash, redirect, url_for, session
+    from sqlalchemy import text
+
+    # Normalizar entradas
+    email = (request.form.get("email") or "").strip().lower()
+    pin   = (request.form.get("pin")   or "").strip()
+
+    if not email or not pin:
+        flash("Completá email y código.", "error")
+        return redirect(url_for("login"))
+
+    # --- Validación en SQL (case-insensitive + fecha robusta) ---
+    # Usamos lower(email) y comparamos fechas con julianday() para evitar issues de TZ/parsing.
+    row = db.session.execute(text("""
+        SELECT id
+          FROM codigos_login
+         WHERE lower(email) = :email
+           AND code         = :pin
+           AND IFNULL(usado, 0) = 0
+           AND julianday(expira) > julianday('now')
+         ORDER BY id DESC
+         LIMIT 1
+    """), {"email": email, "pin": pin}).first()
+
+    if not row:
+        flash("Código inválido o vencido.", "error")
+        return redirect(url_for("login"))
+
+    # --- Marcar ÚNICAMENTE este código como usado (one-time) ---
+    try:
+        db.session.execute(text("""
+            UPDATE codigos_login
+               SET usado = 1
+             WHERE id = :id
+        """), {"id": row.id})
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash("Ocurrió un problema validando el código. Probá de nuevo.", "error")
+        return redirect(url_for("login"))
+
+    # --- Resolver jugador y setear sesión coherente con el resto de la app ---
+    row_j = db.session.execute(text("""
+        SELECT id
+          FROM jugadores
+         WHERE lower(email) = :email
+         LIMIT 1
+    """), {"email": email}).first()
+
+    # Limpiar posibles restos de sesión
+    session.pop("jugador_id", None)
+    session.pop("auth_email", None)
+
+    if row_j:
+        session["jugador_id"] = row_j.id
+        flash("¡Bienvenido!", "success")
+        return redirect(url_for("mi_panel"))
+    else:
+        # Si aún no existe jugador para ese email, guardamos para completar perfil
+        session["auth_email"] = email
+        flash("Código verificado. Completá tu perfil para continuar.", "info")
+        # Podés redirigir a alta_publica si querés forzar completar datos:
+        # return redirect(url_for("alta_publica"))
+        return redirect(url_for("mi_panel"))
+
+
+
+
+
+
+
 
 # ----------------------------
 # RUTAS
@@ -2665,6 +2937,28 @@ def alta_publica():
         # NUEVO: campos opcionales de teléfono separados
         tel_cc = (request.form.get('tel_cc') or '').strip() or '54'   # AR por defecto
         tel_local = (request.form.get('tel_local') or '').strip()
+
+        # ===== NUEVO: Datos personales opcionales =====
+        # Helpers locales para normalizar/parsear sin tocar el resto de la app
+        from datetime import datetime  # (local por si en tu módulo ya está importado)
+        def _safe_title(s: str | None):
+            if not s:
+                return None
+            return " ".join(w.capitalize() for w in s.strip().split())
+
+        def _parse_date_yyyy_mm_dd(s: str | None):
+            if not s:
+                return None
+            try:
+                return datetime.strptime(s, "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+        pais = _safe_title(request.form.get('pais'))
+        provincia = _safe_title(request.form.get('provincia'))
+        ciudad = _safe_title(request.form.get('ciudad'))
+        fecha_nacimiento = _parse_date_yyyy_mm_dd(request.form.get('fecha_nacimiento'))
+        # ==============================================
 
         # --- Validaciones obligatorias ---
         if not nombre:
@@ -2734,29 +3028,43 @@ def alta_publica():
         # --- Normalizar nombre a MAYÚSCULAS (mantiene acentos) ---
         nombre_upper = nombre.upper()
 
-        # Crear solicitud
+        # Crear solicitud (se agregan los nuevos campos)
         s = SolicitudAlta(
             nombre_completo=nombre_upper,
             email=email,
             telefono=telefono_final,
             categoria_id=cat.id,
             mensaje=mensaje or None,
-            estado='PENDIENTE'
+            estado='PENDIENTE',
+            # ===== NUEVOS CAMPOS =====
+            pais=pais,
+            provincia=provincia,
+            ciudad=ciudad,
+            fecha_nacimiento=fecha_nacimiento,
         )
         db.session.add(s)
         db.session.commit()
 
         # ==== Aviso por email a administradores (usando send_mail) ====
         try:
+            from zoneinfo import ZoneInfo  # (local por si ya lo tenés importado arriba)
             admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
             if admin_emails:
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
+                # armamos líneas opcionales limpias
+                linea_loc = f"Ubicación: {pais or '-'} / {provincia or '-'} / {ciudad or '-'}\n"
+                # blindaje: si fecha_nacimiento es None, mostramos '-'
+                fn_str = fecha_nacimiento.strftime('%Y-%m-%d') if fecha_nacimiento else '-'
+                linea_fn  = f"Fecha de nacimiento: {fn_str}\n"
+
                 body = (
                     "Se recibió una nueva solicitud de ALTA.\n\n"
                     f"Nombre:   {nombre_upper}\n"
                     f"Email:    {email}\n"
                     f"Teléfono: {telefono_final}\n"
                     f"Categoría solicitada: {cat.nombre} (id {cat.id})\n"
+                    f"{linea_loc}"
+                    f"{linea_fn}"
                     f"Mensaje:  {mensaje or '-'}\n"
                     f"Fecha/Hora (AR): {ahora_ar}\n\n"
                     "Revisar en: /admin/solicitudes"
@@ -2940,21 +3248,42 @@ def categorias_delete(cat_id):
 
 
 # --- Jugadores ---
+from sqlalchemy import func
+
 @app.route('/jugadores')
 def jugadores_list():
-    # Filtros existentes
-    mostrar_inactivos = request.args.get('inactivos', default=0, type=int)  # 1 = incluir inactivos
+    from flask import g
+    from sqlalchemy import func  # para DISTINCT en provincias/ciudades
 
-    # NUEVOS filtros
-    q_text = (request.args.get('q') or '').strip()
-    categoria_id = request.args.get('categoria_id', type=int)
-    solo_mi_cat = request.args.get('solo_mi_cat', type=int) == 1
+    # ====== Jugador actual + flag admin ======
+    current_jugador = getattr(g, 'current_jugador', None)
+    if not current_jugador and 'get_current_jugador' in globals():
+        try:
+            current_jugador = get_current_jugador()
+        except Exception:
+            current_jugador = None
+    is_admin = bool(current_jugador and getattr(current_jugador, 'is_admin', False))
 
+    # ====== Parámetros GET (manteniendo lo que ya tenías) ======
+    raw_inactivos = request.args.get('inactivos', default=0, type=int)  # 1 = incluir inactivos
+    q_text        = (request.args.get('q') or '').strip()
+    categoria_id  = request.args.get('categoria_id', type=int)
+    solo_mi_cat   = request.args.get('solo_mi_cat', type=int) == 1
+
+    # NUEVOS filtros de ubicación
+    provincia     = (request.args.get('provincia') or '').strip()
+    ciudad        = (request.args.get('ciudad') or '').strip()
+
+    # ====== Solo permitir ver inactivos a admins ======
+    mostrar_inactivos = 1 if (is_admin and raw_inactivos == 1) else 0
+
+    # ====== Mantener estado de jugadores (tu helper) ======
     asegurar_estado_jugadores()
 
+    # ====== Base query ======
     base = db.session.query(Jugador)
 
-    # Activos / inactivos
+    # Activos / inactivos (igual que antes)
     if mostrar_inactivos != 1:
         base = base.filter(Jugador.activo.is_(True))
 
@@ -2962,31 +3291,56 @@ def jugadores_list():
     if categoria_id:
         base = base.filter(Jugador.categoria_id == categoria_id)
     elif solo_mi_cat:
-        # Intentamos leer el jugador actual desde g (o adaptalo a tu helper/context processor)
-        from flask import g
-        current_jugador = getattr(g, 'current_jugador', None)
-        if current_jugador and current_jugador.categoria_id:
+        if current_jugador and getattr(current_jugador, 'categoria_id', None):
             base = base.filter(Jugador.categoria_id == current_jugador.categoria_id)
 
-    # Orden original por nombre
-    base = base.order_by(Jugador.nombre_completo.asc())
+    # Buscador por nombre (en DB, case-insensitive)
+    if q_text:
+        like = f"%{q_text}%"
+        base = base.filter(Jugador.nombre_completo.ilike(like))
 
+    # ====== Filtros de ubicación (solo si vienen con valor) ======
+    if provincia:
+        base = base.filter(Jugador.provincia == provincia)
+    if ciudad:
+        base = base.filter(Jugador.ciudad == ciudad)
+
+    # Orden original por nombre (preservado)
+    base = base.order_by(Jugador.nombre_completo.asc())
     jugadores = base.all()
 
-    # Buscador por nombre (case-insensitive, seguro)
-    if q_text:
-        ql = q_text.lower()
-        jugadores = [j for j in jugadores if ql in (j.nombre_completo or '').lower()]
-
-    # Para el combo de categorías
+    # ====== Combo de categorías (como tenías) ======
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
-    # Zona de ascenso (tu lógica original)
+    # ====== Listas únicas para filtros de ubicación ======
+    # (coherente con visibilidad de inactivos)
+    base_distinct = db.session.query(Jugador)
+    if mostrar_inactivos != 1:
+        base_distinct = base_distinct.filter(Jugador.activo.is_(True))
+
+    # Provincias disponibles (no nulas ni vacías)
+    provincias = [
+        r[0] for r in base_distinct
+            .with_entities(func.distinct(Jugador.provincia))
+            .filter(Jugador.provincia.isnot(None), Jugador.provincia != '')
+            .order_by(Jugador.provincia.asc())
+            .all()
+    ]
+
+    # Ciudades disponibles (si hay provincia seleccionada, acotar a esa)
+    ciudades_q = base_distinct.with_entities(func.distinct(Jugador.ciudad)) \
+                              .filter(Jugador.ciudad.isnot(None), Jugador.ciudad != '')
+    if provincia:
+        ciudades_q = ciudades_q.filter(Jugador.provincia == provincia)
+    ciudades = [r[0] for r in ciudades_q.order_by(Jugador.ciudad.asc()).all()]
+
+    # ====== Zona de ascenso (tu lógica original) ======
     zona_ascenso = {}
     for j in jugadores:
         cat = j.categoria
         zona_ascenso[j.id] = bool(cat and j.puntos is not None and j.puntos <= cat.puntos_min)
 
+    # ====== Render ======
     return render_template(
         'jugadores_list.html',
         jugadores=jugadores,
@@ -2995,8 +3349,17 @@ def jugadores_list():
         mostrar_inactivos=mostrar_inactivos,
         q=q_text,
         categoria_id=categoria_id,
-        solo_mi_cat=1 if solo_mi_cat else 0
+        solo_mi_cat=1 if solo_mi_cat else 0,
+        # filtros de ubicación
+        provincia=provincia,
+        ciudad=ciudad,
+        provincias=provincias,
+        ciudades=ciudades,
+        # el template usa current_jugador
+        current_jugador=current_jugador
     )
+
+
 
 
 @app.route('/jugadores/nuevo', methods=['GET', 'POST'])
@@ -3006,10 +3369,34 @@ def jugadores_new():
     if request.method == 'POST':
         nombre = (request.form.get('nombre_completo') or '').strip()
         email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        telefono_compat = (request.form.get('telefono') or '').strip()  # compat: campo viejo
         puntos = request.form.get('puntos')
         categoria_id = request.form.get('categoria_id')
 
+        # NUEVO: teléfono partido (opcional)
+        tel_cc = (request.form.get('tel_cc') or '').strip()
+        tel_local = (request.form.get('tel_local') or '').strip()
+
+        # NUEVO: ubicación + fecha de nacimiento (opcionales)
+        pais = (request.form.get('pais') or '').strip() or None
+        provincia = (request.form.get('provincia') or '').strip() or None
+        ciudad = (request.form.get('ciudad') or '').strip() or None
+        fn_raw = (request.form.get('fecha_nacimiento') or '').strip()
+
+        # === Helpercitos locales (no tocan el resto de tu app) ===
+        def only_digits(s: str) -> str:
+            return ''.join(ch for ch in (s or '') if ch.isdigit())
+
+        def parse_fecha_yyyy_mm_dd(s: str):
+            if not s:
+                return None
+            try:
+                from datetime import datetime
+                return datetime.strptime(s, '%Y-%m-%d').date()
+            except Exception:
+                return None
+
+        # === Validaciones originales ===
         if not nombre or not puntos or not categoria_id:
             flash('Nombre, puntos y categoría son obligatorios.', 'error')
             return redirect(url_for('jugadores_new'))
@@ -3025,20 +3412,51 @@ def jugadores_new():
             flash('Categoría inválida.', 'error')
             return redirect(url_for('jugadores_new'))
 
-        # Validar que los puntos estén dentro del rango de la categoría
+        # Validar rango de puntos (igual que antes)
         if not (cat.puntos_min <= pts <= cat.puntos_max):
             flash(f'Los puntos {pts} no están dentro del rango de la categoría {cat.nombre} ({cat.rango()}).', 'error')
             return redirect(url_for('jugadores_new'))
 
+        # === Armar teléfono final (opcional) ===
+        telefono_final = None
+        if tel_local:
+            cc_digits = only_digits(tel_cc)
+            local_digits = only_digits(tel_local)
+            if cc_digits and len(local_digits) >= 7:
+                telefono_final = f'+{cc_digits}{local_digits}'
+            else:
+                # si no es válido, no bloqueamos el alta porque antes era opcional
+                # podrías flashear aviso suave si querés:
+                # flash('Teléfono ingresado incompleto, se guarda vacío.', 'warning')
+                telefono_final = None
+        elif telefono_compat:
+            # compat: si viene el viejo, normalizamos lo que se pueda
+            tel_digits = only_digits(telefono_compat)
+            if telefono_compat.startswith('+') and tel_digits:
+                telefono_final = '+' + tel_digits
+            else:
+                # si no empieza con +, lo dejamos como estaba (opcional) o None si no hay dígitos
+                telefono_final = '+' + tel_digits if tel_digits else None
+
+        # === Parse fecha de nacimiento (opcional) ===
+        fecha_nacimiento = parse_fecha_yyyy_mm_dd(fn_raw)
+
+        # === Crear jugador (misma semántica que tenías) ===
         jug = Jugador(
             nombre_completo=nombre,
             email=email or None,
-            telefono=telefono or None,
+            telefono=telefono_final,
             puntos=pts,
-            categoria_id=cat.id
+            categoria_id=cat.id,
+            # NUEVOS CAMPOS (opcionales)
+            pais=pais,
+            provincia=provincia,
+            ciudad=ciudad,
+            fecha_nacimiento=fecha_nacimiento,
         )
         db.session.add(jug)
         db.session.commit()
+
         flash('Jugador creado.', 'ok')
         return redirect(url_for('jugadores_list'))
 
@@ -3051,14 +3469,26 @@ def jugadores_edit(jugador_id):
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
     if request.method == 'POST':
+        # --- Campos básicos
         nombre = (request.form.get('nombre_completo') or '').strip()
         email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        telefono_compat = (request.form.get('telefono') or '').strip()  # compat
         puntos = request.form.get('puntos')
         categoria_id = request.form.get('categoria_id')
         pin = (request.form.get('pin') or '').strip()  # opcional
         is_admin_form = request.form.get('is_admin')   # '1' si viene marcado
 
+        # --- Teléfono partido
+        tel_cc = (request.form.get('tel_cc') or '').strip()
+        tel_local = (request.form.get('tel_local') or '').strip()
+
+        # --- Nuevos datos personales
+        pais = (request.form.get('pais') or '').strip() or None
+        provincia = (request.form.get('provincia') or '').strip() or None
+        ciudad = (request.form.get('ciudad') or '').strip() or None
+        fecha_nacimiento_raw = (request.form.get('fecha_nacimiento') or '').strip()
+
+        # --- Validaciones mínimas
         if not nombre or not puntos or not categoria_id:
             flash('Nombre, puntos y categoría son obligatorios.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
@@ -3070,12 +3500,12 @@ def jugadores_edit(jugador_id):
             flash('Los puntos y la categoría deben ser válidos.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
 
-        cat = db.session.get(Categoria, int(cat_id)) if cat_id is not None else None
+        cat = db.session.get(Categoria, cat_id) if cat_id is not None else None
         if not cat:
             flash('Categoría inválida.', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
 
-        # Validar que los puntos estén dentro del rango de la categoría elegida
+        # Rango de puntos de la categoría
         if not (cat.puntos_min <= pts <= cat.puntos_max):
             flash(f'Los puntos {pts} no están dentro del rango de la categoría {cat.nombre} ({cat.puntos_min}–{cat.puntos_max}).', 'error')
             return redirect(url_for('jugadores_edit', jugador_id=j.id))
@@ -3087,12 +3517,49 @@ def jugadores_edit(jugador_id):
                 return redirect(url_for('jugadores_edit', jugador_id=j.id))
             j.pin = pin  # actualizar PIN
 
-        # Guardar cambios básicos
-        j.nombre_completo = nombre
+        # --- Teléfono: priorizamos tel_cc + tel_local; si no, usamos compat
+        def only_digits(s: str) -> str:
+            return ''.join(ch for ch in s if ch.isdigit())
+
+        telefono_final = None
+        if tel_cc or tel_local:
+            cc = only_digits(tel_cc) if tel_cc else ''
+            local = only_digits(tel_local) if tel_local else ''
+            if not local or len(local) < 7:
+                flash('Ingresá un teléfono válido: el número local debe tener al menos 7 dígitos.', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+            if not cc:
+                flash('Ingresá un código de país válido (1–4 dígitos).', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+            telefono_final = f'+{cc}{local}'
+        else:
+            tel_dig = only_digits(telefono_compat)
+            if tel_dig:
+                # si ya venía con +, preservamos + y dígitos; si no, guardamos como +<digits>
+                telefono_final = ('+' + tel_dig) if telefono_compat.strip().startswith('+') else ('+' + tel_dig)
+            else:
+                telefono_final = None  # teléfono opcional al editar
+
+        # --- Fecha de nacimiento
+        fecha_nacimiento = None
+        if fecha_nacimiento_raw:
+            try:
+                fecha_nacimiento = datetime.strptime(fecha_nacimiento_raw, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Fecha de nacimiento inválida.', 'error')
+                return redirect(url_for('jugadores_edit', jugador_id=j.id))
+
+        # --- Guardar cambios
+        j.nombre_completo = nombre.upper()
         j.email = email or None
-        j.telefono = telefono or None
+        j.telefono = telefono_final
         j.puntos = pts
         j.categoria_id = cat.id
+
+        j.pais = pais
+        j.provincia = provincia
+        j.ciudad = ciudad
+        j.fecha_nacimiento = fecha_nacimiento
 
         # Solo un admin puede cambiar el flag de admin
         cur = get_current_jugador()
@@ -4665,9 +5132,14 @@ _last_autocierre_run = {'ts': None}
 
 @app.before_request
 def _autocierre_lazy_hook():
+    # Deshabilitado por defecto; sólo corre si AUTOCRON_ENABLED está activo (1/true/yes/on)
+    if not (globals().get('AUTOCRON_ENABLED') or False):
+        return
+
     # Evitar estáticos y POST (lo corremos en GETs “normales”)
     if request.method != 'GET' or request.path.startswith('/static'):
         return
+
     now = datetime.utcnow()
     ts = _last_autocierre_run['ts']
     # Run cada 60s como máximo
@@ -4677,7 +5149,9 @@ def _autocierre_lazy_hook():
         except Exception:
             # No interrumpas la navegación si algo falla
             pass
+        # ⚠️ importante: actualizar el último run
         _last_autocierre_run['ts'] = now
+
 
 
 @app.route('/desafios')
@@ -5861,6 +6335,11 @@ def logout():
 
 @app.route('/mi')
 def mi_panel():
+    # Aliases seguros para evitar UnboundLocalError
+    from sqlalchemy import and_ as sa_and, or_ as sa_or, select, distinct, union
+    from sqlalchemy.sql import exists
+    from sqlalchemy import Table, MetaData
+
     j = get_current_jugador()
     if not j:
         flash('Iniciá sesión para ver tu panel.', 'error')
@@ -5869,18 +6348,18 @@ def mi_panel():
     # Parejas donde participa
     parejas_ids = [
         p.id for p in db.session.query(Pareja)
-        .filter(or_(Pareja.jugador1_id == j.id, Pareja.jugador2_id == j.id))
+        .filter(sa_or(Pareja.jugador1_id == j.id, Pareja.jugador2_id == j.id))
         .all()
     ]
 
-    # Partidos donde participa (ahora: TODO lo no JUGADO se considera "pendiente")
+    # Partidos donde participa (todo lo no JUGADO = "pendiente")
     partidos_pend = []
     partidos_jug = []
     if parejas_ids:
         partidos_q = (
             db.session.query(Partido)
-            .filter(or_(Partido.pareja1_id.in_(parejas_ids),
-                        Partido.pareja2_id.in_(parejas_ids)))
+            .filter(sa_or(Partido.pareja1_id.in_(parejas_ids),
+                          Partido.pareja2_id.in_(parejas_ids)))
             .order_by(Partido.creado_en.desc())
         )
         for m in partidos_q.all():
@@ -5889,7 +6368,7 @@ def mi_panel():
             else:
                 partidos_pend.append(m)
 
-    # Propuestas de resultado existentes para mis partidos pendientes (seguro si falta el modelo/tabla)
+    # Propuestas de resultado existentes (partidos "normales")
     propuestas_map = {}
     try:
         from .models import PartidoResultadoPropuesto
@@ -5908,7 +6387,7 @@ def mi_panel():
     # Desafíos relacionados (en cualquier rol)
     desafios_rel = (
         db.session.query(Desafio)
-        .filter(or_(
+        .filter(sa_or(
             Desafio.desafiante_id == j.id,
             Desafio.companero_id == j.id,
             Desafio.rival1_id == j.id,
@@ -5922,39 +6401,39 @@ def mi_panel():
     desafios_para_responder = (
         db.session.query(Desafio)
         .filter(
-            or_(Desafio.estado == 'PENDIENTE', Desafio.estado == 'ACEPTADO_PARCIAL'),
-            or_(
-                and_(Desafio.rival1_id == j.id,
-                     or_(Desafio.rival1_acepto.is_(False), Desafio.rival1_acepto.is_(None))),
-                and_(Desafio.rival2_id == j.id,
-                     or_(Desafio.rival2_acepto.is_(False), Desafio.rival2_acepto.is_(None)))
+            sa_or(Desafio.estado == 'PENDIENTE', Desafio.estado == 'ACEPTADO_PARCIAL'),
+            sa_or(
+                sa_and(Desafio.rival1_id == j.id,
+                       sa_or(Desafio.rival1_acepto.is_(False), Desafio.rival1_acepto.is_(None))),
+                sa_and(Desafio.rival2_id == j.id,
+                       sa_or(Desafio.rival2_acepto.is_(False), Desafio.rival2_acepto.is_(None)))
             )
         )
         .order_by(Desafio.creado_en.desc())
         .all()
     )
 
-    # === PARTIDOS PARA RESPONDER INVITACIÓN
+    # PARTIDOS PARA RESPONDER (invitación)
     partidos_para_responder = (
         db.session.query(Partido)
         .filter(
             Partido.estado.in_(['POR_CONFIRMAR', 'PENDIENTE']),
-            or_(
-                and_(Partido.rival1_id == j.id, Partido.rival1_acepto.is_(None)),
-                and_(Partido.rival2_id == j.id, Partido.rival2_acepto.is_(None))
+            sa_or(
+                sa_and(Partido.rival1_id == j.id, Partido.rival1_acepto.is_(None)),
+                sa_and(Partido.rival2_id == j.id, Partido.rival2_acepto.is_(None))
             )
         )
         .order_by(Partido.creado_en.desc())
         .all()
     )
 
-    # === PARTIDOS CREADOS POR MÍ esperando aceptación
+    # PARTIDOS CREADOS POR MÍ esperando aceptación
     partidos_creados_pend = (
         db.session.query(Partido)
         .filter(
             Partido.estado.in_(['POR_CONFIRMAR', 'PENDIENTE']),
             Partido.creador_id == j.id,
-            or_(Partido.rival1_acepto.is_(None), Partido.rival2_acepto.is_(None))
+            sa_or(Partido.rival1_acepto.is_(None), Partido.rival2_acepto.is_(None))
         )
         .order_by(Partido.creado_en.desc())
         .all()
@@ -5965,7 +6444,7 @@ def mi_panel():
         db.session.query(Desafio)
         .filter(
             Desafio.desafiante_id == j.id,
-            or_(Desafio.estado == 'PENDIENTE', Desafio.estado == 'ACEPTADO_PARCIAL')
+            sa_or(Desafio.estado == 'PENDIENTE', Desafio.estado == 'ACEPTADO_PARCIAL')
         )
         .order_by(Desafio.creado_en.desc())
         .all()
@@ -5984,14 +6463,16 @@ def mi_panel():
     # Abiertos de su categoría
     abiertos_cat = (
         db.session.query(PartidoAbierto)
-        .filter(PartidoAbierto.categoria_id == j.categoria_id)
+        .filter(
+            PartidoAbierto.categoria_id == j.categoria_id,
+            PartidoAbierto.estado.in_(["ABIERTO", "LLENO"])
+        )
         .order_by(PartidoAbierto.creado_en.desc())
         .all()
     )
 
-    # === NUEVO: Suplencias ===
-    # 1) Listado de suplencias del jugador (para el bloque "Suplencias activas")
-    estados_activos = ['ABIERTO', 'LLENO', 'PARTIDO_CREADO']  # incluimos PARTIDO_CREADO si querés seguir viendo la suplencia
+    # Suplencias
+    estados_activos = ['ABIERTO', 'LLENO', 'PARTIDO_CREADO']
     try:
         suplencias = (
             db.session.query(PartidoAbiertoSuplente)
@@ -6007,15 +6488,11 @@ def mi_panel():
         suplencias = []
     cant_suplencias = len(suplencias)
 
-    # 2) Para el bloque "Unirme a un partido": necesitamos saber
-    #    - si YA soy suplente en cada abierto mostrado
-    #    - cuántos suplentes totales tiene cada abierto
+    # Para "Unirme a un partido": ya soy suplente + conteos
     pa_ids = [pa.id for pa in abiertos_cat] if abiertos_cat else []
     mis_suplencias_pa_ids = set()
     suplentes_counts = {pid: 0 for pid in pa_ids}
-
     if pa_ids:
-        # Traemos TODAS las suplencias de esos abiertos (sin filtrar por estado)
         todas_supls = (
             db.session.query(PartidoAbiertoSuplente)
             .filter(PartidoAbiertoSuplente.pa_id.in_(pa_ids))
@@ -6062,77 +6539,363 @@ def mi_panel():
     )
 
     # === Métricas / listas para UI ===
+    ESTADOS_PROPONIBLES = {'PENDIENTE', 'POR_CONFIRMAR', 'CONFIRMADO', 'ACEPTADO', 'PROGRAMADO'}
+
+    def _as_bool(v):
+        return True if v in (True, 1, '1') else False
 
     # 1) "Listos para cargar"
     listos_para_cargar = []
     for m in partidos_pend:
         hubo_invitacion = (m.rival1_id is not None and m.rival2_id is not None)
-        aceptado = (not hubo_invitacion) or (m.rival1_acepto == 1 and m.rival2_acepto == 1)
+        r1_ok = _as_bool(getattr(m, 'rival1_acepto', None))
+        r2_ok = _as_bool(getattr(m, 'rival2_acepto', None))
+        aceptado = (not hubo_invitacion) or (r1_ok and r2_ok) or (m.estado in ('CONFIRMADO', 'ACEPTADO'))
         tiene_propuesta = (m.id in propuestas_map)
-        if aceptado and not tiene_propuesta and m.estado in ('PENDIENTE', 'POR_CONFIRMAR'):
+        if aceptado and not tiene_propuesta and (m.estado in ESTADOS_PROPONIBLES):
             listos_para_cargar.append(m)
 
-    # 2) Resultado propuesto y YO debo responder
+    # 2) Resultado propuesto y YO debo responder (partidos "normales")
     partidos_resultado_para_responder = [m for m in partidos_pend if m.necesita_respuesta_de(j.id)]
 
-    # 3) Partidos sin resultado (candidatos a "Proponer resultado")
+    # 2.b) Propuestas ENVIADAS por mí (partidos "normales")
+    partidos_propuestas_enviadas_pend = []
+    for m in partidos_pend:
+        pr = propuestas_map.get(m.id)
+        if not pr:
+            continue
+        proponente_id = (
+            getattr(pr, 'jugador_id', None)
+            or getattr(pr, 'propuesto_por_id', None)
+            or getattr(pr, 'autor_id', None)
+            or getattr(pr, 'creador_id', None)
+        )
+        if proponente_id == j.id:
+            estado_pr = (getattr(pr, 'estado', None) or '').upper()
+            aceptada = _as_bool(getattr(pr, 'aceptado', None)) or _as_bool(getattr(pr, 'confirmado', None)) or (estado_pr in ('ACEPTADA', 'CONFIRMADA'))
+            rechazada = _as_bool(getattr(pr, 'rechazado', None)) or (estado_pr in ('RECHAZADA', 'RECHAZADO'))
+            if not aceptada and not rechazada:
+                partidos_propuestas_enviadas_pend.append(m)
+
     partidos_sin_resultado = listos_para_cargar
 
-    # Contadores
-    cant_pend_sin_result = len(partidos_sin_resultado)
+    # Contadores base (sin torneo aún)
+    cant_pend_sin_resultado = len(partidos_sin_resultado)
     cant_abiertos_mi_cat = len(abiertos_cat)
     puede_desafiar = bool(en_zona and cat_superior)
 
-    cant_partidos_para_responder = len(partidos_para_responder)  # invitaciones
+    cant_partidos_para_responder = len(partidos_para_responder)
     cant_partidos_creados_pend = len(partidos_creados_pend)
     cant_partidos_resultado_para_responder = len(partidos_resultado_para_responder)
+    cant_propuestas_enviadas_pend = len(partidos_propuestas_enviadas_pend)
+
+    # =========================
+    # === BLOQUE: TORNEOS ===
+    # =========================
+    try:
+        from datetime import datetime, timedelta
+        hace_60d = datetime.utcnow().date() - timedelta(days=60)
+        torneos_q = db.session.query(Torneo).filter(
+            sa_or(Torneo.categoria_id == j.categoria_id, Torneo.categoria_id.is_(None))
+        ).filter(
+            sa_or(Torneo.fecha_inicio.is_(None), Torneo.fecha_inicio >= hace_60d)
+        ).order_by(Torneo.id.desc()).limit(6)
+        torneos_mi_cat = torneos_q.all()
+    except Exception:
+        torneos_mi_cat = []
+
+    # === Partidos de TORNEO pendientes del jugador (incluye puente 'torneos_partidos_lados') ===
+    ESTADOS_TORNEO_PEND = ('PENDIENTE', 'PROGRAMADO', 'POR_CONFIRMAR', 'ACEPTADO', 'CONFIRMADO')
+
+    # 1) Inscripciones del jugador (SELECT 1-col)
+    insc_ids_sq = (
+        select(TorneoInscripcion.id)
+        .where(sa_or(TorneoInscripcion.jugador1_id == j.id,
+                     TorneoInscripcion.jugador2_id == j.id))
+    )
+
+    # 2) Participantes (wrapper de inscripción) (SELECT 1-col)
+    part_ids_sq = (
+        select(TorneoParticipante.id)
+        .where(TorneoParticipante.inscripcion_id.in_(insc_ids_sq))
+    )
+
+    # 3) Sin resultado (prefiere ganador nulo; cae a resultado_json vacío)
+    if hasattr(TorneoPartido, 'ganador_participante_id'):
+        sin_resultado = sa_or(
+            TorneoPartido.ganador_participante_id.is_(None),
+            TorneoPartido.resultado_json.is_(None),
+            TorneoPartido.resultado_json == '',
+            TorneoPartido.resultado_json == 'null'
+        )
+    else:
+        sin_resultado = sa_or(
+            TorneoPartido.resultado_json.is_(None),
+            TorneoPartido.resultado_json == '',
+            TorneoPartido.resultado_json == 'null'
+        )
+
+    # 4) IDs vía columnas A/B (SELECT 1-col)
+    ids_via_ab = (
+        select(TorneoPartido.id)
+        .where(sa_or(
+            TorneoPartido.participante_a_id.in_(part_ids_sq),
+            TorneoPartido.participante_b_id.in_(part_ids_sq)
+        ))
+    )
+
+    # 5) IDs vía tabla puente torneos_partidos_lados (reflexión + detección de columnas)
+    metadata = MetaData()
+    try:
+        lados_tbl = Table('torneos_partidos_lados', metadata, autoload_with=db.engine)
+        cols = set(lados_tbl.c.keys())
+    except Exception:
+        lados_tbl = None
+        cols = set()
+
+    ids_via_lados = None
+    if lados_tbl is not None:
+        # Detectar nombre de columna del partido
+        partido_col_name = next((n for n in ('partido_id', 'torneo_partido_id', 'tpartido_id') if n in cols), None)
+        # Variantes para "quién participa"
+        participante_col_name = next((n for n in ('participante_id', 'torneo_participante_id', 'tp_id') if n in cols), None)
+        jugador_col_name = next((n for n in ('jugador_id', 'player_id') if n in cols), None)
+        insc1_col = 'insc1_id' if 'insc1_id' in cols else None
+        insc2_col = 'insc2_id' if 'insc2_id' in cols else None
+
+        if partido_col_name:
+            if participante_col_name:
+                ids_via_lados = (
+                    select(distinct(lados_tbl.c[partido_col_name]))
+                    .where(lados_tbl.c[participante_col_name].in_(part_ids_sq))
+                )
+            elif jugador_col_name:
+                ids_via_lados = (
+                    select(distinct(lados_tbl.c[partido_col_name]))
+                    .where(lados_tbl.c[jugador_col_name] == j.id)
+                )
+            elif insc1_col and insc2_col:
+                # Diseño actual: lados(partido_id, lado, insc1_id, insc2_id)
+                ids_via_lados = (
+                    select(distinct(lados_tbl.c[partido_col_name]))
+                    .where(sa_or(
+                        lados_tbl.c[insc1_col].in_(insc_ids_sq),
+                        lados_tbl.c[insc2_col].in_(insc_ids_sq),
+                    ))
+                )
+            # Si no hay columnas compatibles, queda como None
+
+    # 6) Unión de criterios (A/B + puente) → todos SELECT 1-col
+    if ids_via_lados is not None:
+        ids_union = union(ids_via_ab, ids_via_lados).alias('ids_union')
+        ids_union_select = select(ids_union.c[0])  # única columna
+    else:
+        ids_union_select = ids_via_ab  # ya es SELECT 1-col
+
+    try:
+        partidos_torneo_pend = (
+            db.session.query(TorneoPartido)
+            .filter(
+                TorneoPartido.id.in_(ids_union_select),
+                sin_resultado,
+                TorneoPartido.estado.in_(ESTADOS_TORNEO_PEND)
+            )
+            .order_by(TorneoPartido.programado_en.is_(None), TorneoPartido.programado_en.asc())
+            .all()
+        )
+        cant_torneo_partidos_pend = len(partidos_torneo_pend)
+    except Exception:
+        partidos_torneo_pend = []
+        cant_torneo_partidos_pend = 0
+
+    # ====== NUEVO: Propuestas de TORNEO que YO debo responder (optimizado, sin megajoin) ======
+    helper_torneo   = globals().get('_jugadores_del_lado_torneo')
+    helper_generico = globals().get('_jugadores_del_lado')
+
+    TP  = globals().get('TorneoPartido')
+    TPR = globals().get('TorneoPartidoResultado')
+    try:
+        TPRP = globals().get('TorneoPartidoResultadoPropuesto') or __import__('app').TorneoPartidoResultadoPropuesto
+    except Exception:
+        TPRP = globals().get('TorneoPartidoResultadoPropuesto', None)
+
+    torneo_partidos_resultado_para_responder = []
+    jug_ids_necesarios = set()
+
+    # === IDs para nombres en 'partidos_torneo_pend' ===
+    for tp in (partidos_torneo_pend or []):
+        try:
+            idsA = (helper_torneo(tp, 'A') if helper_torneo else (helper_generico(tp, 'A') if helper_generico else [])) or []
+            idsB = (helper_torneo(tp, 'B') if helper_torneo else (helper_generico(tp, 'B') if helper_generico else [])) or []
+        except TypeError:
+            idsA, idsB = [], []
+        idsA = [int(x) for x in idsA if x]
+        idsB = [int(x) for x in idsB if x]
+        setattr(tp, 'idsA', idsA)
+        setattr(tp, 'idsB', idsB)
+        jug_ids_necesarios.update(idsA)
+        jug_ids_necesarios.update(idsB)
+
+    if TP and TPRP:
+        # Query mínima: solo TPRP + TP, y "sin resultado definitivo" con NOT EXISTS
+        pr_rows = db.session.execute(
+            select(
+                TPRP.id.label('pr_id'),
+                TPRP.partido_id.label('tp_id'),
+                TPRP.ganador_lado,
+                TPRP.sets_text,
+                TPRP.propuesto_por_jugador_id,
+                TPRP.creado_en,
+                TP.ronda,
+                TP.orden,
+                TP.programado_en,
+                TP.cancha,
+                TP.torneo_id,
+            )
+            .select_from(TPRP)
+            .join(TP, TPRP.partido_id == TP.id)
+            .where(
+                ~exists(select(TPR.id).where(TPR.partido_id == TP.id))  # aún sin resultado final
+            )
+        ).all()
+
+
+        for row in pr_rows:
+            tp = db.session.get(TP, row.tp_id)  # carga puntual
+
+            # Determinar jugadores de ambos lados
+            try:
+                idsA = (helper_torneo(tp, 'A') if helper_torneo else helper_generico(tp, 'A')) or []
+                idsB = (helper_torneo(tp, 'B') if helper_torneo else helper_generico(tp, 'B')) or []
+            except TypeError:
+                idsA, idsB = [], []
+
+            idsA = [int(x) for x in idsA if x]
+            idsB = [int(x) for x in idsB if x]
+            ids_all = set(idsA) | set(idsB)
+
+            # Si participo y NO fui el proponente → me toca responder
+            prop_id = int(row.propuesto_por_jugador_id) if row.propuesto_por_jugador_id else None
+            if j and (j.id in ids_all) and (prop_id != j.id):
+                torneo_partidos_resultado_para_responder.append({
+                    'id': row.tp_id,
+                    'ronda': row.ronda,
+                    'orden': row.orden,
+                    'programado_en': row.programado_en,
+                    'cancha': row.cancha,
+                    'torneo': getattr(tp, 'torneo', None),
+                    'idsA': idsA,
+                    'idsB': idsB,
+                    'propuesta_id': row.pr_id,
+                    'propuesto_por_jugador_id': prop_id,
+                    'sets_text': row.sets_text,
+                    'ganador_lado': row.ganador_lado,
+                    'creado_en': row.creado_en,
+                })
+                jug_ids_necesarios.update(ids_all)
+                if prop_id:
+                    jug_ids_necesarios.add(prop_id)
+
+    # Map de jugadores (para nombres humanos)
+    jugadores_by_id = {}
+    if jug_ids_necesarios:
+        from app import Jugador as _JUG_
+        rows = db.session.query(_JUG_).filter(_JUG_.id.in_(list(jug_ids_necesarios))).all()
+        jugadores_by_id = {row.id: row for row in rows}
+
+    # Helpers para nombres
+    def _nomb(jg):
+        if not jg:
+            return '—'
+        return getattr(jg, 'nombre_completo', None) or getattr(jg, 'display_name', None) or getattr(jg, 'nombre', None) or f'#{getattr(jg, "id", "?")}'
+
+    def _join_nombres(ids):
+        return ' + '.join(_nomb(jugadores_by_id.get(i)) for i in ids) if ids else '—'
+
+    for it in torneo_partidos_resultado_para_responder:
+        it['a_nombres'] = _join_nombres(it['idsA'])
+        it['b_nombres'] = _join_nombres(it['idsB'])
+
+    # >>> NOMBRES PARA 'partidos_torneo_pend' (usa idsA/idsB cargados en el punto 1)
+    for tp in (partidos_torneo_pend or []):
+        try:
+            an = getattr(tp, 'a_nombres', None)
+            bn = getattr(tp, 'b_nombres', None)
+            if not an:
+                setattr(tp, 'a_nombres', _join_nombres(getattr(tp, 'idsA', []) or []))
+            if not bn:
+                setattr(tp, 'b_nombres', _join_nombres(getattr(tp, 'idsB', []) or []))
+        except Exception:
+            setattr(tp, 'a_nombres', an if an else '—')
+            setattr(tp, 'b_nombres', bn if bn else '—')
+
+    # Aumentamos el contador de “para responder resultado” con los de torneo
+    cant_partidos_resultado_para_responder += len(torneo_partidos_resultado_para_responder)
+
+    # ===== Contador de tareas de resultados (normales + torneo) =====
+    cant_tareas_resultados = (
+        cant_pend_sin_resultado
+        + cant_partidos_resultado_para_responder
+        + cant_propuestas_enviadas_pend
+    )
+
+
+    # =========================
+    # === /BLOQUE: TORNEOS ===
+    # =========================
 
     return render_template(
         'mi.html',
         jugador=j,
         en_zona=en_zona,
         partidos_pend=partidos_pend,
-        partidos_jug=partidos_jug[:5],          # últimos 5 jugados
-        desafios_rel=desafios_rel[:10],         # últimos 10 desafíos (cualquier rol)
+        partidos_jug=partidos_jug[:5],
+        desafios_rel=desafios_rel[:10],
         desafios_para_responder=desafios_para_responder,
         desafios_creados_pend=desafios_creados_pend,
         desafios_creados_listos=desafios_creados_listos,
 
-        # Partidos directos (invitaciones)
         partidos_para_responder=partidos_para_responder,
         partidos_creados_pend=partidos_creados_pend,
         cant_partidos_para_responder=cant_partidos_para_responder,
         cant_partidos_creados_pend=cant_partidos_creados_pend,
 
-        # Propuestas de resultado
         propuestas_map=propuestas_map,
 
-        # Abiertos y selects
         abiertos_cat=abiertos_cat[:10],
         cat_superior=cat_superior,
         rivales_superior=rivales_superior,
         jugadores_mi_cat=jugadores_mi_cat,
 
-        # métricas
-        cant_pend_sin_result=cant_pend_sin_result,
+        cant_pend_sin_result=cant_pend_sin_resultado,
         cant_abiertos_mi_cat=cant_abiertos_mi_cat,
         puede_desafiar=puede_desafiar,
 
-        # Resultado propuesto
         partidos_resultado_para_responder=partidos_resultado_para_responder,
         cant_partidos_resultado_para_responder=cant_partidos_resultado_para_responder,
 
-        # Para botones "Proponer resultado"
         partidos_sin_resultado=partidos_sin_resultado,
 
-        # Suplencias (bloque dedicado)
+        partidos_propuestas_enviadas_pend=partidos_propuestas_enviadas_pend,
+        cant_propuestas_enviadas_pend=cant_propuestas_enviadas_pend,
+
         suplencias=suplencias,
         cant_suplencias=cant_suplencias,
 
-        # === NUEVO PARA UI de abiertos ===
-        suplentes_counts=suplentes_counts,      # dict {pa_id: cantidad}
-        mis_suplencias_pa_ids=mis_suplencias_pa_ids,  # set de pa_id donde YA soy suplente
+        suplentes_counts=suplentes_counts,
+        mis_suplencias_pa_ids=mis_suplencias_pa_ids,
+
+        cant_tareas_resultados=cant_tareas_resultados,
+
+        torneos_mi_cat=torneos_mi_cat,
+        partidos_torneo_pend=partidos_torneo_pend,
+        cant_torneo_partidos_pend=cant_torneo_partidos_pend,
+
+        # NUEVO para poder mostrar nombres humanos en propuestas de torneo
+        torneo_partidos_resultado_para_responder=torneo_partidos_resultado_para_responder,
+        jugadores_by_id=jugadores_by_id,
     )
+
 
 
 
@@ -6288,7 +7051,7 @@ def inject_current_jugador():
 
 # Endpoints públicos (pueden entrar sin sesión)
 PUBLIC_ENDPOINTS = {
-    'home','login','alta_publica','static','ranking','categorias_list',
+    'home','login','alta_publica','healthz','static','ranking','categorias_list',
     'olvide_pin','olvide_pin_confirmar',
     # + torneos públicos
     'torneos_public_list','torneo_public_detail','torneo_public_detail_legacy',
@@ -6384,57 +7147,71 @@ def admin_solicitudes_aprobar(sid):
                 flash(f'Ya existe un jugador con el email {s.email}. No se puede duplicar.', 'error')
                 return redirect(url_for('admin_solicitudes_list'))
 
-        # Crear jugador activo (sin PIN inicial; lo creará con el código)
+        # Crear jugador activo (sin PIN persistente; usaremos PIN one-time de codigos_login)
         j = Jugador(
             nombre_completo=s.nombre_completo,
             email=s.email,
             telefono=s.telefono,
             puntos=puntos,
             categoria_id=s.categoria_id,
-            activo=True
-            # no seteamos 'pin' aquí (opción 1)
+            activo=True,
+            # --- NUEVOS CAMPOS copiados desde la solicitud (si existen) ---
+            pais=getattr(s, 'pais', None),
+            provincia=getattr(s, 'provincia', None),
+            ciudad=getattr(s, 'ciudad', None),
+            fecha_nacimiento=getattr(s, 'fecha_nacimiento', None),
+            # no seteamos 'pin' aquí (flujo PIN one-time por email)
         )
         db.session.add(j)
-        db.session.flush()  # obtener j.id antes del commit para el PinReset
-
-        # Generar código de activación (PinReset) - vence en 24 h
-        code = _gen_code(6)
-        pr = PinReset(
-            jugador_id=j.id,
-            code=code,
-            created_en=datetime.utcnow(),
-            expires_en=datetime.utcnow() + timedelta(hours=24),
-            used=False
-        )
-        db.session.add(pr)
+        db.session.flush()  # obtener j.id antes del commit si se necesitara
 
         # Cerrar solicitud
         s.estado = 'APROBADA'
+        # si tu modelo tiene 'resuelto_en' (lo estás usando), lo sellamos; si fuera 'resuelta_en', ajusta el nombre
         s.resuelto_en = datetime.utcnow()
         db.session.commit()
 
-        # URLs para el email
+        # Generar PIN one-time (6 dígitos) que vence según tu config MINUTOS_VIGENCIA_PIN
         try:
-            confirmar_url = url_for('olvide_pin_confirmar', _external=True)
+            pin_emitido = emitir_codigo(s.email)  # guarda/actualiza en codigos_login (usado=0, expira futura)
+        except Exception as ex:
+            flash(f"Solicitud aprobada, pero no se pudo generar el PIN automáticamente ({ex}).", "warning")
+            return redirect(url_for('admin_solicitudes_list'))
+
+        # URLs para el email (login directo)
+        try:
             login_url = url_for('login', _external=True)
         except Exception:
-            confirmar_url = request.url_root.rstrip('/') + '/olvide-pin-confirmar'
             login_url = request.url_root.rstrip('/') + '/login'
 
-        subject = "¡Bienvenido a UPLAY! Activá tu cuenta creando tu PIN"
-        # Fallback texto plano (si no renderiza HTML)
+        subject = "¡Bienvenido a UPLAY! Tu PIN de acceso"
+
+        # Líneas opcionales (ubicación / fecha de nacimiento) si existen en la solicitud
+        def _fmt_loc(_s):
+            p = getattr(_s, 'pais', None) or '-'
+            pr = getattr(_s, 'provincia', None) or '-'
+            c = getattr(_s, 'ciudad', None) or '-'
+            return f"Ubicación: {p} / {pr} / {c}\n"
+
+        def _fmt_fn(_s):
+            fn = getattr(_s, 'fecha_nacimiento', None)
+            return f"Fecha de nacimiento: {fn.strftime('%Y-%m-%d') if fn else '-'}\n"
+
+        # Fallback texto plano
         body = (
             f"Hola {j.nombre_completo},\n\n"
-            "¡Tu alta fue aprobada! Para empezar, creá tu PIN.\n\n"
-            f"Código: {code} (vence en 24 horas)\n"
-            f"Crear PIN: {confirmar_url}\n\n"
-            f"También podés iniciar sesión luego aquí: {login_url}\n\n"
+            "¡Tu alta fue aprobada! Este es tu PIN de acceso (válido por tiempo limitado):\n\n"
+            f"PIN: {pin_emitido}\n\n"
+            f"Para ingresar, andá a: {login_url}\n"
+            "Elegí tu nombre y poné este PIN.\n\n"
             f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
-            f"Puntos iniciales: {j.puntos}\n\n"
-            "— Equipo UPLAY"
+            f"Puntos iniciales: {j.puntos}\n"
+            + _fmt_loc(s)
+            + _fmt_fn(s)
+            + "\n— Equipo UPLAY"
         )
 
-        # HTML con logo inline (CID) + botón
+        # HTML con logo inline (CID) + PIN + botón a login
         html_body = f"""\
 <!doctype html>
 <html lang="es">
@@ -6463,27 +7240,40 @@ def admin_solicitudes_aprobar(sid):
           <tr>
             <td class="card" style="background:#ffffff;border-radius:14px;padding:24px 22px;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
               <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;">¡Bienvenido/a a UPLAY!</h1>
-              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, para empezar creá tu PIN.</p>
-              <p style="margin:0 0 8px;color:#334155;">Usá este código (vence en <strong>24 horas</strong>):</p>
+              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, tu alta fue aprobada. Este es tu <strong>PIN de acceso</strong> (válido por tiempo limitado):</p>
               <div style="margin:8px 0 16px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
-                {code}
+                {pin_emitido}
               </div>
               <div style="text-align:center;margin-bottom:16px;">
-                <a href="{confirmar_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
-                  Crear mi PIN
+                <a href="{login_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
+                  Iniciar sesión
                 </a>
               </div>
-              <p class="muted" style="margin:0 0 8px;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace:</p>
-              <p style="margin:0 0 16px;word-break:break-all;font-size:12px;color:#334155;">{confirmar_url}</p>
 
               <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0 16px;">
 
               <p style="margin:0 0 6px;color:#334155;">Datos iniciales</p>
               <ul style="margin:0 0 10px 18px;padding:0;color:#334155;">
                 <li>Categoría: {j.categoria.nombre if j.categoria else '-'}</li>
-                <li>Puntos: {j.puntos}</li>
+                <li>Puntos: {j.puntos}</li>"""
+
+        # Sección extra opcional en HTML: ubicación y fecha de nacimiento
+        loc_items = []
+        if getattr(s, 'pais', None):
+            loc_items.append(f"<li>País: {s.pais}</li>")
+        if getattr(s, 'provincia', None):
+            loc_items.append(f"<li>Provincia/Estado: {s.provincia}</li>")
+        if getattr(s, 'ciudad', None):
+            loc_items.append(f"<li>Ciudad: {s.ciudad}</li>")
+        fn_text = s.fecha_nacimiento.strftime('%Y-%m-%d') if getattr(s, 'fecha_nacimiento', None) else None
+        if fn_text:
+            loc_items.append(f"<li>Fecha de nacimiento: {fn_text}</li>")
+        html_extra = ("\n".join(loc_items)) if loc_items else ""
+
+        html_body += f"""
+                {html_extra}
               </ul>
-              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Luego podrás iniciar sesión aquí: {login_url}</p>
+              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace: {login_url}</p>
             </td>
           </tr>
           <tr>
@@ -6504,19 +7294,22 @@ def admin_solicitudes_aprobar(sid):
             send_mail(
                 subject=subject,
                 body=body,                 # fallback texto plano
-                html_body=html_body,       # HTML con botón + código + logo
+                html_body=html_body,       # HTML con botón + PIN + logo
                 to=[j.email],
                 inline_images={"uplay-logo": "static/logo/uplay.png"}  # usa el PNG que subiste
             )
             flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
         except Exception as e:
-            flash(f'Jugador creado, pero falló el envío de email: {e}', 'warning')
+            # El PIN ya está generado; si falla el email, el usuario puede pedir otro desde /login → "Olvidé mi PIN"
+            flash(f'Jugador creado. No se pudo enviar email: {e}', 'warning')
 
         return redirect(url_for('admin_solicitudes_list'))
 
     # GET -> sugerir puntos = puntos_max
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
+
+
 
 
 @app.route('/admin/solicitudes/<int:sid>/rechazar', methods=['POST'])
@@ -6829,11 +7622,132 @@ def admin_torneos_new():
 @admin_required
 def admin_torneos_view(tid):
     t = get_or_404(Torneo, tid)
-    insc = (db.session.query(TorneoInscripcion)
-            .filter(TorneoInscripcion.torneo_id == t.id)
-            .order_by(TorneoInscripcion.seed.asc().nulls_last(), TorneoInscripcion.id.asc())
-            .all())
-    return render_template('admin_torneos_view.html', t=t, inscripciones=insc)
+
+    # Inscripciones (como ya lo tenías)
+    insc = (
+        db.session.query(TorneoInscripcion)
+        .filter(TorneoInscripcion.torneo_id == t.id)
+        .order_by(
+            TorneoInscripcion.seed.asc().nulls_last(),
+            TorneoInscripcion.id.asc()
+        )
+        .all()
+    )
+
+    # Partidos del torneo (como ya lo tenías)
+    partidos = (
+        db.session.query(TorneoPartido)
+        .filter(TorneoPartido.torneo_id == t.id)
+        .order_by(
+            TorneoPartido.ronda.asc().nulls_last(),
+            TorneoPartido.orden.asc().nulls_last(),
+            TorneoPartido.id.asc()
+        )
+        .all()
+    )
+
+    # Resultados existentes (dict por partido_id) — como lo tenías
+    res_list = (
+        db.session.query(TorneoPartidoResultado)
+        .join(TorneoPartido, TorneoPartidoResultado.partido_id == TorneoPartido.id)
+        .filter(TorneoPartido.torneo_id == t.id)
+        .all()
+    )
+    resultados = {r.partido_id: r for r in res_list}
+
+    # ==== PRO-PUESTOS (si el modelo existe) ====
+    propuestas = {}
+    try:
+        from app import TorneoPartidoResultadoPropuesto as TPRP
+    except Exception:
+        TPRP = globals().get('TorneoPartidoResultadoPropuesto', None)
+
+    if TPRP:
+        pids = [p.id for p in partidos]
+        if pids:
+            prps = (
+                db.session.query(TPRP)
+                .filter(TPRP.partido_id.in_(pids))
+                .all()
+            )
+            propuestas = {x.partido_id: x for x in prps}
+
+    # ==== JUGADORES POR PARTIDO (A/B) usando helpers del proyecto ====
+    helper_torneo = globals().get('_jugadores_del_lado_torneo')
+    helper_generico = globals().get('_jugadores_del_lado')
+
+    jugadores_por_partido_ids: dict[int, dict[str, list[int]]] = {}
+    all_ids: set[int] = set()
+
+    for p in partidos:
+        jugadores_por_partido_ids[p.id] = {'A': [], 'B': []}
+        for lado in ('A', 'B'):
+            ids = []
+            try:
+                if helper_torneo:
+                    ids = helper_torneo(p, lado) or []
+                elif helper_generico:
+                    ids = helper_generico(p, lado) or []
+            except TypeError:
+                # Por si algún helper tiene firma distinta
+                ids = []
+            # normalizar y filtrar nulos/ceros
+            ids = [int(x) for x in ids if x]
+            jugadores_por_partido_ids[p.id][lado] = ids
+            all_ids.update(ids)
+
+    # ➕ AÑADIDO: incluir confirmador (resultado definitivo) y proponente (resultado propuesto)
+    for r in res_list:
+        cid = getattr(r, 'confirmado_por_jugador_id', None)
+        if cid:
+            try:
+                all_ids.add(int(cid))
+            except (TypeError, ValueError):
+                pass
+
+    for rp in propuestas.values():
+        pid = getattr(rp, 'propuesto_por_jugador_id', None)
+        if pid:
+            try:
+                all_ids.add(int(pid))
+            except (TypeError, ValueError):
+                pass
+
+    # Mapear id -> Jugador y reemplazar por objetos
+    jug_map = {}
+    if all_ids:
+        from app import Jugador
+        rows = (
+            db.session.query(Jugador)
+            .filter(Jugador.id.in_(list(all_ids)))
+            .all()
+        )
+        jug_map = {j.id: j for j in rows}
+
+    jugadores_por_partido_obj: dict[int, dict[str, list]] = {}
+    for pid, lados in jugadores_por_partido_ids.items():
+        jugadores_por_partido_obj[pid] = {
+            'A': [jug_map.get(jid) for jid in lados.get('A', []) if jug_map.get(jid)],
+            'B': [jug_map.get(jid) for jid in lados.get('B', []) if jug_map.get(jid)],
+        }
+
+    return render_template(
+        'admin_torneos_view.html',
+        t=t,
+        inscripciones=insc,
+        partidos=partidos,
+        resultados=resultados,
+        propuestas=propuestas,
+        jugadores_por_partido=jugadores_por_partido_obj,
+        jugadores_by_id=jug_map,   # << para mostrar nombres de proponente/confirmador
+    )
+
+
+
+
+
+
+
 
 
 @app.route('/admin/torneos/<int:tid>/estado', methods=['POST'])
@@ -7044,6 +7958,8 @@ def torneo_inscribirme(tid):
 @app.route('/admin/torneos/<int:tid>/generar_fixture', methods=['POST'])
 @admin_required
 def admin_torneos_generar_fixture(tid):
+    from sqlalchemy import and_, or_, func
+
     t = get_or_404(Torneo, tid)
 
     EST_INSCRIPCION_CERRADA = globals().get('EST_INSCRIPCION_CERRADA', 'INSCRIPCION_CERRADA')
@@ -7069,14 +7985,125 @@ def admin_torneos_generar_fixture(tid):
 
     try:
         if modo == 'AMERICANO':
-            # ⬇️ FIX: sin 'por_zonas'
-            generar_fixture_americano(
-                t.id,
-                zonas=zonas,
-                ida_y_vuelta=ida_y_vuelta
+            # ===============================
+            # GENERADOR AMERICANO *IDEMPOTENTE*
+            # ===============================
+            # 1) Participantes del torneo (orden estable)
+            participantes = (
+                db.session.query(TorneoParticipante)
+                .filter(TorneoParticipante.torneo_id == tid)
+                .order_by(TorneoParticipante.id.asc())
+                .all()
             )
+            ids = [p.id for p in participantes]
+
+            if not ids:
+                flash('No hay participantes para generar fixture.', 'warning')
+                return back()
+
+            # 2) Método del círculo (round-robin). Manejo BYE si es impar.
+            part_list = ids[:]
+            bye_added = False
+            if len(part_list) % 2 == 1:
+                part_list.append(None)  # BYE
+                bye_added = True
+
+            n = len(part_list)
+            num_rondas_base = n - 1  # N-1
+            rondas = []  # lista de rondas; cada ronda = lista de pares (a,b)
+
+            # Algoritmo estándar: fijás el primero y rotás el resto a la derecha
+            cur = part_list[:]
+            for _r in range(num_rondas_base):
+                pairs = []
+                for i in range(n // 2):
+                    a = cur[i]
+                    b = cur[n - 1 - i]
+                    if a is None or b is None:
+                        # BYE → se salta
+                        continue
+                    pairs.append((a, b))
+                rondas.append(pairs)
+                # rotación: deja fijo cur[0], rota el resto a la derecha
+                cur = [cur[0]] + [cur[-1]] + cur[1:-1]
+
+            # 3) Si ida_y_vuelta: duplicamos rondas invirtiendo local/visitante
+            if ida_y_vuelta:
+                rondas_vuelta = []
+                for pairs in rondas:
+                    vuelta = [(b, a) for (a, b) in pairs]
+                    rondas_vuelta.append(vuelta)
+                rondas = rondas + rondas_vuelta  # primero toda la ida, luego toda la vuelta
+
+            # 4) Idempotencia: solo crear partidos faltantes entre cada par, sin importar el orden A/B
+            #    Si ya existe A-B o B-A, se considera existente.
+            creados = 0
+
+            # Para numerar rondas sin chocar con lo previo, tomamos la ronda máxima actual y sumamos offset.
+            max_ronda_actual = (
+                db.session.query(func.max(TorneoPartido.ronda))
+                .filter(TorneoPartido.torneo_id == tid)
+                .scalar()
+            )
+            offset_ronda = (max_ronda_actual or 0)
+
+            # Contamos cuántos partidos existen ya por par (A,B) sin importar el orden
+            def existe_partido(a, b):
+                return db.session.query(TorneoPartido.id).filter(
+                    TorneoPartido.torneo_id == tid,
+                    or_(
+                        and_(TorneoPartido.participante_a_id == a,
+                             TorneoPartido.participante_b_id == b),
+                        and_(TorneoPartido.participante_a_id == b,
+                             TorneoPartido.participante_b_id == a),
+                    )
+                ).first() is not None
+
+            # Si ida_y_vuelta, permitimos hasta 2 partidos por par (A-B y B-A).
+            def cantidad_existente(a, b):
+                return db.session.query(func.count(TorneoPartido.id)).filter(
+                    TorneoPartido.torneo_id == tid,
+                    or_(
+                        and_(TorneoPartido.participante_a_id == a,
+                             TorneoPartido.participante_b_id == b),
+                        and_(TorneoPartido.participante_a_id == b,
+                             TorneoPartido.participante_b_id == a),
+                    )
+                ).scalar() or 0
+
+            for idx_ronda, pairs in enumerate(rondas, start=1):
+                for idx_orden, (a, b) in enumerate(pairs, start=1):
+                    if ida_y_vuelta:
+                        ya = cantidad_existente(a, b)
+                        # queremos hasta 2 (ida y vuelta). Si hay 0 → creamos, si hay 1 → creamos (el inverso),
+                        # si hay 2 → nada
+                        if ya >= 2:
+                            continue
+                        # decidimos el orden A/B según la ronda que estamos generando (ya viene invertido en la vuelta)
+                        crear_a, crear_b = a, b
+                    else:
+                        # con ida sola, si ya existe (en cualquier orden), no creamos
+                        if existe_partido(a, b):
+                            continue
+                        crear_a, crear_b = a, b
+
+                    db.session.add(TorneoPartido(
+                        torneo_id=tid,
+                        participante_a_id=crear_a,
+                        participante_b_id=crear_b,
+                        ronda=offset_ronda + idx_ronda,
+                        orden=idx_orden,
+                        estado='PENDIENTE'
+                    ))
+                    creados += 1
+
+            db.session.commit()
+
             extra = f" (zonas={zonas}{', ida y vuelta' if ida_y_vuelta else ''})"
-            flash('Fixture AMERICANO generado' + extra + '.', 'ok')
+            msg = f'Fixture AMERICANO generado/actualizado. Partidos nuevos: {creados}.'
+            if bye_added:
+                msg += ' (Se usó BYE por cantidad impar.)'
+            flash(msg + extra, 'ok')
 
             if t.estado != EST_EN_JUEGO:
                 t.estado = EST_EN_JUEGO
@@ -7121,6 +8148,7 @@ def admin_torneos_generar_fixture(tid):
 
 
 
+
 @app.route('/admin/torneos/partidos/<int:pid>/resultado', methods=['POST'])
 @admin_required
 def admin_torneo_partido_resultado(pid):
@@ -7139,6 +8167,155 @@ def admin_torneo_partido_resultado(pid):
     db.session.commit()
     flash('Resultado cargado.', 'ok')
     return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
+# === ADMIN TORNEOS: editar / eliminar resultado de un partido ===
+
+@app.post('/admin/torneos/partidos/<int:pid>/resultado/eliminar')
+@admin_required
+def admin_torneos_partido_resultado_eliminar(pid):
+    """Elimina el resultado definitivo de un partido de torneo revirtiendo ranking y limpia estado/campos."""
+    m = get_or_404(TorneoPartido, pid)
+    try:
+        # Buscar resultado definitivo si existe
+        res = (
+            db.session.query(TorneoPartidoResultado)
+            .filter_by(partido_id=m.id)
+            .one_or_none()
+        )
+
+        # ——— 1) Revertir ranking ANTES de borrar el resultado ———
+        if res:
+            # Determinar ganador_lado ("A"/"B")
+            ganador_lado = getattr(res, "ganador_lado", None)
+
+            if not ganador_lado:
+                # Fallback: inferir por ganador_participante_id del partido
+                try:
+                    if getattr(m, "ganador_participante_id", None):
+                        if m.ganador_participante_id == getattr(m, "participante_a_id", None):
+                            ganador_lado = "A"
+                        elif m.ganador_participante_id == getattr(m, "participante_b_id", None):
+                            ganador_lado = "B"
+                except Exception:
+                    ganador_lado = None
+
+            # Llamar helper espejo si está definido y tenemos ganador_lado
+            try:
+                if ganador_lado and "_revertir_ranking_por_torneo" in globals():
+                    _revertir_ranking_por_torneo(m, ganador_lado, res)
+            except Exception:
+                # No abortar por error de reversión: log y continuar con borrado
+                current_app.logger.exception(
+                    "[admin] Error revirtiendo ranking en eliminar resultado (pid=%s)", pid
+                )
+
+            # ——— 2) Borrar resultado definitivo ———
+            db.session.delete(res)
+
+        # ——— 3) Borrar propuesta (si tu modelo la usa) ———
+        try:
+            from app import TorneoPartidoResultadoPropuesto as TPRP
+        except Exception:
+            TPRP = globals().get('TorneoPartidoResultadoPropuesto', None)
+
+        if TPRP:
+            prp = db.session.query(TPRP).filter_by(partido_id=m.id).one_or_none()
+            if prp:
+                db.session.delete(prp)
+
+        # ——— 4) Limpiar campos del partido ———
+        # Ganador explícito en el partido
+        if hasattr(m, 'ganador_participante_id'):
+            m.ganador_participante_id = None
+
+        # Texto/JSON de sets si existiera
+        if hasattr(m, 'sets_text'):
+            m.sets_text = None
+        if hasattr(m, 'resultado_json'):
+            m.resultado_json = None
+        if hasattr(m, 'resultado_id'):
+            m.resultado_id = None
+
+        # Dejar el estado en 'PENDIENTE' si corresponde
+        if hasattr(m, 'estado'):
+            m.estado = 'PENDIENTE'
+
+        db.session.commit()
+        flash('Resultado eliminado, ranking revertido y partido dejado en PENDIENTE.', 'success')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('[admin] eliminar resultado torneo pid=%s', pid)
+        flash('No se pudo eliminar el resultado (ver logs).', 'error')
+
+    return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
+
+@app.route('/admin/torneos/partidos/<int:pid>/resultado/editar', methods=['POST'])
+@admin_required
+def admin_torneos_partido_resultado_editar(pid):
+    """
+    Edita (o crea) el resultado definitivo de un partido de torneo.
+    Espera en el form:
+      - ganador_participante_id (int)  O bien ganador_lado in ['A','B'] si preferís por lado
+      - sets_text (str, opcional)
+    """
+    m = get_or_404(TorneoPartido, pid)
+
+    # Tomar ganador por participante directamente…
+    ganador_participante_id = request.form.get('ganador_participante_id', type=int)
+    # …o permitir indicar por lado (A/B) y derivar el participante
+    if not ganador_participante_id:
+        lado = (request.form.get('ganador_lado') or '').strip().upper()
+        if lado == 'A':
+            ganador_participante_id = getattr(m, 'participante_a_id', None)
+        elif lado == 'B':
+            ganador_participante_id = getattr(m, 'participante_b_id', None)
+
+    sets_text = (request.form.get('sets_text') or '').strip() or None
+
+    if not ganador_participante_id:
+        flash('Falta indicar ganador.', 'error')
+        return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
+    try:
+        # upsert del resultado definitivo
+        res = db.session.query(TorneoPartidoResultado).filter_by(partido_id=m.id).one_or_none()
+        if not res:
+            res = TorneoPartidoResultado(partido_id=m.id)
+            db.session.add(res)
+
+        res.ganador_participante_id = ganador_participante_id
+        res.sets_text = sets_text
+
+        # reflejar en el partido
+        m.ganador_participante_id = ganador_participante_id
+        if hasattr(m, 'estado'):
+            m.estado = 'JUGADO'
+        if hasattr(m, 'resultado_json') and sets_text is not None:
+            # opcional: si guardás un json de sets, podés serializar desde sets_text
+            # acá simplemente lo limpiamos o dejamos como texto; adaptá si hace falta
+            m.resultado_json = None
+
+        # si había una propuesta, al confirmar resultado definitivo la borramos
+        try:
+            from app import TorneoPartidoResultadoPropuesto as TPRP
+        except Exception:
+            TPRP = globals().get('TorneoPartidoResultadoPropuesto', None)
+        if TPRP:
+            prp = db.session.query(TPRP).filter_by(partido_id=m.id).one_or_none()
+            if prp:
+                db.session.delete(prp)
+
+        db.session.commit()
+        flash('Resultado guardado correctamente.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('[admin] editar resultado torneo pid=%s', pid)
+        flash('No se pudo guardar el resultado (ver logs).', 'error')
+
+    return redirect(url_for('admin_torneos_view', tid=m.torneo_id))
+
 
 
 @app.route('/admin/torneos/<int:tid>/abrir_inscripcion', methods=['POST'])
@@ -7695,85 +8872,76 @@ def torneo_partido_detalle(partido_id: int):
 @app.route('/torneos/partidos/<int:partido_id>/proponer', methods=['GET', 'POST'])
 def torneo_partido_proponer(partido_id: int):
     """Crear/editar la propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
-    # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
-
-    # Usuario actual (requiere login)
     j = get_current_jugador()
     if not j:
         abort(403)
 
-    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
-    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+    # --- Detección robusta de lado ---
+    lado_user = None
+    try:
+        idsA = (_jugadores_del_lado_torneo(p, 'A') or [])
+        idsB = (_jugadores_del_lado_torneo(p, 'B') or [])
+        if j.id in idsA:
+            lado_user = 'A'
+        elif j.id in idsB:
+            lado_user = 'B'
+    except Exception:
+        pass
+    if lado_user is None:
+        try:
+            flags = _lado_flag_dict(p, j.id)  # {'A': bool, 'B': bool}
+            lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+        except Exception:
+            lado_user = None
 
     es_admin = bool(getattr(j, 'is_admin', False))
     es_participante = lado_user in ('A', 'B')
-
-    # Sólo admin o participantes pueden abrir/proponer
     if not (es_admin or es_participante):
         abort(403)
 
-    # Si ya está cerrado, no permitir nuevas propuestas
     if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Leer (si existe) propuesta actual para prellenar el form (SIEMPRE scoping por partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
 
     if request.method == 'GET':
-        # Mostrar form (permite ver/editar la propuesta existente si la hay)
         return render_template('torneo_partido_proponer.html', p=p, lado_user=lado_user, prop=prop)
 
-    # ----------------
-    # POST (submit)
-    # ----------------
+    # ---- POST ----
     ganador_lado = (request.form.get('ganador_lado') or '').strip().upper()
     sets_text = (request.form.get('sets_text') or '').strip() or None
 
-    # Validación del lado ganador y existencia de lados en el partido
     if ganador_lado not in ('A', 'B'):
         flash('Seleccioná el lado ganador (A o B).', 'error')
         return redirect(url_for('torneo_partido_proponer', partido_id=partido_id))
 
-    # (Opcional) Si querés validar que ambos lados tengan jugadores:
-    # _validar_lados_torneo(p)  # si tenés un helper, si no, podés omitir
-
     try:
-        # Crear/editar propuesta SIEMPRE aislado al partido p.id
         if prop is None:
             prop = TorneoPartidoResultadoPropuesto(
                 partido_id=p.id,
                 ganador_lado=ganador_lado,
                 sets_text=sets_text,
                 propuesto_por_jugador_id=j.id,
-                # auto-confirma SOLO el lado del proponente si es participante; admin no-participante no auto-confirma
+                # auto-confirma sólo el lado del proponente si participa
                 confirma_ladoA=True if lado_user == 'A' else None,
                 confirma_ladoB=True if lado_user == 'B' else None,
             )
             db.session.add(prop)
         else:
-            # Editar propuesta existente (manteniendo scoping por partido)
             prop.ganador_lado = ganador_lado
             prop.sets_text = sets_text
             prop.propuesto_por_jugador_id = j.id
-
-            # Si propone un participante, auto-confirma su lado y resetea el contrario a "pendiente" (si no estaba confirmado)
+            # ⚠️ NO tocar el lado rival: evitamos rulo
             if lado_user == 'A':
                 prop.confirma_ladoA = True
-                if prop.confirma_ladoB is not True:
-                    prop.confirma_ladoB = None
             elif lado_user == 'B':
                 prop.confirma_ladoB = True
-                if prop.confirma_ladoA is not True:
-                    prop.confirma_ladoA = None
-            # Si propone un admin que no participa, no se auto-confirma ningún lado
+            # admin no participante: no auto-confirma nada
 
-        # Marcar estado del partido como PROPUESTO (si no está ya cerrado)
         p.estado = 'PROPUESTO'
         db.session.commit()
-
         flash('Resultado propuesto enviado.', 'success')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
@@ -7788,51 +8956,50 @@ def torneo_partido_proponer(partido_id: int):
 @app.route('/torneos/partidos/<int:partido_id>/responder', methods=['GET', 'POST'])
 def torneo_partido_responder(partido_id: int):
     """Responder una propuesta de resultado de UN partido de torneo (aislado por partido_id)."""
-    # Traer partido o 404
     p = get_or_404(TorneoPartido, partido_id)
-
-    # Usuario actual (requiere login)
     j = get_current_jugador()
     if not j:
         abort(403)
 
-    # ¿en qué lado estoy? — contempla A2/B2 usando la tabla LADOS
-    flags = _lado_flag_dict(p, j.id)  # {'A': True/False, 'B': True/False}
-    lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+    # --- Detección robusta de lado ---
+    lado_user = None
+    try:
+        idsA = (_jugadores_del_lado_torneo(p, 'A') or [])
+        idsB = (_jugadores_del_lado_torneo(p, 'B') or [])
+        if j.id in idsA:
+            lado_user = 'A'
+        elif j.id in idsB:
+            lado_user = 'B'
+    except Exception:
+        pass
+    if lado_user is None:
+        try:
+            flags = _lado_flag_dict(p, j.id)
+            lado_user = 'A' if flags.get('A') else ('B' if flags.get('B') else None)
+        except Exception:
+            lado_user = None
 
     es_admin = bool(getattr(j, 'is_admin', False))
     es_participante = lado_user in ('A', 'B')
-
-    # Sólo admin o participantes pueden responder
     if not (es_admin or es_participante):
         abort(403)
 
-    # Si ya está cerrado, no permitir responder
     if (p.estado or '').upper() == 'JUGADO' or getattr(p, 'resultado_def', None):
         flash('El partido ya está cerrado.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-    # Debe existir una propuesta para poder responder (aislada a este partido)
     prop = TorneoPartidoResultadoPropuesto.query.filter_by(partido_id=p.id).one_or_none()
     if not prop:
         flash('No hay propuesta para responder.', 'warning')
         return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
     if request.method == 'GET':
-        # Admin no participante puede elegir lado en el form
-        return render_template(
-            'torneo_partido_responder.html',
-            p=p, prop=prop, lado_user=lado_user, es_admin=es_admin
-        )
+        return render_template('torneo_partido_responder.html', p=p, prop=prop, lado_user=lado_user, es_admin=es_admin)
 
-    # ----------------
-    # POST (submit)
-    # ----------------
+    # ---- POST ----
     accion = (request.form.get('accion') or '').strip().lower()  # 'aceptar' | 'rechazar'
 
-    # Determinar qué lado responde:
-    # - Si el usuario participa, su lado queda fijado.
-    # - Si es admin y no participa, puede elegir 'lado' en el form.
+    # Determinar lado que responde
     working_lado = lado_user
     if working_lado not in ('A', 'B') and es_admin:
         lado_form = (request.form.get('lado') or '').strip().upper()
@@ -7845,40 +9012,37 @@ def torneo_partido_responder(partido_id: int):
 
     try:
         if accion == 'aceptar':
-            # Marcar confirmación del lado que responde
+            # marcar SOLAMENTE mi lado como True
             if working_lado == 'A':
                 prop.confirma_ladoA = True
             else:
                 prop.confirma_ladoB = True
 
-            # Si ambos confirmaron -> cerrar partido
+            # si ambos confirmaron → cerrar
             if prop.confirma_ladoA is True and prop.confirma_ladoB is True:
                 _finalizar_partido(
                     p,
                     prop.ganador_lado,
                     prop.sets_text,
-                    confirmado_por_jugador_id=j.id  # quien ejecutó la confirmación final
+                    confirmado_por_jugador_id=j.id
                 )
-                # Importante: limpiar SOLO la propuesta de ESTE partido
-                db.session.delete(prop)
+                db.session.delete(prop)  # borrar SOLO esta propuesta
                 db.session.commit()
                 flash('Partido cerrado como JUGADO.', 'success')
                 return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
-            # Aún falta la otra confirmación
+            # aún falta el otro lado
             p.estado = 'PROPUESTO'
             db.session.commit()
             flash('Aceptaste la propuesta. Falta confirmación del rival.', 'info')
             return redirect(url_for('torneo_partido_detalle', partido_id=partido_id))
 
         elif accion == 'rechazar':
-            # Marcar rechazo del lado que responde (se mantiene la propuesta para auditoría)
+            # marcar SOLAMENTE mi lado como False (queda en revisión)
             if working_lado == 'A':
                 prop.confirma_ladoA = False
             else:
                 prop.confirma_ladoB = False
-
-            # Queda para revisión manual
             p.estado = 'EN_REVISION'
             db.session.commit()
             flash('Marcaste la propuesta como RECHAZADA. Se pasó a revisión.', 'warning')
@@ -7896,15 +9060,245 @@ def torneo_partido_responder(partido_id: int):
 
 
 
-
 # --- Público: tabla (americano / zonas) ---
-@app.route('/torneos/<int:torneo_id>/tabla', methods=['GET'])
-def torneo_public_tabla(torneo_id: int):
-    t = Torneo.query.get_or_404(torneo_id)
-    if not getattr(t, 'es_publico', False) and not session.get('is_admin'):
-        abort(404)
-    # Más adelante: calcular tabla. Por ahora, placeholder.
-    return render_template('torneo_tabla.html', torneo=t)
+@app.route('/torneos/<int:torneo_id>/tabla')
+def torneo_public_tabla(torneo_id):
+    from sqlalchemy import or_ as sa_or
+
+    t = get_or_404(Torneo, torneo_id)
+
+    # Traer partidos del torneo
+    partidos = (
+        db.session.query(TorneoPartido)
+        .filter(TorneoPartido.torneo_id == t.id)
+        .order_by(
+            TorneoPartido.ronda.asc().nulls_last(),
+            TorneoPartido.orden.asc().nulls_last(),
+            TorneoPartido.id.asc()
+        )
+        .all()
+    )
+
+    # Resultados confirmados (si no existe el modelo, tabla queda en 0)
+    try:
+        res_list = (
+            db.session.query(TorneoPartidoResultado)
+            .join(TorneoPartido, TorneoPartidoResultado.partido_id == TorneoPartido.id)
+            .filter(TorneoPartido.torneo_id == t.id)
+            .all()
+        )
+    except Exception:
+        res_list = []
+    res_map = {r.partido_id: r for r in res_list}
+
+    # Helper para obtener jugadores por lado (A/B)
+    helper_torneo = globals().get('_jugadores_del_lado_torneo')
+
+    # --------- Parser de sets (ej: "6-4 3-6 10-8") ----------
+    def parse_sets(texto):
+        sw = sl = gw = gl = 0
+        if not texto:
+            return sw, sl, gw, gl
+        # tokens por espacio
+        for tok in str(texto).strip().split():
+            if '-' not in tok:
+                continue
+            try:
+                a, b = tok.split('-', 1)
+                ga = int(a); gb = int(b)
+            except Exception:
+                continue
+            # quién ganó el set
+            if ga > gb:
+                sw += 1
+                gw += ga; gl += gb
+            elif gb > ga:
+                sl += 1
+                gw += ga; gl += gb
+                # (el que llama decidirá a qué lado sumar como "won/lost")
+            else:
+                # empates no deberían existir, igual contamos juegos
+                gw += ga; gl += gb
+        return sw, sl, gw, gl
+
+    # --------- Acumuladores por jugador ---------
+    # standings[jid] = dict con métricas
+    standings = {}
+    def ensure(jid):
+        if jid not in standings:
+            standings[jid] = dict(
+                PJ=0, G=0, P=0,
+                SW=0, SL=0, SD=0,   # Sets Won/Lost/Diff
+                GW=0, GL=0, GD=0,   # Games Won/Lost/Diff
+                PTS=0
+            )
+
+    # Reglas de puntaje (fallback: 2 por victoria, 0 por derrota)
+    # Si querés customizar, podés guardar en t.reglas_json = {"pts_victoria":3,"pts_derrota":0}
+    pts_v = 2
+    pts_d = 0
+    try:
+        import json
+        if t.reglas_json:
+            rj = json.loads(t.reglas_json) if isinstance(t.reglas_json, str) else (t.reglas_json or {})
+            pts_v = int(rj.get('pts_victoria', pts_v))
+            pts_d = int(rj.get('pts_derrota', pts_d))
+    except Exception:
+        pass
+
+    # Pre-cargar jugadores usados para nombres
+    all_ids = set()
+
+    # Recorremos partidos con resultado
+    for p in partidos:
+        r = res_map.get(p.id)
+        if not r:
+            continue
+
+        # Jugadores por LADO usando helper fuerte de torneo
+        a_ids = []
+        b_ids = []
+        try:
+            if helper_torneo:
+                a_ids = [int(x) for x in (helper_torneo(p, 'A') or []) if x]
+                b_ids = [int(x) for x in (helper_torneo(p, 'B') or []) if x]
+        except TypeError:
+            a_ids = []
+            b_ids = []
+
+        # Si no hay info de lados, saltamos (no podemos adjudicar victorias)
+        if not a_ids and not b_ids:
+            continue
+
+        all_ids.update(a_ids); all_ids.update(b_ids)
+
+        # Determinar ganador por lado
+        ganador_lado = getattr(r, 'ganador_lado', None)
+        ganador_pid = getattr(r, 'ganador_participante_id', None)
+        # Si no viene lado pero sí el participante_id, traducimos
+        if not ganador_lado and ganador_pid:
+            if getattr(p, 'participante_a_id', None) == ganador_pid:
+                ganador_lado = 'A'
+            elif getattr(p, 'participante_b_id', None) == ganador_pid:
+                ganador_lado = 'B'
+
+        # Parseo de sets para ambos lados
+        SW_A = SL_A = GW_A = GL_A = 0
+        SW_B = SL_B = GW_B = GL_B = 0
+
+        if r and r.sets_text:
+            # parse genérico desde perspectiva "texto", luego asignamos
+            # Nota: parse_sets suma SW cuando el lado "texto" gana el set y SL cuando lo pierde.
+            # Para que ambos lados queden consistentes, interpretamos sets desde A vs B:
+            # p.ej "6-4" => A ganó 1 set y B perdió 1; A ganó 6 juegos, B 4.
+            for tok in str(r.sets_text).strip().split():
+                if '-' not in tok:
+                    continue
+                try:
+                    a, b = tok.split('-', 1)
+                    ga = int(a); gb = int(b)
+                except Exception:
+                    continue
+                GW_A += ga; GL_A += gb
+                GW_B += gb; GL_B += ga
+                if ga > gb:
+                    SW_A += 1; SL_B += 1
+                elif gb > ga:
+                    SW_B += 1; SL_A += 1
+                # empates no cuentan sets (evitamos)
+
+        # Sin sets_text: igual computamos PJ + G/P
+        # Aseguramos existir en standings
+        for jid in a_ids + b_ids:
+            ensure(jid)
+
+        # Sumar PJ
+        for jid in a_ids:
+            standings[jid]['PJ'] += 1
+        for jid in b_ids:
+            standings[jid]['PJ'] += 1
+
+        # Sumar sets/juegos
+        for jid in a_ids:
+            standings[jid]['SW'] += SW_A
+            standings[jid]['SL'] += SL_A
+            standings[jid]['GW'] += GW_A
+            standings[jid]['GL'] += GL_A
+        for jid in b_ids:
+            standings[jid]['SW'] += SW_B
+            standings[jid]['SL'] += SL_B
+            standings[jid]['GW'] += GW_B
+            standings[jid]['GL'] += GL_B
+
+        # Ganador / Perdedor + puntos
+        if ganador_lado == 'A':
+            for jid in a_ids:
+                standings[jid]['G']  += 1
+                standings[jid]['PTS'] += pts_v
+            for jid in b_ids:
+                standings[jid]['P']  += 1
+                standings[jid]['PTS'] += pts_d
+        elif ganador_lado == 'B':
+            for jid in b_ids:
+                standings[jid]['G']  += 1
+                standings[jid]['PTS'] += pts_v
+            for jid in a_ids:
+                standings[jid]['P']  += 1
+                standings[jid]['PTS'] += pts_d
+        else:
+            # sin ganador claro: no sumamos G/P ni puntos
+            pass
+
+    # Armar difs y mapa de jugadores
+    jug_map = {}
+    if all_ids:
+        rows = (
+            db.session.query(Jugador)
+            .filter(Jugador.id.in_(list(all_ids)))
+            .all()
+        )
+        jug_map = {j.id: j for j in rows}
+
+    for jid, s in standings.items():
+        s['SD'] = s['SW'] - s['SL']
+        s['GD'] = s['GW'] - s['GL']
+
+    # Ordenar: PTS desc, SD desc, GD desc, G desc, PJ asc, nombre
+    def _name(j):
+        if not j:
+            return ''
+        return (j.nombre_completo or j.display_name or j.nombre or f'Jugador #{j.id}').upper()
+
+    sorted_rows = sorted(
+        standings.items(),
+        key=lambda kv: (
+            -kv[1]['PTS'],
+            -kv[1]['SD'],
+            -kv[1]['GD'],
+            -kv[1]['G'],
+            kv[1]['PJ'],
+            _name(jug_map.get(kv[0]))
+        )
+    )
+
+    # Preparar filas para template
+    tabla = []
+    pos = 1
+    for jid, s in sorted_rows:
+        jrow = jug_map.get(jid)
+        tabla.append(dict(
+            pos=pos,
+            jugador=jrow,
+            **s
+        ))
+        pos += 1
+
+    return render_template(
+        'torneo_tabla.html',
+        t=t,
+        tabla=tabla
+    )
+
 
 def calcular_tabla_americano(torneo_id: int):
     """
@@ -8299,6 +9693,30 @@ def _kwargs_ronda_o_jornada(model, valor):
 # ========= GENERADOR PLAYOFF (ELIMINACIÓN DIRECTA) =========
 
 from math import log2, ceil
+
+
+def _safe_upper(s):
+    if not s: return None
+    return s.strip().upper()
+
+def _safe_title(s):
+    if not s: return None
+    return " ".join(w.capitalize() for w in s.strip().split())
+
+def _parse_date_yyyy_mm_dd(s):
+    if not s: return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def _merge_phone(cc, local):
+    cc = "".join([c for c in (cc or "") if c.isdigit()])
+    local = "".join([c for c in (local or "") if c.isdigit()])
+    if not cc and not local:
+        return None
+    return f"+{cc}{local}"
+
 
 
 def _get_or_create_grupo_llaves(torneo: 'Torneo', fase: 'TorneoFase') -> 'TorneoGrupo':
@@ -8866,6 +10284,117 @@ def _aplicar_ranking_por_torneo(p: 'TorneoPartido', ganador_lado: str):
         # Si algo falla en el bonus, no frenamos el flujo principal
         pass
 
+# ——— util: lado opuesto ———
+def _lado_opuesto(lado):
+    return "B" if str(lado).upper() == "A" else "A"
+
+# ——— util: lista de jugadores por lado de un partido ———
+def _jugadores_del_lado(p, lado):
+    # Adaptarse a tu modelo: TorneoParticipante puede ser single o pareja.
+    # Intentamos cubrir ambos casos de forma defensiva.
+    participante = p.participante_a if str(lado).upper() == "A" else p.participante_b
+    js = []
+    if not participante:
+        return js
+    # Casos frecuentes de modelos:
+    for attr in ("jugador1", "jugador2", "jugador"):  # soporta single o pareja
+        j = getattr(participante, attr, None)
+        if j:
+            js.append(j)
+    # Si tu modelo expone un iterable:
+    if hasattr(participante, "jugadores") and callable(getattr(participante, "jugadores")):
+        try:
+            for j in participante.jugadores():
+                if j and j not in js:
+                    js.append(j)
+        except Exception:
+            pass
+    return [j for j in js if j is not None]
+
+# ——— util: ¿hubo bono en ESTE partido? (según victorias previas del lado ganador) ———
+def _bonus_aplicado_en_partido(p, ganador_lado, resultado):
+    """
+    Recalcula si este partido gatilló bono, computando las VICTORIAS PREVIAS
+    del mismo PARTICIPANTE ganador dentro del mismo torneo, ANTES de este resultado.
+    Asume la misma regla que usás al aplicar:
+      bono si (victorias_previas + 1) >= BONUS_APLICA_DESDE
+    """
+    from sqlalchemy import and_, or_
+    # Identificar participante ganador (A o B) en este partido
+    if str(ganador_lado).upper() == "A":
+        ganador_part_id = p.participante_a_id
+        filtro_lado = (TorneoPartidoResultado.ganador_lado == "A",
+                       TorneoPartido.participante_a_id == ganador_part_id)
+    else:
+        ganador_part_id = p.participante_b_id
+        filtro_lado = (TorneoPartidoResultado.ganador_lado == "B",
+                       TorneoPartido.participante_b_id == ganador_part_id)
+
+    # Contar victorias previas de este participante en el torneo, antes de este "resultado"
+    # Usamos el id del resultado como proxy temporal (asumiendo autoincremental).
+    vict_previas = (
+        db.session.query(TorneoPartidoResultado)
+        .join(TorneoPartido, TorneoPartidoResultado.partido_id == TorneoPartido.id)
+        .filter(
+            TorneoPartido.torneo_id == p.torneo_id,
+            filtro_lado[0],  # ganador_lado coincide
+            filtro_lado[1],  # es el mismo participante en ese lado
+            TorneoPartidoResultado.id < resultado.id
+        )
+        .count()
+    )
+
+    try:
+        aplica = (vict_previas + 1) >= BONUS_APLICA_DESDE
+    except NameError:
+        # Si no está importada la constante acá, traela de donde la definas
+        from app import BONUS_APLICA_DESDE  # o el módulo correcto
+        aplica = (vict_previas + 1) >= BONUS_APLICA_DESDE
+
+    return aplica
+
+def _revertir_ranking_por_torneo(p, ganador_lado, resultado):
+    """
+    Revierte EXACTAMENTE los deltas aplicados cuando se cerró este partido:
+      - ganadores: -(DELTA_WIN) y, si correspondió, -(DELTA_WIN_BONUS)
+      - perdedores: -(DELTA_LOSS)
+    Debe llamarse ANTES de borrar el TorneoPartidoResultado.
+    """
+    # Traer constantes (si no están en este scope)
+    try:
+        _ = DELTA_WIN
+    except NameError:
+        from app import DELTA_WIN, DELTA_LOSS, DELTA_WIN_BONUS
+
+    # Determinar ganadores y perdedores
+    lado_gan = str(ganador_lado).upper()
+    lado_perd = _lado_opuesto(lado_gan)
+    ganadores  = _jugadores_del_lado(p, lado_gan)
+    perdedores = _jugadores_del_lado(p, lado_perd)
+
+    # ¿Este partido gatilló bono?
+    hubo_bono = _bonus_aplicado_en_partido(p, lado_gan, resultado)
+
+    # Motivos y metadatos (para auditoría/bitácora)
+    motivo_base = f"Reversión resultado torneo (Partido #{p.id})"
+    meta = {
+        "torneo_id": p.torneo_id,
+        "partido_id": p.id,
+        "accion": "revertir",
+        "resultado_id": resultado.id if resultado else None,
+    }
+
+    # Revertir ganadores
+    for j in ganadores:
+        aplicar_delta_rankeable(j, -DELTA_WIN, f"{motivo_base}: ganadores (-WIN)", meta)
+        if hubo_bono:
+            aplicar_delta_rankeable(j, -DELTA_WIN_BONUS, f"{motivo_base}: bono (-WIN_BONUS)", meta)
+
+    # Revertir perdedores
+    for j in perdedores:
+        aplicar_delta_rankeable(j, -DELTA_LOSS, f"{motivo_base}: perdedores (-LOSS)", meta)
+
+
 
 
 @app.errorhandler(CSRFError)
@@ -8879,6 +10408,11 @@ def handle_csrf_error(e):
 def inject_csrf_token():
     # csrf_token() usable en cualquier template
     return dict(csrf_token=lambda: generate_csrf())
+
+
+@app.route('/healthz')
+def healthz():
+    return "ok", 200
 
 
 

@@ -214,16 +214,6 @@
 
   <!-- Lateral: mensajes + inscripción -->
   <div class="col-lg-4">
-    {% with msgs = get_flashed_messages(with_categories=true) %}
-      {% if msgs %}
-        {% for cat, msg in msgs %}
-          <div class="alert alert-{{ 'danger' if cat in ['error','danger'] else ('success' if cat in ['ok','success'] else 'info') }} mb-3">
-            {{ msg }}
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
     <section id="inscripcion" class="card">
       <div class="card-header" style="background:#111315; color:#fff;">
         <strong>Inscribirme</strong>

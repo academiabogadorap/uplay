@@ -141,11 +141,7 @@
       </div>
     </form>
   {% else %}
-    <div class="flash-error" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-      Iniciá sesión para crear un partido abierto en tu categoría.
-      <a href="{{ url_for('login') }}" class="btn btn-ghost btn-slim">Iniciar sesión</a>
-    </div>
-  {% endif %}
+    {% endif %}
 </div>
 
 <!-- ===== Listado ===== -->

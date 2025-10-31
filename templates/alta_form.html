@@ -91,7 +91,7 @@
       <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Volver a Iniciar sesión</a>
     </div>
   </div>
-  <p class="muted" style="margin:10px 0 0;">Completá tus datos y un administrador aprobará tu acceso.</p>
+  <p class="muted" style="margin:10px 0 0;">Completá tus datos y un administrador aprobará tu acceso. Al aprobar, te enviamos un <strong>PIN de 6 dígitos</strong> por email.</p>
 </div>
 
 <!-- ===== CONTENIDO ===== -->
@@ -99,7 +99,8 @@
 
   <div class="card card-form">
     <!-- Hacemos explícito el action hacia la ruta correcta -->
-    <form method="post" action="{{ url_for('alta_publica') }}" style="display:grid; gap:10px;">
+    <form method="post" action="{{ url_for('alta_publica') }}" style="display:grid; gap:10px;" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-row">
         <label for="nombre_completo" class="form-label">Nombre completo</label>
         <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" class="form-input" autocomplete="name" autofocus>
@@ -109,6 +110,7 @@
       <div class="form-row">
         <label for="email" class="form-label">Email</label>
         <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email" inputmode="email">
+        <small class="help-note">Asegurate de escribirlo bien: ahí te llegará el <strong>PIN</strong> cuando te aprueben.</small>
       </div>
 
       <!-- Teléfono dividido: código de país + número local -->
@@ -198,6 +200,12 @@
         <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." class="form-input" autocomplete="off">
       </div>
 
+      <!-- Preferencia para recibir PIN por email al aprobar -->
+      <div class="form-row" style="display:flex; align-items:center; gap:8px; margin-top:2px;">
+        <input id="prefiere_pin_email" name="prefiere_pin_email" type="checkbox" checked>
+        <label for="prefiere_pin_email" class="form-label" style="margin:0;">Quiero recibir mi <strong>PIN por email</strong> cuando aprueben mi alta.</label>
+      </div>
+
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
         <button id="btn-submit" type="submit" class="btn">Enviar solicitud</button>
         <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Cancelar</a>
@@ -214,14 +222,14 @@
     <h3 style="margin:0 0 6px;">¿Cómo sigue?</h3>
     <ol style="margin:0; padding-left:18px;">
       <li>Un admin revisa tu solicitud.</li>
-      <li>Si todo está OK, te asignan un <strong>PIN</strong>.</li>
-      <li>Entrás por <em>Iniciar sesión</em> (nombre + PIN) y vas a <strong>Mi panel</strong>.</li>
+      <li>Si todo está OK, se aprueba y te asignamos un <strong>PIN de 6 dígitos</strong>.</li>
+      <li>Te llega el PIN por email y ya podés <em>Iniciar sesión</em>.</li>
     </ol>
   </div>
 
 </div>
 
-<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha + evitar doble submit -->
+<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha + evitar doble submit + email en minúsculas -->
 <script>
   // Nombre en MAYÚSCULAS (mantiene acentos)
   const $nombre = document.getElementById('nombre_completo');
@@ -230,6 +238,16 @@
       const pos = $nombre.selectionStart;
       $nombre.value = ($nombre.value || '').toUpperCase();
       try { $nombre.setSelectionRange(pos, pos); } catch(_){}
+    }, { passive: true });
+  }
+
+  // Email en minúsculas
+  const $email = document.getElementById('email');
+  if ($email){
+    $email.addEventListener('input', () => {
+      const pos = $email.selectionStart;
+      $email.value = ($email.value || '').toLowerCase().trim();
+      try { $email.setSelectionRange(pos, pos); } catch(_){}
     }, { passive: true });
   }
 
@@ -357,7 +375,7 @@
           </svg>
           ¿Qué es esta solicitud?
         </h4>
-        <p>Pedís acceso a UPLAY. Un admin revisará tus datos y te dará ingreso con un <strong>PIN</strong>.</p>
+        <p>Pedís acceso a UPLAY. Un admin revisará tus datos y, si aprueba, te enviará un <strong>PIN de 6 dígitos</strong> por email.</p>
         <div>
           <span class="chip info">Datos personales</span>
           <span class="chip ok">Validación</span>
@@ -390,8 +408,8 @@
         </h4>
         <ol class="help-ol">
           <li>Un admin revisa tu solicitud.</li>
-          <li>Si todo está OK, te asignan un <strong>PIN</strong>.</li>
-          <li>Entrás por <em>Iniciar sesión</em> (nombre + PIN) y vas a <strong>Mi panel</strong>.</li>
+          <li>Si todo está OK, se aprueba y te asignamos un <strong>PIN</strong>.</li>
+          <li>Te llega el PIN por email y ya podés <em>Iniciar sesión</em>.</li>
         </ol>
       </section>
 

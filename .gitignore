@@ -8,3 +8,19 @@ instance/
 *.db
 ar parámetro 'to' en send_mail (reemplaza to_addrs)*
 templates/jugadores_list.html.bak
+# Auditorías y artefactos locales
+*.bak
+*.bak_*
+*.txt
+*.csv
+*.env
+.SID_*
+.cookies_*
+.cookies*.txt
+csrf_*.txt
+routes*.txt
+audit_*
+.olvido_*.html
+.login_*.html
+.aprobar_*.html
+.alta_*.html
