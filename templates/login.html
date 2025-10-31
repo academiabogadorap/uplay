@@ -70,6 +70,7 @@
 <!-- ===== FORMULARIO ===== -->
 <div class="card" style="max-width:560px;">
   <form method="post" style="display:grid; gap:10px;" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <!-- Buscador rápido de jugador -->
     <div>
       <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>

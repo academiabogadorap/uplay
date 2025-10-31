@@ -150,10 +150,13 @@
 
 <!-- ===== Filtros ===== -->
 <form method="get" class="card filters" role="search" aria-label="Filtros de jugadores">
-  <label class="inline" title="Incluir jugadores dados de baja temporal">
-    <input type="checkbox" name="inactivos" value="1" {% if mostrar_inactivos == 1 %}checked{% endif %}>
-    Mostrar inactivos
-  </label>
+  {# Mostrar checkbox de inactivos SOLO a admins #}
+  {% if current_jugador and current_jugador.is_admin %}
+    <label class="inline" title="Incluir jugadores dados de baja temporal">
+      <input type="checkbox" name="inactivos" value="1" {% if mostrar_inactivos == 1 %}checked{% endif %}>
+      Mostrar inactivos
+    </label>
+  {% endif %}
 
   {% if current_jugador and current_jugador.categoria_id %}
   <label class="inline" title="Ignora el selector de categoría">

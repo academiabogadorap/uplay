@@ -82,7 +82,11 @@
       </div>
       <div>
         <div class="label">Email</div>
-        <div class="val">{{ sol.email or '-' }}</div>
+        <div class="val">
+          {% if sol.email %}
+            <a href="mailto:{{ sol.email }}" style="text-decoration:underline">{{ sol.email }}</a>
+          {% else %}-{% endif %}
+        </div>
       </div>
       <div>
         <div class="label">Teléfono</div>
@@ -128,7 +132,8 @@
     <h3 style="margin:0 0 8px;">Aprobación</h3>
 
     <!-- Form principal: aprobar y enviar código -->
-    <form method="post" style="display:grid; gap:10px;">
+    <form id="form-aprobar" method="post" style="display:grid; gap:10px;">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
       <div>
         <label for="puntos" class="form-label">Puntos iniciales</label>
         <input id="puntos"
@@ -138,6 +143,7 @@
                value="{{ puntos_sugeridos }}"
                min="{{ sol.categoria.puntos_min if sol.categoria else 0 }}"
                max="{{ sol.categoria.puntos_max if sol.categoria else 9999 }}"
+               inputmode="numeric" step="1" autocomplete="off"
                required>
         {% if sol.categoria %}
           <div class="muted" style="margin-top:4px;">
@@ -158,14 +164,18 @@
       <input name="pin" type="hidden" value="">
 
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button type="submit" class="btn">Aprobar y enviar código</button>
+        <button id="btn-aprobar" type="submit" class="btn"
+                {% if not sol.categoria %} disabled title="La solicitud no tiene categoría válida" {% endif %}>
+          Aprobar y enviar código
+        </button>
         <a href="{{ url_for('admin_solicitudes_list') }}" class="btn-ghost">Cancelar</a>
       </div>
     </form>
 
     <!-- Rechazar: form independiente (no anidar forms) -->
-    <form method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=sol.id) }}" style="margin-top:8px;">
-      <button type="submit" class="btn-ghost danger">Rechazar solicitud</button>
+    <form id="form-rechazar" method="post" action="{{ url_for('admin_solicitudes_rechazar', sid=sol.id) }}" style="margin-top:8px;">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <button id="btn-rechazar" type="submit" class="btn-ghost danger">Rechazar solicitud</button>
     </form>
   </div>
 
@@ -186,6 +196,30 @@
     }
     inp.addEventListener('change', clamp, { passive:true });
     inp.addEventListener('blur', clamp, { passive:true });
+  })();
+
+  // Evitar doble envío en "Aprobar y enviar código"
+  (function(){
+    const form = document.getElementById('form-aprobar');
+    const btn  = document.getElementById('btn-aprobar');
+    if(!form || !btn) return;
+    form.addEventListener('submit', function(e){
+      if (btn.disabled) { e.preventDefault(); return; }
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Enviando…';
+    }, { passive:false });
+  })();
+
+  // Confirmar rechazo
+  (function(){
+    const form = document.getElementById('form-rechazar');
+    const btn  = document.getElementById('btn-rechazar');
+    if(!form || !btn) return;
+    form.addEventListener('submit', function(e){
+      const ok = confirm('¿Seguro que querés rechazar esta solicitud?');
+      if (!ok) e.preventDefault();
+    });
   })();
 </script>
 {% endblock %}
