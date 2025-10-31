@@ -6049,7 +6049,7 @@ def olvide_pin():
             list(request.form.keys()), list(request.args.keys()), request.is_json
         )
 
-        # Usa TU helper existente
+        # Usa tu helper existente
         email = (_extraer_email_desde_request(request) or "").lower()
 
         # Mensaje genérico (no revelar existencia)
@@ -6085,12 +6085,19 @@ def olvide_pin():
             flash(generic_msg, 'ok')
             return redirect(url_for('olvide_pin'))
 
-        # === Email (sin flujo de confirmación, ya no hay códigos temporales) ===
+        # === URL de inicio de sesión (botón del correo) ===
+        try:
+            login_url = url_for('login', _external=True)
+        except Exception:
+            login_url = request.url_root.rstrip('/') + '/login'
+
+        # === Email (sin códigos temporales) ===
         subject = "UPLAY · Tu PIN de acceso"
         body = (
             f"Hola {j.nombre_completo},\n\n"
-            f"Este es tu PIN de acceso a UPLAY (es permanente):\n\n"
+            f"Este es tu PIN permanente de acceso a UPLAY:\n\n"
             f"{perma_pin}\n\n"
+            f"Iniciar sesión:\n{login_url}\n\n"
             "Ingresá a la app, seleccioná tu nombre e introducí este PIN.\n"
             "Si no solicitaste este correo, podés ignorarlo.\n"
         )
@@ -6103,10 +6110,11 @@ def olvide_pin():
   body {{ background:#111; color:#ECECEC; }}
   .card {{ background:#1B1B1B; color:#ECECEC; }}
   .muted {{ color:#B5B9C0; }}
+  .btn {{ background:#2563EB; color:#fff; }}
 }}
 </style></head>
 <body style="margin:0;padding:0;background:#F3F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Tu PIN de acceso a UPLAY es {perma_pin}.</div>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Tu PIN de acceso a UPLAY es {perma_pin}. Iniciá sesión en {login_url}.</div>
 <table role="presentation" width="100%" style="width:100%;background:#F3F5F7;padding:24px 12px;"><tr><td align="center">
   <table role="presentation" width="100%" style="max-width:560px;">
     <tr><td align="center" style="padding:8px 0 16px;">
@@ -6120,7 +6128,17 @@ def olvide_pin():
       <div role="text" aria-label="PIN" style="margin:12px 0 18px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
         {perma_pin}
       </div>
-      <p class="muted" style="margin:0;font-size:12px;line-height:1.6;color:#64748B;">Entrá a la app, elegí tu nombre e ingresá este PIN.</p>
+      <table role="presentation" align="center" style="margin:0 auto 16px;">
+        <tr><td>
+          <a class="btn" href="{login_url}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
+             Iniciar sesión
+          </a>
+        </td></tr>
+      </table>
+      <p class="muted" style="margin:0;font-size:12px;line-height:1.6;color:#64748B;">
+        Si el botón no funciona, copiá y pegá este enlace:<br>{login_url}
+      </p>
     </td></tr>
     <tr><td align="center" style="padding:16px 6px;">
       <p class="muted" style="margin:0;font-size:12px;color:#94A3B8;">© {datetime.utcnow().year} UPLAY · Email generado automáticamente.</p>
@@ -6133,7 +6151,7 @@ def olvide_pin():
             ok = send_mail(
                 subject=subject,
                 body=body,                 # texto plano
-                html_body=html_body,       # HTML con el PIN
+                html_body=html_body,       # HTML con el PIN + botón a /login
                 to=[email],
                 inline_images={"uplaylogo": "static/logo/uplay.png"}  # CID del logo
             )
@@ -6151,63 +6169,13 @@ def olvide_pin():
 
     # GET
     return render_template('olvide_pin_request.html')
+
     
 
-@app.route('/olvide-pin/confirmar', methods=['GET', 'POST'])
+@app.route('/olvide-pin-confirmar', methods=['GET','POST'])
 def olvide_pin_confirmar():
-    # GET: mostrar form limpio (sin flashes) y permitir prefill por querystring
-    if request.method == 'GET':
-        email = (request.args.get('email') or '').strip().lower()
-        code  = (request.args.get('code')  or '').strip()
-        return render_template('olvide_pin_confirm.html', email=email, code=code)
-
-    # POST: validar y actualizar PIN
-    email = (request.form.get('email') or '').strip().lower()
-    code  = (request.form.get('code')  or '').strip()
-    pin1  = (request.form.get('pin1')  or '').strip()
-    pin2  = (request.form.get('pin2')  or '').strip()
-
-    if not email or not code or not pin1 or not pin2:
-        flash('Completá email, código y el nuevo PIN (dos veces).', 'error')
-        return redirect(url_for('olvide_pin_confirmar'))
-
-    if pin1 != pin2:
-        flash('Los PIN no coinciden.', 'error')
-        return redirect(url_for('olvide_pin_confirmar'))
-
-    if not (pin1.isdigit() and 4 <= len(pin1) <= 6):
-        flash('El PIN debe tener 4–6 dígitos.', 'error')
-        return redirect(url_for('olvide_pin_confirmar'))
-
-    j = db.session.query(Jugador).filter(Jugador.email == email).first()
-    if not j:
-        # Mensaje genérico para no revelar información
-        flash('Código inválido o expirado.', 'error')
-        return redirect(url_for('olvide_pin_confirmar'))
-
-    # Buscar un reset válido (no usado, no vencido) con ese code
-    pr = (db.session.query(PinReset)
-          .filter(
-              PinReset.jugador_id == j.id,
-              PinReset.code == code,
-              PinReset.used.is_(False),
-              PinReset.expires_en >= datetime.utcnow()
-          )
-          .order_by(PinReset.created_en.desc())
-          .first())
-
-    if not pr:
-        flash('Código inválido o expirado.', 'error')
-        return redirect(url_for('olvide_pin_confirmar'))
-
-    # Ok, actualizar PIN y marcar como usado
-    j.pin = pin1
-    pr.used = True
-    db.session.commit()
-
-    flash('Tu PIN fue actualizado. Ya podés iniciar sesión.', 'ok')
+    flash('El flujo cambió: revisá tu email con tu PIN permanente e iniciá sesión.', 'ok')
     return redirect(url_for('login'))
-
 
 @app.route('/logout', methods=['POST'])
 def logout():

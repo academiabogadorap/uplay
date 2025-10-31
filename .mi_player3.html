@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mi panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="ImQwMmQ1OThiMDJjMmY5OGIxYTZmM2EyMjBmODNkMTE5ZDJmOWYwNWIi.aQTd5g.g6DULs-CPZibO1coPcnTrRayDyY" />
+
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===== Paleta Academia ===== */
+    :root{
+      --blue-900:#004B8D;      /* azul institucional */
+      --blue-800:#0a4a82;
+      --blue-700:#0d5fa1;
+      --blue-600:#0f6fb7;
+      --panel:#0e3f6e;         /* panel/carta */
+      --panel-2:#0b355d;       /* panel alterno */
+      --text:#ffffff;          /* texto principal */
+      --muted:#cfe3f7;         /* texto secundario */
+      --neon:#8AE80C;          /* verde neón */
+      --yellow:#F6C90E;        /* amarillo tenis */
+      --danger:#ff5252;
+      --warn:#ffd166;
+      --ok:#00c853;
+      --radius:14px;
+      --shadow:0 14px 40px rgba(0,0,0,.28);
+    }
+
+    /* ===== Reset & base ===== */
+    html,body{margin:0; padding:0; height:100%;}
+    body{
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+      /* fondo texturizado suave con la gama del afiche */
+      background:
+        radial-gradient(1400px 800px at -10% -20%, rgba(255,255,255,.06), transparent 60%),
+        radial-gradient(1200px 700px at 110% 120%, rgba(255,255,255,.05), transparent 60%),
+        linear-gradient(180deg, var(--blue-900), #053966 55%, #042c4f);
+      min-height:100%;
+      line-height:1.5;
+    }
+    .container{max-width:1120px; margin:18px auto; padding:0 14px;}
+
+    /* ===== Nav ===== */
+    nav{
+      position:sticky; top:0; z-index:50;
+      backdrop-filter:saturate(1.4) blur(6px);
+      background:linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.05));
+      border-bottom:1px solid rgba(255,255,255,.12);
+    }
+    .nav-inner{
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:10px 14px;
+      max-width:1120px; margin:0 auto;
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px; text-decoration:none;
+      padding:4px 6px; border-radius:12px;
+    }
+    .brand:hover{background:rgba(255,255,255,.07);}
+    .brand img{height:38px; display:block;}
+    .brand-text{display:flex; flex-direction:column; line-height:1.05;}
+    .brand-text strong{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:1.08rem; letter-spacing:.02em;
+    }
+    .brand-text small{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--neon);
+    }
+
+    nav a{color:var(--text); text-decoration:none; opacity:.92;}
+    nav a:hover{opacity:1; color:var(--neon);}
+    .spacer{flex:1;}
+
+    /* ===== Cards ===== */
+    .card{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:var(--radius);
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+    .card + .card{margin-top:12px;}
+    .card h3{margin:0 0 8px; font-size:1.12rem;}
+
+    /* ===== Botones ===== */
+    .btn, button{
+      appearance:none; border:0; cursor:pointer;
+      padding:10px 14px; border-radius:12px; font-weight:700;
+      color:#001a2e;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      transition:transform .12s ease, filter .12s ease;
+      text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn:hover, button:hover{transform:translateY(-1px); filter:brightness(1.05);}
+    .btn:active, button:active{transform:translateY(0);}
+    .btn-ghost{
+      color:var(--text);
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.18);
+    }
+    .btn-ok{background:linear-gradient(180deg, #20e27a, #0cc567); color:#002a1c;}
+    .btn-danger{background:linear-gradient(180deg, #ff6b6b, #ff5252); color:#2a0000;}
+    .btn-warning{background:linear-gradient(180deg, var(--yellow), #e4b800); color:#2a1f00;}
+    .btn-slim{padding:7px 10px; border-radius:10px; font-weight:600;}
+
+    /* ===== Inputs ===== */
+    label{display:block; font-size:.92rem; color:var(--muted); margin:6px 0 4px;}
+    input, select, textarea{
+      width:100%; max-width:460px; outline:none;
+      background:#072e55; color:var(--text);
+      border:1px solid rgba(255,255,255,.18);
+      padding:9px 11px; border-radius:12px;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color:var(--neon); box-shadow:0 0 0 3px rgba(138,232,12,.15);
+    }
+
+    /* ===== Tablas ===== */
+    table{
+      width:100%; border-collapse:separate; border-spacing:0;
+      border-radius:16px; overflow:hidden; background:rgba(255,255,255,.03);
+      box-shadow:var(--shadow);
+    }
+    thead th{
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.15));
+      color:var(--muted); font-size:.82rem; letter-spacing:.06em; text-transform:uppercase;
+    }
+    th, td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.10); text-align:left;}
+    tbody tr:hover{background:rgba(138,232,12,.08);}
+    tbody tr:last-child td{border-bottom:0;}
+
+    /* ===== Badges ===== */
+    .badge{
+      display:inline-block; font-size:.78rem; padding:3px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.10); color:#fff;
+    }
+    .badge-ok{background:linear-gradient(180deg, rgba(32,226,122,.25), rgba(12,197,103,.20)); border-color:rgba(32,226,122,.55);}
+    .badge-warn{background:linear-gradient(180deg, rgba(246,201,14,.28), rgba(246,201,14,.16)); border-color:rgba(246,201,14,.6);}
+    .badge-danger{background:linear-gradient(180deg, rgba(255,82,82,.25), rgba(255,82,82,.16)); border-color:rgba(255,82,82,.6);}
+
+    /* ===== Flash ===== */
+    .flash-ok{background:rgba(0,200,83,.18); border:1px solid rgba(0,200,83,.55); color:#e8fff1; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-error{background:rgba(255,82,82,.18); border:1px solid rgba(255,82,82,.55); color:#ffe8e8; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-warning{background:rgba(246,201,14,.18); border:1px solid rgba(246,201,14,.55); color:#fff8dc; padding:10px; border-radius:12px; margin:8px 0;}
+
+    /* ===== Helpers ===== */
+    .muted{color:var(--muted);}
+
+    /* ===== FAB de Ayuda ===== */
+    .help-fab{
+      position:fixed; right:20px; bottom:20px; z-index:999;
+      width:56px; height:56px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      color:#012; font-size:22px; border:1px solid rgba(255,255,255,.20);
+      box-shadow:0 14px 40px rgba(0,0,0,.35);
+    }
+    .help-fab:hover{transform:translateY(-1px); filter:brightness(1.05);}
+
+    .help-backdrop{position:fixed; inset:0; display:none; z-index:1000; background:rgba(1,18,34,.65);}
+    .help-dialog{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      color:var(--text);
+      width:min(860px, 94vw); margin:6vh auto; border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+    }
+    .help-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .help-title{margin:0; font-size:1.06rem; font-weight:800; letter-spacing:.02em;}
+    .help-close{
+      background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+      border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);
+    }
+    .help-body{padding:14px;}
+    .help-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px,1fr));}
+    .help-section{
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:12px; padding:12px;
+    }
+    .help-section h4{margin:0 0 8px; font-size:1rem; color:#eaf6ff;}
+    .help-section p{margin:0; color:var(--muted);}
+    .help-links a{display:inline-block; margin:6px 8px 0 0; color:var(--neon); text-decoration:none; font-weight:700;}
+    .help-links a:hover{text-decoration:underline;}
+    .help-footer{
+      padding:12px 14px; border-top:1px solid rgba(255,255,255,.10);
+      display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);
+    }
+
+    @media (prefers-reduced-motion:no-preference){
+      .help-dialog{animation:pop .16s ease-out;}
+      @keyframes pop{from{transform:scale(.98); opacity:.75;} to{transform:scale(1); opacity:1;}}
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <!-- Marca -->
+      <a href="/" class="brand" aria-label="UPLAY inicio">
+        <img src="/static/logo/uplay-logo.svg" alt="UPLAY">
+        <span class="brand-text">
+          <strong>UPLAY</strong>
+          <small>Vos jugás, Vos ascendes!</small>
+        </span>
+      </a>
+
+      <!-- Enlaces -->
+      <a href="/">Inicio</a>
+      
+        <a href="/categorias">Categorías</a>
+        <a href="/jugadores">Jugadores</a>
+        <a href="/partidos">Partidos</a>
+        <a href="/desafios">Desafíos</a>
+        <a href="/abiertos">Abiertos</a>
+        <a href="/torneos">Torneos</a>
+        <a href="/ranking">Ranking</a>
+        <a href="/admin">Admin</a>
+      
+      <span class="spacer"></span>
+
+      
+        <a href="/mi" class="btn-ghost btn-slim">Mi panel (admin)</a>
+        <form method="post" action="/logout" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="ImQwMmQ1OThiMDJjMmY5OGIxYTZmM2EyMjBmODNkMTE5ZDJmOWYwNWIi.aQTd5g.g6DULs-CPZibO1coPcnTrRayDyY">
+          <button type="submit" class="btn btn-slim">Salir</button>
+        </form>
+      
+    </div>
+  </nav>
+
+  <div class="container">
+    
+      
+        
+          <div class="flash-error">Sesión expirada o formulario inválido. Volvé a intentar.</div>
+        
+      
+    
+
+    
+<style>
+  /* ——— Header compacto ——— */
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+         background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700; }
+  .dot{width:8px; height:8px; border-radius:50%;}
+  .dot.g{ background:var(--neon); } .dot.y{ background:var(--yellow); } .dot.b{ background:#6EA8FF; }
+
+  /* ——— Layout de secciones ——— */
+  .section-grid{
+    display:grid; gap:10px; margin-top:12px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    align-items:start;
+  }
+  .list-clean{ list-style:none; padding-left:0; margin:0; }
+  .list-clean li{ padding:6px 0; }
+
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); font-size:.8rem;}
+  .badge-ok{ background:#153c2a; border-color:#2a8b5f; }
+  .badge-warn{ background:#3b2f1b; border-color:#704d1a; }
+  .badge-danger{ background:#3b1b1b; border-color:#701a1a; }
+
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
+  .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
+  .btn-ok{ background:rgba(16,185,129,.2); border:1px solid rgba(16,185,129,.4); }
+  .btn-danger{ background:rgba(239,68,68,.18); border:1px solid rgba(239,68,68,.38); }
+
+  /* Tablas/filas compactas */
+  .torneos-list{ list-style:none; padding:0; margin:0; }
+  .torneos-list li{
+    display:flex; gap:8px; align-items:center; justify-content:space-between;
+    padding:8px 0; border-top:1px solid rgba(255,255,255,.08);
+  }
+  .torneo-meta{ font-size:.9rem; color:var(--muted); }
+
+  /* Mis partidos */
+  .match-line{ display:flex; gap:8px; align-items:center; justify-content:space-between; padding:8px 0; border-top:1px solid rgba(255,255,255,.08); }
+  .match-teams{ font-weight:600; }
+  .muted{ color:var(--muted); }
+  .disabled{ opacity:.6; pointer-events:none; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h2 class="hero-title">¡Hola, admin!</h2>
+      <div class="chips">
+        <span class="chip"><span class="dot b"></span> Cat: 7ma</span>
+        <span class="chip"><span class="dot g"></span> Puntos: 150</span>
+        
+      </div>
+    </div>
+    <div class="hero-actions">
+      <a href="/mi/pin" class="btn btn-ghost btn-slim">Cambiar PIN</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECCIONES PRINCIPALES ===== -->
+<div class="section-grid">
+
+  <!-- Tareas pendientes -->
+  <div class="card">
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+
+    
+    
+    
+    
+
+    
+    
+
+    
+    
+
+    <h3>
+      Tareas pendientes
+      <span class="badge" title="Invitaciones, creados por mí, resultados (responder/proponer/enviadas), desafíos y partidos de torneo">0</span>
+    </h3>
+
+    <ul class="list-clean">
+      
+        <li class="muted">No tenés partidos para responder invitación.</li>
+      
+
+      
+        <li class="muted">No tenés partidos creados pendientes de aceptación.</li>
+      
+
+      
+        <li class="muted">No tenés partidos para responder resultado.</li>
+      
+
+      
+
+      
+        
+          <li class="muted">No tenés partidos pendientes de resultado.</li>
+        
+      
+
+      
+        <li class="muted">No tenés partidos de torneo pendientes.</li>
+      
+
+      
+        <li class="muted">No tenés desafíos para responder.</li>
+      
+
+      
+        <li>No hay abiertos en tu categoría.
+          <a href="/abiertos" class="btn btn-ghost btn-slim" style="margin-left:4px;">Crear uno</a>
+        </li>
+      
+    </ul>
+  </div>
+
+  <!-- Suplencias activas -->
+  
+
+  <!-- Desafiar nivel superior -->
+  <div class="card">
+    <h3>Desafiar nivel superior</h3>
+    
+      <p class="muted">Estás en la categoría más alta.</p>
+    
+  </div>
+
+  <!-- Novedades de torneos -->
+  <div class="card">
+    <h3>Novedades de torneos</h3>
+
+    
+
+    
+    
+
+    
+      <p class="muted">Sin novedades por ahora.</p>
+    
+
+    
+
+    
+
+    <p style="margin-top:8px;">
+      <a href="/torneos" class="btn btn-ghost btn-slim">Ir a torneos</a>
+    </p>
+  </div>
+
+</div>
+
+<!-- ===== DETALLES ENLAZADOS DESDE “Tareas pendientes” ===== -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- ===== MIS PARTIDOS ===== -->
+<div class="card" style="margin-top:12px;">
+  <h3>Mis partidos</h3>
+
+  <h4 style="margin:6px 0 4px;">Por jugar</h4>
+  
+  
+    <p class="muted">No tenés partidos por jugar.</p>
+  
+
+  <h4 style="margin:10px 0 4px;">Últimos jugados</h4>
+  
+  
+    <p class="muted">Aún no registraste partidos jugados.</p>
+  
+</div>
+
+
+  </div>
+
+  <!-- FAB de Ayuda -->
+  <button class="help-fab" id="helpFab" aria-label="Ayuda" title="Ayuda">❔</button>
+
+  <!-- Modal de Ayuda -->
+  <div class="help-backdrop" id="helpBackdrop" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-header">
+        <h3 class="help-title" id="helpTitle">¿Cómo usar UPLAY?</h3>
+        <button class="help-close" id="helpClose" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="help-body">
+        
+
+          <div class="help-grid">
+            <section class="help-section">
+              <h4>Menú principal</h4>
+              <p>
+                <strong>Ranking:</strong> tu posición y categoría.<br>
+                <strong>Desafíos:</strong> crear/aceptar retos.<br>
+                <strong>Partidos abiertos:</strong> anotate cuando haya cupos.<br>
+                <strong>Mi Panel:</strong> tus propuestas, confirmaciones y estado.
+              </p>
+            </section>
+            <section class="help-section">
+              <h4>Resultados y confirmaciones</h4>
+              <p>Una pareja propone el resultado, la otra confirma. Si pasan 12h sin respuesta, se cierra automático.</p>
+            </section>
+            <section class="help-section">
+              <h4>Estados de partido</h4>
+              <p>
+                <span class="badge">PENDIENTE</span> invitación/confirmación ·
+                <span class="badge badge-warn">PROPUESTO</span> esperando confirmación ·
+                <span class="badge badge-ok">JUGADO</span> cerrado.
+              </p>
+            </section>
+          </div>
+        
+
+        <div class="help-links" style="margin-top:10px;">
+          <a href="/ranking">Ir al Ranking</a>
+          <a href="/desafios">Ver Desafíos</a>
+          <a href="/abiertos">Partidos Abiertos</a>
+          <a href="/mi">Mi Panel</a>
+        </div>
+      </div>
+      <div class="help-footer">
+        <a class="btn btn-ghost" href="mailto:bogadoacademia@gmail.com">Soporte</a>
+        <button class="btn" id="helpOk">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const fab = document.getElementById('helpFab');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const okBtn = document.getElementById('helpOk');
+
+      function openHelp(){ backdrop.style.display='block'; backdrop.setAttribute('aria-hidden','false'); setTimeout(()=> closeBtn.focus(), 10); }
+      function closeHelp(){ backdrop.style.display='none'; backdrop.setAttribute('aria-hidden','true'); fab.focus(); }
+
+      fab.addEventListener('click', openHelp);
+      closeBtn.addEventListener('click', closeHelp);
+      okBtn.addEventListener('click', closeHelp);
+      backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeHelp(); });
+      window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeHelp(); });
+    })();
+
+    // CSRF auto-injection
+    (function addCsrfToForms(){
+      const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+      if(!tokenMeta) return;
+      const token = tokenMeta.content;
+      document.querySelectorAll('form[method="post"]').forEach(f=>{
+        if(!f.querySelector('input[name="csrf_token"]')){
+          const i=document.createElement('input'); i.type='hidden'; i.name='csrf_token'; i.value=token; f.appendChild(i);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

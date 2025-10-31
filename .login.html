@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Iniciar sesión</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="Ijc3YjE4YzkxOWM5YmIwMDFkM2Q5Yjk5Mzc1NmQ5ZjQwNDE0YWVkMWIi.aQShtg.fPnHYuiA7e8WZRpSwjdEl9LTyNA" />
+
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===== Paleta Academia ===== */
+    :root{
+      --blue-900:#004B8D;      /* azul institucional */
+      --blue-800:#0a4a82;
+      --blue-700:#0d5fa1;
+      --blue-600:#0f6fb7;
+      --panel:#0e3f6e;         /* panel/carta */
+      --panel-2:#0b355d;       /* panel alterno */
+      --text:#ffffff;          /* texto principal */
+      --muted:#cfe3f7;         /* texto secundario */
+      --neon:#8AE80C;          /* verde neón */
+      --yellow:#F6C90E;        /* amarillo tenis */
+      --danger:#ff5252;
+      --warn:#ffd166;
+      --ok:#00c853;
+      --radius:14px;
+      --shadow:0 14px 40px rgba(0,0,0,.28);
+    }
+
+    /* ===== Reset & base ===== */
+    html,body{margin:0; padding:0; height:100%;}
+    body{
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+      /* fondo texturizado suave con la gama del afiche */
+      background:
+        radial-gradient(1400px 800px at -10% -20%, rgba(255,255,255,.06), transparent 60%),
+        radial-gradient(1200px 700px at 110% 120%, rgba(255,255,255,.05), transparent 60%),
+        linear-gradient(180deg, var(--blue-900), #053966 55%, #042c4f);
+      min-height:100%;
+      line-height:1.5;
+    }
+    .container{max-width:1120px; margin:18px auto; padding:0 14px;}
+
+    /* ===== Nav ===== */
+    nav{
+      position:sticky; top:0; z-index:50;
+      backdrop-filter:saturate(1.4) blur(6px);
+      background:linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.05));
+      border-bottom:1px solid rgba(255,255,255,.12);
+    }
+    .nav-inner{
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:10px 14px;
+      max-width:1120px; margin:0 auto;
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px; text-decoration:none;
+      padding:4px 6px; border-radius:12px;
+    }
+    .brand:hover{background:rgba(255,255,255,.07);}
+    .brand img{height:38px; display:block;}
+    .brand-text{display:flex; flex-direction:column; line-height:1.05;}
+    .brand-text strong{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:1.08rem; letter-spacing:.02em;
+    }
+    .brand-text small{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--neon);
+    }
+
+    nav a{color:var(--text); text-decoration:none; opacity:.92;}
+    nav a:hover{opacity:1; color:var(--neon);}
+    .spacer{flex:1;}
+
+    /* ===== Cards ===== */
+    .card{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:var(--radius);
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+    .card + .card{margin-top:12px;}
+    .card h3{margin:0 0 8px; font-size:1.12rem;}
+
+    /* ===== Botones ===== */
+    .btn, button{
+      appearance:none; border:0; cursor:pointer;
+      padding:10px 14px; border-radius:12px; font-weight:700;
+      color:#001a2e;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      transition:transform .12s ease, filter .12s ease;
+      text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn:hover, button:hover{transform:translateY(-1px); filter:brightness(1.05);}
+    .btn:active, button:active{transform:translateY(0);}
+    .btn-ghost{
+      color:var(--text);
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.18);
+    }
+    .btn-ok{background:linear-gradient(180deg, #20e27a, #0cc567); color:#002a1c;}
+    .btn-danger{background:linear-gradient(180deg, #ff6b6b, #ff5252); color:#2a0000;}
+    .btn-warning{background:linear-gradient(180deg, var(--yellow), #e4b800); color:#2a1f00;}
+    .btn-slim{padding:7px 10px; border-radius:10px; font-weight:600;}
+
+    /* ===== Inputs ===== */
+    label{display:block; font-size:.92rem; color:var(--muted); margin:6px 0 4px;}
+    input, select, textarea{
+      width:100%; max-width:460px; outline:none;
+      background:#072e55; color:var(--text);
+      border:1px solid rgba(255,255,255,.18);
+      padding:9px 11px; border-radius:12px;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color:var(--neon); box-shadow:0 0 0 3px rgba(138,232,12,.15);
+    }
+
+    /* ===== Tablas ===== */
+    table{
+      width:100%; border-collapse:separate; border-spacing:0;
+      border-radius:16px; overflow:hidden; background:rgba(255,255,255,.03);
+      box-shadow:var(--shadow);
+    }
+    thead th{
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.15));
+      color:var(--muted); font-size:.82rem; letter-spacing:.06em; text-transform:uppercase;
+    }
+    th, td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.10); text-align:left;}
+    tbody tr:hover{background:rgba(138,232,12,.08);}
+    tbody tr:last-child td{border-bottom:0;}
+
+    /* ===== Badges ===== */
+    .badge{
+      display:inline-block; font-size:.78rem; padding:3px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.10); color:#fff;
+    }
+    .badge-ok{background:linear-gradient(180deg, rgba(32,226,122,.25), rgba(12,197,103,.20)); border-color:rgba(32,226,122,.55);}
+    .badge-warn{background:linear-gradient(180deg, rgba(246,201,14,.28), rgba(246,201,14,.16)); border-color:rgba(246,201,14,.6);}
+    .badge-danger{background:linear-gradient(180deg, rgba(255,82,82,.25), rgba(255,82,82,.16)); border-color:rgba(255,82,82,.6);}
+
+    /* ===== Flash ===== */
+    .flash-ok{background:rgba(0,200,83,.18); border:1px solid rgba(0,200,83,.55); color:#e8fff1; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-error{background:rgba(255,82,82,.18); border:1px solid rgba(255,82,82,.55); color:#ffe8e8; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-warning{background:rgba(246,201,14,.18); border:1px solid rgba(246,201,14,.55); color:#fff8dc; padding:10px; border-radius:12px; margin:8px 0;}
+
+    /* ===== Helpers ===== */
+    .muted{color:var(--muted);}
+
+    /* ===== FAB de Ayuda ===== */
+    .help-fab{
+      position:fixed; right:20px; bottom:20px; z-index:999;
+      width:56px; height:56px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      color:#012; font-size:22px; border:1px solid rgba(255,255,255,.20);
+      box-shadow:0 14px 40px rgba(0,0,0,.35);
+    }
+    .help-fab:hover{transform:translateY(-1px); filter:brightness(1.05);}
+
+    .help-backdrop{position:fixed; inset:0; display:none; z-index:1000; background:rgba(1,18,34,.65);}
+    .help-dialog{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      color:var(--text);
+      width:min(860px, 94vw); margin:6vh auto; border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+    }
+    .help-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .help-title{margin:0; font-size:1.06rem; font-weight:800; letter-spacing:.02em;}
+    .help-close{
+      background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+      border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);
+    }
+    .help-body{padding:14px;}
+    .help-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px,1fr));}
+    .help-section{
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:12px; padding:12px;
+    }
+    .help-section h4{margin:0 0 8px; font-size:1rem; color:#eaf6ff;}
+    .help-section p{margin:0; color:var(--muted);}
+    .help-links a{display:inline-block; margin:6px 8px 0 0; color:var(--neon); text-decoration:none; font-weight:700;}
+    .help-links a:hover{text-decoration:underline;}
+    .help-footer{
+      padding:12px 14px; border-top:1px solid rgba(255,255,255,.10);
+      display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);
+    }
+
+    @media (prefers-reduced-motion:no-preference){
+      .help-dialog{animation:pop .16s ease-out;}
+      @keyframes pop{from{transform:scale(.98); opacity:.75;} to{transform:scale(1); opacity:1;}}
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <!-- Marca -->
+      <a href="/" class="brand" aria-label="UPLAY inicio">
+        <img src="/static/logo/uplay-logo.svg" alt="UPLAY">
+        <span class="brand-text">
+          <strong>UPLAY</strong>
+          <small>Vos jugás, Vos ascendes!</small>
+        </span>
+      </a>
+
+      <!-- Enlaces -->
+      <a href="/">Inicio</a>
+      
+      <span class="spacer"></span>
+
+      
+        <a href="/login" class="btn btn-ghost btn-slim">Iniciar sesión</a>
+      
+    </div>
+  </nav>
+
+  <div class="container">
+    
+      
+        
+          <div class="flash-error">Sesión expirada o formulario inválido. Volvé a intentar.</div>
+        
+          <div class="flash-error">Iniciá sesión para acceder.</div>
+        
+      
+    
+
+    
+<style>
+  /* ===== Hero / cabecera (igual que index) ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ===== Chips / info ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-blue{background:#6EA8FF;}
+  .muted{ color:var(--muted,#98a2b3); }
+
+  /* ===== Card y controles ===== */
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* Accesibilidad de estado del buscador */
+  #buscar-estado{ min-height:1.2em; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Iniciar sesión</h1>
+      <p class="hero-tag">Accedé para jugar y sumar puntos</p>
+    </div>
+    <div class="hero-actions">
+      <a href="/alta" class="btn btn-ghost btn-slim">Pedir alta</a>
+      <a href="/ranking" class="btn btn-ghost btn-slim">Ver ranking</a>
+    </div>
+  </div>
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Seleccioná tu nombre y PIN</span>
+  </div>
+</div>
+
+<!-- ===== FORMULARIO ===== -->
+<div class="card" style="max-width:560px;">
+  <form method="post" style="display:grid; gap:10px;" novalidate>
+    <!-- Buscador rápido de jugador -->
+    <div>
+      <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>
+      <input id="buscar" type="text" placeholder="Escribí para filtrar por nombre…" autocomplete="off" style="width:100%;" aria-describedby="buscar-estado">
+      <div id="buscar-estado" class="muted" style="margin:.35rem 0 0; font-size:.9rem;"></div>
+    </div>
+
+    <div>
+      <label for="jugador_id" class="muted" style="display:block; margin-bottom:4px;">Tu nombre</label>
+      <select id="jugador_id" name="jugador_id" required style="width:100%;" aria-describedby="ayuda-jugador">
+        <option value="">-- Elegí tu nombre --</option>
+        
+          <option value="27">
+            CHARO — 3ra CABALLEROS
+          </option>
+        
+          <option value="24">
+            ERNESTO SABATO — 4ta CABALLEROS
+          </option>
+        
+          <option value="5">
+            JOAQUIN LUENGO — 4ta CABALLEROS
+          </option>
+        
+          <option value="6">
+            JOSE OTERMIN — 3ra CABALLEROS
+          </option>
+        
+          <option value="7">
+            JUAN CACEREZ — 4ta CABALLEROS
+          </option>
+        
+          <option value="3">
+            JUAN MARIA ORAZI — 4ta CABALLEROS
+          </option>
+        
+          <option value="19">
+            Jugador Test 10 — 4ta CABALLEROS
+          </option>
+        
+          <option value="20">
+            Jugador Test 11 — 4ta CABALLEROS
+          </option>
+        
+          <option value="21">
+            Jugador Test 12 — 4ta CABALLEROS
+          </option>
+        
+          <option value="11">
+            Jugador Test 2 — 4ta CABALLEROS
+          </option>
+        
+          <option value="12">
+            Jugador Test 3 — 4ta CABALLEROS
+          </option>
+        
+          <option value="13">
+            Jugador Test 4 — 4ta CABALLEROS
+          </option>
+        
+          <option value="14">
+            Jugador Test 5 — 4ta CABALLEROS
+          </option>
+        
+          <option value="15">
+            Jugador Test 6 — 4ta CABALLEROS
+          </option>
+        
+          <option value="16">
+            Jugador Test 7 — 4ta CABALLEROS
+          </option>
+        
+          <option value="17">
+            Jugador Test 8 — 4ta CABALLEROS
+          </option>
+        
+          <option value="18">
+            Jugador Test 9 — 4ta CABALLEROS
+          </option>
+        
+          <option value="2">
+            MATIAS BOGADO — 3ra CABALLEROS
+          </option>
+        
+          <option value="26">
+            TESTER 8X5N — PRINCIPIANTES B
+          </option>
+        
+          <option value="23">
+            VICTOR MANUEL BOGADO — 4ta CABALLEROS
+          </option>
+        
+          <option value="22">
+            admin — 7ma
+          </option>
+        
+      </select>
+      <p id="ayuda-jugador" class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+        Si no aparecés, pedí el alta al organizador.
+      </p>
+
+      
+    </div>
+
+    <div>
+      <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN</label>
+      <div style="display:flex; gap:8px;">
+        <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
+               required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
+        <button type="button" id="togglePin" class="btn btn-ghost btn-slim" aria-pressed="false" aria-controls="pin" title="Mostrar/ocultar PIN">👁</button>
+      </div>
+      <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
+        El PIN lo define el organizador. Podrás cambiarlo luego desde <em>Editar jugador</em>.
+      </p>
+      <p style="margin:.35rem 0 0;">
+        <a href="/olvide-pin" class="btn btn-ghost btn-slim">Olvidé mi PIN</a>
+      </p>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
+      <button type="submit" class="btn">Entrar</button>
+      <a href="/alta" class="btn btn-ghost">No figuro, pedir alta</a>
+      <a href="/ranking" class="btn btn-ghost">Ver ranking</a>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="border-style:dashed; margin-top:10px; max-width:560px;">
+  <p style="margin:0;">
+    ¿Problemas para ingresar? Verificá que tu nombre esté en la lista y que el PIN sea correcto.
+  </p>
+</div>
+
+<script>
+  // --- Utilidades
+  const normalizar = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  const buscar = document.getElementById('buscar');
+  const select = document.getElementById('jugador_id');
+  const estado = document.getElementById('buscar-estado');
+  const pin = document.getElementById('pin');
+  const toggle = document.getElementById('togglePin');
+
+  if (buscar && select) {
+    // Clonamos opciones originales para rearmar la lista rápido
+    const optsOriginales = Array.from(select.options).map(o => o.cloneNode(true));
+    const optBase = optsOriginales[0];           // "-- Elegí tu nombre --"
+    const optResto = optsOriginales.slice(1);    // jugadores
+
+    // Render helper
+    function renderLista(coincidentes) {
+      // Limpio y vuelvo a poner la base
+      select.innerHTML = '';
+      select.appendChild(optBase.cloneNode(true));
+
+      if (coincidentes.length === 0) {
+        const vacio = document.createElement('option');
+        vacio.disabled = true;
+        vacio.textContent = '— Sin resultados —';
+        select.appendChild(vacio);
+        estado.textContent = 'Sin resultados.';
+        select.selectedIndex = 0;
+        return;
+      }
+
+      // Agrego coincidencias
+      coincidentes.forEach(o => select.appendChild(o.cloneNode(true)));
+
+      // Auto-seleccionar primera coincidencia
+      select.selectedIndex = 1;
+
+      // Estado accesible
+      estado.textContent = `${coincidentes.length} resultado${coincidentes.length === 1 ? '' : 's'}.`;
+    }
+
+    // Filtro (tokeniza para búsquedas "nombre apellido")
+    function filtrar(qRaw) {
+      const q = normalizar(qRaw);
+      if (!q) {
+        // Reset
+        renderLista(optResto);
+        estado.textContent = '';
+        select.selectedIndex = 0;
+        return;
+      }
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const coincide = (texto) => {
+        const t = normalizar(texto);
+        return tokens.every(tok => t.includes(tok));
+      };
+      const match = optResto.filter(o => coincide(o.textContent || o.innerText || ''));
+      renderLista(match);
+    }
+
+    // Eventos
+    buscar.addEventListener('input', () => filtrar(buscar.value));
+
+    // Enter desde el buscador: si hay UNA coincidencia, confirmo y voy a PIN
+    buscar.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const total = select.options.length;
+        // Base + (1) única coincidencia = 2 opciones totales
+        if (total === 2 && !select.options[1].disabled) {
+          select.selectedIndex = 1;
+          pin && pin.focus();
+        } else {
+          if (total > 1) {
+            select.selectedIndex = 1;
+            pin && pin.focus();
+          }
+        }
+      }
+    });
+  }
+
+  // --- Mostrar/Ocultar PIN
+  if (pin && toggle){
+    toggle.addEventListener('click', () => {
+      const isPass = pin.type === 'password';
+      pin.type = isPass ? 'text' : 'password';
+      toggle.setAttribute('aria-pressed', String(isPass));
+    });
+  }
+</script>
+
+  </div>
+
+  <!-- FAB de Ayuda -->
+  <button class="help-fab" id="helpFab" aria-label="Ayuda" title="Ayuda">❔</button>
+
+  <!-- Modal de Ayuda -->
+  <div class="help-backdrop" id="helpBackdrop" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-header">
+        <h3 class="help-title" id="helpTitle">¿Cómo usar UPLAY?</h3>
+        <button class="help-close" id="helpClose" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="help-body">
+        
+<section class="help-section">
+  <h4 style="margin:0 0 8px;">¿Qué puedo hacer en <strong>Iniciar sesión</strong>?</h4>
+
+  <ul style="margin:0 0 10px 18px; padding:0; line-height:1.3;">
+    <li><strong>Buscar tu nombre</strong> con el filtro y seleccionarlo en la lista.</li>
+    <li><strong>Ingresar tu PIN</strong> (4–6 dígitos).</li>
+    <li>Si no estás en la lista, <strong>pedí el alta</strong> al organizador.</li>
+    <li>Si te olvidaste el PIN, usá <strong>Olvidé mi PIN</strong>.</li>
+  </ul>
+
+  <div style="margin:10px 0 0; font-size:.95rem; opacity:.95;">
+    <strong>Tip:</strong> escribí nombre y apellido para filtrar más rápido; con Enter se selecciona la primera coincidencia.
+  </div>
+</section>
+
+          <div class="help-grid">
+            <section class="help-section">
+              <h4>Menú principal</h4>
+              <p>
+                <strong>Ranking:</strong> tu posición y categoría.<br>
+                <strong>Desafíos:</strong> crear/aceptar retos.<br>
+                <strong>Partidos abiertos:</strong> anotate cuando haya cupos.<br>
+                <strong>Mi Panel:</strong> tus propuestas, confirmaciones y estado.
+              </p>
+            </section>
+            <section class="help-section">
+              <h4>Resultados y confirmaciones</h4>
+              <p>Una pareja propone el resultado, la otra confirma. Si pasan 12h sin respuesta, se cierra automático.</p>
+            </section>
+            <section class="help-section">
+              <h4>Estados de partido</h4>
+              <p>
+                <span class="badge">PENDIENTE</span> invitación/confirmación ·
+                <span class="badge badge-warn">PROPUESTO</span> esperando confirmación ·
+                <span class="badge badge-ok">JUGADO</span> cerrado.
+              </p>
+            </section>
+          </div>
+        
+
+        <div class="help-links" style="margin-top:10px;">
+          <a href="/ranking">Ir al Ranking</a>
+          <a href="/desafios">Ver Desafíos</a>
+          <a href="/abiertos">Partidos Abiertos</a>
+          
+        </div>
+      </div>
+      <div class="help-footer">
+        <a class="btn btn-ghost" href="mailto:bogadoacademia@gmail.com">Soporte</a>
+        <button class="btn" id="helpOk">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const fab = document.getElementById('helpFab');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const okBtn = document.getElementById('helpOk');
+
+      function openHelp(){ backdrop.style.display='block'; backdrop.setAttribute('aria-hidden','false'); setTimeout(()=> closeBtn.focus(), 10); }
+      function closeHelp(){ backdrop.style.display='none'; backdrop.setAttribute('aria-hidden','true'); fab.focus(); }
+
+      fab.addEventListener('click', openHelp);
+      closeBtn.addEventListener('click', closeHelp);
+      okBtn.addEventListener('click', closeHelp);
+      backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeHelp(); });
+      window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeHelp(); });
+    })();
+
+    // CSRF auto-injection
+    (function addCsrfToForms(){
+      const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+      if(!tokenMeta) return;
+      const token = tokenMeta.content;
+      document.querySelectorAll('form[method="post"]').forEach(f=>{
+        if(!f.querySelector('input[name="csrf_token"]')){
+          const i=document.createElement('input'); i.type='hidden'; i.name='csrf_token'; i.value=token; f.appendChild(i);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

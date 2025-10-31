@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Aprobar solicitud</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="Ijc3YjE4YzkxOWM5YmIwMDFkM2Q5Yjk5Mzc1NmQ5ZjQwNDE0YWVkMWIi.aQSt5Q.SVs7OBTZP-h9xsu22Qy075SZqs8" />
+
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===== Paleta Academia ===== */
+    :root{
+      --blue-900:#004B8D;      /* azul institucional */
+      --blue-800:#0a4a82;
+      --blue-700:#0d5fa1;
+      --blue-600:#0f6fb7;
+      --panel:#0e3f6e;         /* panel/carta */
+      --panel-2:#0b355d;       /* panel alterno */
+      --text:#ffffff;          /* texto principal */
+      --muted:#cfe3f7;         /* texto secundario */
+      --neon:#8AE80C;          /* verde neón */
+      --yellow:#F6C90E;        /* amarillo tenis */
+      --danger:#ff5252;
+      --warn:#ffd166;
+      --ok:#00c853;
+      --radius:14px;
+      --shadow:0 14px 40px rgba(0,0,0,.28);
+    }
+
+    /* ===== Reset & base ===== */
+    html,body{margin:0; padding:0; height:100%;}
+    body{
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+      /* fondo texturizado suave con la gama del afiche */
+      background:
+        radial-gradient(1400px 800px at -10% -20%, rgba(255,255,255,.06), transparent 60%),
+        radial-gradient(1200px 700px at 110% 120%, rgba(255,255,255,.05), transparent 60%),
+        linear-gradient(180deg, var(--blue-900), #053966 55%, #042c4f);
+      min-height:100%;
+      line-height:1.5;
+    }
+    .container{max-width:1120px; margin:18px auto; padding:0 14px;}
+
+    /* ===== Nav ===== */
+    nav{
+      position:sticky; top:0; z-index:50;
+      backdrop-filter:saturate(1.4) blur(6px);
+      background:linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.05));
+      border-bottom:1px solid rgba(255,255,255,.12);
+    }
+    .nav-inner{
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:10px 14px;
+      max-width:1120px; margin:0 auto;
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px; text-decoration:none;
+      padding:4px 6px; border-radius:12px;
+    }
+    .brand:hover{background:rgba(255,255,255,.07);}
+    .brand img{height:38px; display:block;}
+    .brand-text{display:flex; flex-direction:column; line-height:1.05;}
+    .brand-text strong{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:1.08rem; letter-spacing:.02em;
+    }
+    .brand-text small{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--neon);
+    }
+
+    nav a{color:var(--text); text-decoration:none; opacity:.92;}
+    nav a:hover{opacity:1; color:var(--neon);}
+    .spacer{flex:1;}
+
+    /* ===== Cards ===== */
+    .card{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:var(--radius);
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+    .card + .card{margin-top:12px;}
+    .card h3{margin:0 0 8px; font-size:1.12rem;}
+
+    /* ===== Botones ===== */
+    .btn, button{
+      appearance:none; border:0; cursor:pointer;
+      padding:10px 14px; border-radius:12px; font-weight:700;
+      color:#001a2e;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      transition:transform .12s ease, filter .12s ease;
+      text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn:hover, button:hover{transform:translateY(-1px); filter:brightness(1.05);}
+    .btn:active, button:active{transform:translateY(0);}
+    .btn-ghost{
+      color:var(--text);
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.18);
+    }
+    .btn-ok{background:linear-gradient(180deg, #20e27a, #0cc567); color:#002a1c;}
+    .btn-danger{background:linear-gradient(180deg, #ff6b6b, #ff5252); color:#2a0000;}
+    .btn-warning{background:linear-gradient(180deg, var(--yellow), #e4b800); color:#2a1f00;}
+    .btn-slim{padding:7px 10px; border-radius:10px; font-weight:600;}
+
+    /* ===== Inputs ===== */
+    label{display:block; font-size:.92rem; color:var(--muted); margin:6px 0 4px;}
+    input, select, textarea{
+      width:100%; max-width:460px; outline:none;
+      background:#072e55; color:var(--text);
+      border:1px solid rgba(255,255,255,.18);
+      padding:9px 11px; border-radius:12px;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color:var(--neon); box-shadow:0 0 0 3px rgba(138,232,12,.15);
+    }
+
+    /* ===== Tablas ===== */
+    table{
+      width:100%; border-collapse:separate; border-spacing:0;
+      border-radius:16px; overflow:hidden; background:rgba(255,255,255,.03);
+      box-shadow:var(--shadow);
+    }
+    thead th{
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.15));
+      color:var(--muted); font-size:.82rem; letter-spacing:.06em; text-transform:uppercase;
+    }
+    th, td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.10); text-align:left;}
+    tbody tr:hover{background:rgba(138,232,12,.08);}
+    tbody tr:last-child td{border-bottom:0;}
+
+    /* ===== Badges ===== */
+    .badge{
+      display:inline-block; font-size:.78rem; padding:3px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.10); color:#fff;
+    }
+    .badge-ok{background:linear-gradient(180deg, rgba(32,226,122,.25), rgba(12,197,103,.20)); border-color:rgba(32,226,122,.55);}
+    .badge-warn{background:linear-gradient(180deg, rgba(246,201,14,.28), rgba(246,201,14,.16)); border-color:rgba(246,201,14,.6);}
+    .badge-danger{background:linear-gradient(180deg, rgba(255,82,82,.25), rgba(255,82,82,.16)); border-color:rgba(255,82,82,.6);}
+
+    /* ===== Flash ===== */
+    .flash-ok{background:rgba(0,200,83,.18); border:1px solid rgba(0,200,83,.55); color:#e8fff1; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-error{background:rgba(255,82,82,.18); border:1px solid rgba(255,82,82,.55); color:#ffe8e8; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-warning{background:rgba(246,201,14,.18); border:1px solid rgba(246,201,14,.55); color:#fff8dc; padding:10px; border-radius:12px; margin:8px 0;}
+
+    /* ===== Helpers ===== */
+    .muted{color:var(--muted);}
+
+    /* ===== FAB de Ayuda ===== */
+    .help-fab{
+      position:fixed; right:20px; bottom:20px; z-index:999;
+      width:56px; height:56px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      color:#012; font-size:22px; border:1px solid rgba(255,255,255,.20);
+      box-shadow:0 14px 40px rgba(0,0,0,.35);
+    }
+    .help-fab:hover{transform:translateY(-1px); filter:brightness(1.05);}
+
+    .help-backdrop{position:fixed; inset:0; display:none; z-index:1000; background:rgba(1,18,34,.65);}
+    .help-dialog{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      color:var(--text);
+      width:min(860px, 94vw); margin:6vh auto; border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+    }
+    .help-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .help-title{margin:0; font-size:1.06rem; font-weight:800; letter-spacing:.02em;}
+    .help-close{
+      background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+      border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);
+    }
+    .help-body{padding:14px;}
+    .help-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px,1fr));}
+    .help-section{
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:12px; padding:12px;
+    }
+    .help-section h4{margin:0 0 8px; font-size:1rem; color:#eaf6ff;}
+    .help-section p{margin:0; color:var(--muted);}
+    .help-links a{display:inline-block; margin:6px 8px 0 0; color:var(--neon); text-decoration:none; font-weight:700;}
+    .help-links a:hover{text-decoration:underline;}
+    .help-footer{
+      padding:12px 14px; border-top:1px solid rgba(255,255,255,.10);
+      display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);
+    }
+
+    @media (prefers-reduced-motion:no-preference){
+      .help-dialog{animation:pop .16s ease-out;}
+      @keyframes pop{from{transform:scale(.98); opacity:.75;} to{transform:scale(1); opacity:1;}}
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <!-- Marca -->
+      <a href="/" class="brand" aria-label="UPLAY inicio">
+        <img src="/static/logo/uplay-logo.svg" alt="UPLAY">
+        <span class="brand-text">
+          <strong>UPLAY</strong>
+          <small>Vos jugás, Vos ascendes!</small>
+        </span>
+      </a>
+
+      <!-- Enlaces -->
+      <a href="/">Inicio</a>
+      
+        <a href="/categorias">Categorías</a>
+        <a href="/jugadores">Jugadores</a>
+        <a href="/partidos">Partidos</a>
+        <a href="/desafios">Desafíos</a>
+        <a href="/abiertos">Abiertos</a>
+        <a href="/torneos">Torneos</a>
+        <a href="/ranking">Ranking</a>
+        <a href="/admin">Admin</a>
+      
+      <span class="spacer"></span>
+
+      
+        <a href="/mi" class="btn-ghost btn-slim">Mi panel (admin)</a>
+        <form method="post" action="/logout" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="Ijc3YjE4YzkxOWM5YmIwMDFkM2Q5Yjk5Mzc1NmQ5ZjQwNDE0YWVkMWIi.aQSt5Q.SVs7OBTZP-h9xsu22Qy075SZqs8">
+          <button type="submit" class="btn btn-slim">Salir</button>
+        </form>
+      
+    </div>
+  </nav>
+
+  <div class="container">
+    
+      
+    
+
+    
+<style>
+  /* ===== Hero / cabecera (consistente) ===== */
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:10px;
+  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem,1.6vw,.92rem);
+    background:linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 0 .15em rgba(0,0,0,.25));
+  }
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700;}
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-blue{background:#6EA8FF;} .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
+
+  /* ===== Layout principal ===== */
+  .page{ display:grid; gap:10px; grid-template-columns: 1fr; }
+  .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
+         background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:12px; }
+  .grid2{ display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+  .label{ color:var(--muted,#98a2b3); font-size:.92rem; }
+  .val{ font-weight:700; }
+  .muted{ color:var(--muted,#98a2b3); }
+
+  .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
+  .form-input{
+    width:100%; border-radius:10px; padding:10px 12px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); color:#fff; outline:none;
+  }
+  .form-input:focus{ border-color: rgba(16,185,129,.45); box-shadow: 0 0 0 3px rgba(16,185,129,.18); }
+
+  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; }
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); border-radius:10px; padding:8px 12px; font-weight:700; }
+  .danger{ border-color:#e11d48; color:#e11d48; }
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">Aprobar solicitud</h1>
+      <p class="hero-tag">Alta de jugador</p>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="/admin/solicitudes" class="btn-ghost">Volver a solicitudes</a>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span class="chip"><span class="dot dot-blue"></span>Jugador Test Bash</span>
+    <span class="chip"><span class="dot dot-green"></span>Cat: 7ma CABALLEROS</span>
+    <span class="chip"><span class="dot dot-yellow"></span>test_bash_uplay@example.com</span>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Datos de la solicitud -->
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Datos de la solicitud</h3>
+    <div class="grid2">
+      <div>
+        <div class="label">Nombre</div>
+        <div class="val">Jugador Test Bash</div>
+      </div>
+      <div>
+        <div class="label">Email</div>
+        <div class="val">
+          
+            <a href="mailto:test_bash_uplay@example.com" style="text-decoration:underline">test_bash_uplay@example.com</a>
+          
+        </div>
+      </div>
+      <div>
+        <div class="label">Teléfono</div>
+        <div class="val">+5492901000000</div>
+      </div>
+      <div>
+        <div class="label">Categoría solicitada</div>
+        <div class="val">7ma CABALLEROS</div>
+        
+          <div class="muted">Rango: 700–799 pts</div>
+        
+      </div>
+
+      <!-- Nuevos campos -->
+      <div>
+        <div class="label">País</div>
+        <div class="val">AR</div>
+      </div>
+      <div>
+        <div class="label">Provincia / Estado</div>
+        <div class="val">Río Negro</div>
+      </div>
+      <div>
+        <div class="label">Ciudad</div>
+        <div class="val">Viedma</div>
+      </div>
+      <div>
+        <div class="label">Fecha de nacimiento</div>
+        <div class="val">-</div>
+      </div>
+    </div>
+
+    
+      <div style="margin-top:8px;">
+        <div class="label">Mensaje</div>
+        <div class="val" style="white-space:pre-wrap;">Solicitud de prueba via bash</div>
+      </div>
+    
+  </div>
+
+  <!-- Aprobar -->
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Aprobación</h3>
+
+    <!-- Form principal: aprobar y enviar código -->
+    <form id="form-aprobar" method="post" style="display:grid; gap:10px;">
+      <input type="hidden" name="csrf_token" value="Ijc3YjE4YzkxOWM5YmIwMDFkM2Q5Yjk5Mzc1NmQ5ZjQwNDE0YWVkMWIi.aQSt5Q.SVs7OBTZP-h9xsu22Qy075SZqs8">
+      <div>
+        <label for="puntos" class="form-label">Puntos iniciales</label>
+        <input id="puntos"
+               name="puntos"
+               type="number"
+               class="form-input"
+               value="799"
+               min="700"
+               max="799"
+               inputmode="numeric" step="1" autocomplete="off"
+               required>
+        
+          <div class="muted" style="margin-top:4px;">
+            Rango permitido: 700–799 puntos.
+          </div>
+        
+      </div>
+
+      <div style="margin:4px 0; padding:10px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:10px;">
+        <strong>PIN inicial</strong>
+        <p class="muted" style="margin:6px 0 0;">
+          No hace falta ingresarlo: generamos un <em>código de activación</em> y se lo enviamos por email.
+          Con ese código (válido por <strong>24 h</strong>) el jugador creará su propio PIN en el primer ingreso.
+        </p>
+      </div>
+
+      <!-- Compat: mantener 'pin' oculto y vacío -->
+      <input name="pin" type="hidden" value="">
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btn-aprobar" type="submit" class="btn"
+                >
+          Aprobar y enviar código
+        </button>
+        <a href="/admin/solicitudes" class="btn-ghost">Cancelar</a>
+      </div>
+    </form>
+
+    <!-- Rechazar: form independiente (no anidar forms) -->
+    <form id="form-rechazar" method="post" action="/admin/solicitudes/14/rechazar" style="margin-top:8px;">
+      <input type="hidden" name="csrf_token" value="Ijc3YjE4YzkxOWM5YmIwMDFkM2Q5Yjk5Mzc1NmQ5ZjQwNDE0YWVkMWIi.aQSt5Q.SVs7OBTZP-h9xsu22Qy075SZqs8">
+      <button id="btn-rechazar" type="submit" class="btn-ghost danger">Rechazar solicitud</button>
+    </form>
+  </div>
+
+</div>
+
+<script>
+  // Asistencia para mantener 'puntos' dentro de rango
+  (function(){
+    const inp = document.getElementById('puntos');
+    if(!inp) return;
+    function clamp(){
+      const min = Number(inp.min || 0);
+      const max = Number(inp.max || 999999);
+      let val = Number(inp.value || min);
+      if (val < min) val = min;
+      if (val > max) val = max;
+      inp.value = val;
+    }
+    inp.addEventListener('change', clamp, { passive:true });
+    inp.addEventListener('blur', clamp, { passive:true });
+  })();
+
+  // Evitar doble envío en "Aprobar y enviar código"
+  (function(){
+    const form = document.getElementById('form-aprobar');
+    const btn  = document.getElementById('btn-aprobar');
+    if(!form || !btn) return;
+    form.addEventListener('submit', function(e){
+      if (btn.disabled) { e.preventDefault(); return; }
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Enviando…';
+    }, { passive:false });
+  })();
+
+  // Confirmar rechazo
+  (function(){
+    const form = document.getElementById('form-rechazar');
+    const btn  = document.getElementById('btn-rechazar');
+    if(!form || !btn) return;
+    form.addEventListener('submit', function(e){
+      const ok = confirm('¿Seguro que querés rechazar esta solicitud?');
+      if (!ok) e.preventDefault();
+    });
+  })();
+</script>
+
+  </div>
+
+  <!-- FAB de Ayuda -->
+  <button class="help-fab" id="helpFab" aria-label="Ayuda" title="Ayuda">❔</button>
+
+  <!-- Modal de Ayuda -->
+  <div class="help-backdrop" id="helpBackdrop" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-header">
+        <h3 class="help-title" id="helpTitle">¿Cómo usar UPLAY?</h3>
+        <button class="help-close" id="helpClose" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="help-body">
+        
+<section class="help-section">
+  <h4>Aprobar solicitud — guía rápida</h4>
+  <ul style="margin:6px 0; padding-left:18px;">
+    <li>Revisá los datos del jugador (contacto y ubicación).</li>
+    <li>Definí los <strong>puntos iniciales</strong> dentro del rango de la categoría.</li>
+    <li>Al aprobar, se envía un <strong>código</strong> para que el jugador cree su PIN (24 h de validez).</li>
+    <li>Si no corresponde, podés <strong>rechazar</strong> la solicitud.</li>
+  </ul>
+</section>
+
+          <div class="help-grid">
+            <section class="help-section">
+              <h4>Menú principal</h4>
+              <p>
+                <strong>Ranking:</strong> tu posición y categoría.<br>
+                <strong>Desafíos:</strong> crear/aceptar retos.<br>
+                <strong>Partidos abiertos:</strong> anotate cuando haya cupos.<br>
+                <strong>Mi Panel:</strong> tus propuestas, confirmaciones y estado.
+              </p>
+            </section>
+            <section class="help-section">
+              <h4>Resultados y confirmaciones</h4>
+              <p>Una pareja propone el resultado, la otra confirma. Si pasan 12h sin respuesta, se cierra automático.</p>
+            </section>
+            <section class="help-section">
+              <h4>Estados de partido</h4>
+              <p>
+                <span class="badge">PENDIENTE</span> invitación/confirmación ·
+                <span class="badge badge-warn">PROPUESTO</span> esperando confirmación ·
+                <span class="badge badge-ok">JUGADO</span> cerrado.
+              </p>
+            </section>
+          </div>
+        
+
+        <div class="help-links" style="margin-top:10px;">
+          <a href="/ranking">Ir al Ranking</a>
+          <a href="/desafios">Ver Desafíos</a>
+          <a href="/abiertos">Partidos Abiertos</a>
+          <a href="/mi">Mi Panel</a>
+        </div>
+      </div>
+      <div class="help-footer">
+        <a class="btn btn-ghost" href="mailto:bogadoacademia@gmail.com">Soporte</a>
+        <button class="btn" id="helpOk">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const fab = document.getElementById('helpFab');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const okBtn = document.getElementById('helpOk');
+
+      function openHelp(){ backdrop.style.display='block'; backdrop.setAttribute('aria-hidden','false'); setTimeout(()=> closeBtn.focus(), 10); }
+      function closeHelp(){ backdrop.style.display='none'; backdrop.setAttribute('aria-hidden','true'); fab.focus(); }
+
+      fab.addEventListener('click', openHelp);
+      closeBtn.addEventListener('click', closeHelp);
+      okBtn.addEventListener('click', closeHelp);
+      backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeHelp(); });
+      window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeHelp(); });
+    })();
+
+    // CSRF auto-injection
+    (function addCsrfToForms(){
+      const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+      if(!tokenMeta) return;
+      const token = tokenMeta.content;
+      document.querySelectorAll('form[method="post"]').forEach(f=>{
+        if(!f.querySelector('input[name="csrf_token"]')){
+          const i=document.createElement('input'); i.type='hidden'; i.name='csrf_token'; i.value=token; f.appendChild(i);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
