@@ -149,19 +149,27 @@
           {% for m in partidos %}
             {# ---- Normalización segura ---- #}
             {% set cj = current_jugador if current_jugador is defined else None %}
+            {% set p1 = m.pareja1 %}
+            {% set p2 = m.pareja2 %}
+            {% set p1_j1 = p1.jugador1 if p1 else None %}
+            {% set p1_j2 = p1.jugador2 if p1 else None %}
+            {% set p2_j1 = p2.jugador1 if p2 else None %}
+            {% set p2_j2 = p2.jugador2 if p2 else None %}
+            {% set p1_j1_id = p1.jugador1_id if p1 else None %}
+            {% set p1_j2_id = p1.jugador2_id if p1 else None %}
+            {% set p2_j1_id = p2.jugador1_id if p2 else None %}
+            {% set p2_j2_id = p2.jugador2_id if p2 else None %}
+            {% set p1_name = (p1_j1.nombre_completo if p1_j1 else '—') ~ ' + ' ~ (p1_j2.nombre_completo if p1_j2 else '—') %}
+            {% set p2_name = (p2_j1.nombre_completo if p2_j1 else '—') ~ ' + ' ~ (p2_j2.nombre_completo if p2_j2 else '—') %}
+
             {% set r1_ok = (m.rival1_acepto in [True, 1, '1']) %}
             {% set r2_ok = (m.rival2_acepto in [True, 1, '1']) %}
             {% set ambos_aceptaron = r1_ok and r2_ok %}
             {% set hay_propuesta = (m.resultado_propuesto_ganador_pareja_id is not none) %}
 
-            {% set soy_participante = cj and (
-              cj.id in [
-                m.pareja1.jugador1_id, m.pareja1.jugador2_id,
-                m.pareja2.jugador1_id, m.pareja2.jugador2_id
-              ]
-            ) %}
-            {% set soy_pareja1 = cj and (cj.id in [m.pareja1.jugador1_id, m.pareja1.jugador2_id]) %}
-            {% set soy_pareja2 = cj and (cj.id in [m.pareja2.jugador1_id, m.pareja2.jugador2_id]) %}
+            {% set soy_participante = cj and (cj.id in [p1_j1_id, p1_j2_id, p2_j1_id, p2_j2_id]) %}
+            {% set soy_pareja1 = cj and (cj.id in [p1_j1_id, p1_j2_id]) %}
+            {% set soy_pareja2 = cj and (cj.id in [p2_j1_id, p2_j2_id]) %}
             {% set debo_confirmar = (
               hay_propuesta and soy_participante and
               ((soy_pareja1 and not m.confirmo_pareja1) or (soy_pareja2 and not m.confirmo_pareja2))
@@ -186,16 +194,18 @@
             {# Tooltips faltantes de confirmación #}
             {% set faltan_confirmar = [] %}
             {% if hay_propuesta and not (m.confirmo_pareja1 and m.confirmo_pareja2) %}
-              {% if not m.confirmo_pareja1 %}{% set _ = faltan_confirmar.append('Pareja 1 (' ~ m.pareja1.jugador1.nombre_completo ~ ' + ' ~ m.pareja1.jugador2.nombre_completo ~ ')') %}{% endif %}
-              {% if not m.confirmo_pareja2 %}{% set _ = faltan_confirmar.append('Pareja 2 (' ~ m.pareja2.jugador1.nombre_completo ~ ' + ' ~ m.pareja2.jugador2.nombre_completo ~ ')') %}{% endif %}
+              {% if not m.confirmo_pareja1 %}{% set _ = faltan_confirmar.append('Pareja 1 (' ~ p1_name ~ ')') %}{% endif %}
+              {% if not m.confirmo_pareja2 %}{% set _ = faltan_confirmar.append('Pareja 2 (' ~ p2_name ~ ')') %}{% endif %}
             {% endif %}
 
             {% set hubo_rechazo = (not hay_propuesta) and (m.rechazo_ultimo_por_id is not none) and (m.estado == 'PENDIENTE') %}
 
             <tr>
               <td>{{ m.categoria.nombre if m.categoria else '-' }}</td>
-              <td>{{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}</td>
-              <td>{{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}</td>
+
+              {# --- Pareja 1 / Pareja 2 seguras --- #}
+              <td>{{ p1_name }}</td>
+              <td>{{ p2_name }}</td>
 
               <td>{% if m.fecha %}{{ m.fecha|localdt('%Y-%m-%d %H:%M') }}{% else %}-{% endif %}</td>
 
@@ -253,9 +263,9 @@
                   <div class="muted" style="font-size:.9em; margin-top:4px;">
                     Propuesto:
                     {% if m.resultado_propuesto_ganador_pareja_id == m.pareja1_id %}
-                      {{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}
+                      {{ p1_name }}
                     {% elif m.resultado_propuesto_ganador_pareja_id == m.pareja2_id %}
-                      {{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}
+                      {{ p2_name }}
                     {% else %}
                       (pareja desconocida)
                     {% endif %}
@@ -268,9 +278,9 @@
                 {% if m.estado == 'JUGADO' and m.resultado %}
                   {% set g = m.resultado.ganador_pareja_id %}
                   {% if g == m.pareja1_id %}
-                    Ganó: {{ m.pareja1.jugador1.nombre_completo }} + {{ m.pareja1.jugador2.nombre_completo }}
+                    Ganó: {{ p1_name }}
                   {% elif g == m.pareja2_id %}
-                    Ganó: {{ m.pareja2.jugador1.nombre_completo }} + {{ m.pareja2.jugador2.nombre_completo }}
+                    Ganó: {{ p2_name }}
                   {% else %}
                     Ganador no identificado
                   {% endif %}
