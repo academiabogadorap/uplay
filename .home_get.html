@@ -1,0 +1,584 @@
+HTTP/1.1 200 OK
+Date: Sun, 02 Nov 2025 23:45:56 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+CF-RAY: 998782244efa1d14-EZE
+rndr-id: 4738c33a-b7ed-4b99
+Set-Cookie: session=eyJjc3JmX3Rva2VuIjoiZDJmNzNlMDI4ZDliZTMyOTQ5NGEyZTU0OWZiMjhhYzhhYjczNWIxNCJ9.aQftNA.Zi9SAHrNX03LOWvyDZmwKGexv_w; HttpOnly; Path=/
+vary: Cookie
+vary: Accept-Encoding
+x-render-origin-server: gunicorn
+cf-cache-status: DYNAMIC
+Server: cloudflare
+alt-svc: h3=":443"; ma=86400
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Inicio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="ImQyZjczZTAyOGQ5YmUzMjk0OTRhMmU1NDlmYjI4YWM4YWI3MzViMTQi.aQftNA.GActtYuSSRfBdm0KJpK1jYBli7c" />
+
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===== Paleta Academia ===== */
+    :root{
+      --blue-900:#004B8D;      /* azul institucional */
+      --blue-800:#0a4a82;
+      --blue-700:#0d5fa1;
+      --blue-600:#0f6fb7;
+      --panel:#0e3f6e;         /* panel/carta */
+      --panel-2:#0b355d;       /* panel alterno */
+      --text:#ffffff;          /* texto principal */
+      --muted:#cfe3f7;         /* texto secundario */
+      --neon:#8AE80C;          /* verde neón */
+      --yellow:#F6C90E;        /* amarillo tenis */
+      --danger:#ff5252;
+      --warn:#ffd166;
+      --ok:#00c853;
+      --radius:14px;
+      --shadow:0 14px 40px rgba(0,0,0,.28);
+    }
+
+    /* ===== Reset & base ===== */
+    html,body{margin:0; padding:0; height:100%;}
+    body{
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+      /* fondo texturizado suave con la gama del afiche */
+      background:
+        radial-gradient(1400px 800px at -10% -20%, rgba(255,255,255,.06), transparent 60%),
+        radial-gradient(1200px 700px at 110% 120%, rgba(255,255,255,.05), transparent 60%),
+        linear-gradient(180deg, var(--blue-900), #053966 55%, #042c4f);
+      min-height:100%;
+      line-height:1.5;
+    }
+    .container{max-width:1120px; margin:18px auto; padding:0 14px;}
+
+    /* ===== Nav ===== */
+    nav{
+      position:sticky; top:0; z-index:50;
+      backdrop-filter:saturate(1.4) blur(6px);
+      background:linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.05));
+      border-bottom:1px solid rgba(255,255,255,.12);
+    }
+    .nav-inner{
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:10px 14px;
+      max-width:1120px; margin:0 auto;
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px; text-decoration:none;
+      padding:4px 6px; border-radius:12px;
+    }
+    .brand:hover{background:rgba(255,255,255,.07);}
+    .brand img{height:38px; display:block;}
+    .brand-text{display:flex; flex-direction:column; line-height:1.05;}
+    .brand-text strong{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:1.08rem; letter-spacing:.02em;
+    }
+    .brand-text small{
+      font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+      color:var(--neon);
+    }
+
+    nav a{color:var(--text); text-decoration:none; opacity:.92;}
+    nav a:hover{opacity:1; color:var(--neon);}
+    .spacer{flex:1;}
+
+    /* ===== Cards ===== */
+    .card{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:var(--radius);
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+    .card + .card{margin-top:12px;}
+    .card h3{margin:0 0 8px; font-size:1.12rem;}
+
+    /* ===== Botones ===== */
+    .btn, button{
+      appearance:none; border:0; cursor:pointer;
+      padding:10px 14px; border-radius:12px; font-weight:700;
+      color:#001a2e;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      transition:transform .12s ease, filter .12s ease;
+      text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn:hover, button:hover{transform:translateY(-1px); filter:brightness(1.05);}
+    .btn:active, button:active{transform:translateY(0);}
+    .btn-ghost{
+      color:var(--text);
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.18);
+    }
+    .btn-ok{background:linear-gradient(180deg, #20e27a, #0cc567); color:#002a1c;}
+    .btn-danger{background:linear-gradient(180deg, #ff6b6b, #ff5252); color:#2a0000;}
+    .btn-warning{background:linear-gradient(180deg, var(--yellow), #e4b800); color:#2a1f00;}
+    .btn-slim{padding:7px 10px; border-radius:10px; font-weight:600;}
+
+    /* ===== Inputs ===== */
+    label{display:block; font-size:.92rem; color:var(--muted); margin:6px 0 4px;}
+    input, select, textarea{
+      width:100%; max-width:460px; outline:none;
+      background:#072e55; color:var(--text);
+      border:1px solid rgba(255,255,255,.18);
+      padding:9px 11px; border-radius:12px;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color:var(--neon); box-shadow:0 0 0 3px rgba(138,232,12,.15);
+    }
+
+    /* ===== Tablas ===== */
+    table{
+      width:100%; border-collapse:separate; border-spacing:0;
+      border-radius:16px; overflow:hidden; background:rgba(255,255,255,.03);
+      box-shadow:var(--shadow);
+    }
+    thead th{
+      background:linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.15));
+      color:var(--muted); font-size:.82rem; letter-spacing:.06em; text-transform:uppercase;
+    }
+    th, td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.10); text-align:left;}
+    tbody tr:hover{background:rgba(138,232,12,.08);}
+    tbody tr:last-child td{border-bottom:0;}
+
+    /* ===== Badges ===== */
+    .badge{
+      display:inline-block; font-size:.78rem; padding:3px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.10); color:#fff;
+    }
+    .badge-ok{background:linear-gradient(180deg, rgba(32,226,122,.25), rgba(12,197,103,.20)); border-color:rgba(32,226,122,.55);}
+    .badge-warn{background:linear-gradient(180deg, rgba(246,201,14,.28), rgba(246,201,14,.16)); border-color:rgba(246,201,14,.6);}
+    .badge-danger{background:linear-gradient(180deg, rgba(255,82,82,.25), rgba(255,82,82,.16)); border-color:rgba(255,82,82,.6);}
+
+    /* ===== Flash ===== */
+    .flash-ok{background:rgba(0,200,83,.18); border:1px solid rgba(0,200,83,.55); color:#e8fff1; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-error{background:rgba(255,82,82,.18); border:1px solid rgba(255,82,82,.55); color:#ffe8e8; padding:10px; border-radius:12px; margin:8px 0;}
+    .flash-warning{background:rgba(246,201,14,.18); border:1px solid rgba(246,201,14,.55); color:#fff8dc; padding:10px; border-radius:12px; margin:8px 0;}
+
+    /* ===== Helpers ===== */
+    .muted{color:var(--muted);}
+
+    /* ===== FAB de Ayuda ===== */
+    .help-fab{
+      position:fixed; right:20px; bottom:20px; z-index:999;
+      width:56px; height:56px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, var(--neon), #74d30b);
+      color:#012; font-size:22px; border:1px solid rgba(255,255,255,.20);
+      box-shadow:0 14px 40px rgba(0,0,0,.35);
+    }
+    .help-fab:hover{transform:translateY(-1px); filter:brightness(1.05);}
+
+    .help-backdrop{position:fixed; inset:0; display:none; z-index:1000; background:rgba(1,18,34,.65);}
+    .help-dialog{
+      background:linear-gradient(180deg, var(--panel), var(--panel-2));
+      color:var(--text);
+      width:min(860px, 94vw); margin:6vh auto; border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+    }
+    .help-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .help-title{margin:0; font-size:1.06rem; font-weight:800; letter-spacing:.02em;}
+    .help-close{
+      background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+      border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);
+    }
+    .help-body{padding:14px;}
+    .help-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px,1fr));}
+    .help-section{
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:12px; padding:12px;
+    }
+    .help-section h4{margin:0 0 8px; font-size:1rem; color:#eaf6ff;}
+    .help-section p{margin:0; color:var(--muted);}
+    .help-links a{display:inline-block; margin:6px 8px 0 0; color:var(--neon); text-decoration:none; font-weight:700;}
+    .help-links a:hover{text-decoration:underline;}
+    .help-footer{
+      padding:12px 14px; border-top:1px solid rgba(255,255,255,.10);
+      display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);
+    }
+
+    @media (prefers-reduced-motion:no-preference){
+      .help-dialog{animation:pop .16s ease-out;}
+      @keyframes pop{from{transform:scale(.98); opacity:.75;} to{transform:scale(1); opacity:1;}}
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <!-- Marca -->
+      <a href="/" class="brand" aria-label="UPLAY inicio">
+        <img src="/static/logo/uplay-logo.svg" alt="UPLAY">
+        <span class="brand-text">
+          <strong>UPLAY</strong>
+          <small>Vos jugás, Vos ascendes!</small>
+        </span>
+      </a>
+
+      <!-- Enlaces -->
+      <a href="/">Inicio</a>
+      
+      <span class="spacer"></span>
+
+      
+        <a href="/login" class="btn btn-ghost btn-slim">Iniciar sesión</a>
+      
+    </div>
+  </nav>
+
+  <div class="container">
+    
+      
+    
+
+    
+<style>
+  /* ===== Hero / cabecera ===== */
+  .hero{
+    position:relative; overflow:hidden;
+    border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 14px 40px rgba(0,0,0,.28);
+  }
+  .hero-top{
+    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
+  }
+  .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
+  .hero-tag{
+    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
+    font-size:clamp(.78rem, 1.6vw, .92rem);
+    background: linear-gradient(90deg, var(--yellow), var(--neon));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
+  }
+  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ===== Chips / stats ===== */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
+    font-weight:700;
+  }
+  .chip .dot{width:8px; height:8px; border-radius:50%;}
+  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
+  .dot-blue{background:#6EA8FF;}
+
+  /* ===== Variables de tarjetas/botones ===== */
+  :root{
+    --card-h: 200px;   /* altura uniforme de las cards */
+    --cta-btn-w: 200px;/* ancho fijo del botón en cards */
+    --cta-btn-h: 44px; /* alto fijo del botón en cards */
+  }
+
+  /* ===== Grid de tarjetas ===== */
+  .grid-cards{
+    display:grid; gap:10px;
+    margin-top:12px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items:start; /* prolijidad */
+  }
+  /* FIX: eliminar márgenes heredados en items dentro del grid (causa de la 1ª card “más arriba”) */
+  .grid-cards .card,
+  .grid-cards .card + .card{
+    margin:0 !important;
+  }
+
+  /* Tarjeta CTA: título / descripción / botón */
+  .card-cta{
+    display:grid;
+    grid-template-rows:auto 1fr auto; /* título / texto / botón */
+    min-height:var(--card-h);
+    padding:12px;
+    box-sizing:border-box;
+  }
+  .card-cta h3{ margin:0 0 6px; }
+  .card-cta p{
+    margin:0 0 8px; color:var(--muted);
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+
+  /* ==== Botones consistentes (chicos y centrados) ==== */
+  .card-cta a.btn,
+  .card-cta button.btn,
+  .card-cta button{
+    box-sizing:border-box;
+    width:var(--cta-btn-w);
+    max-width:90%;
+    height:var(--cta-btn-h);
+    padding:0 16px;
+    border-radius:12px;
+    font:inherit; font-weight:700; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    justify-self:center;
+  }
+  /* Botón dentro de <form> centrado y pegado abajo igual que un <a> */
+  .card-cta form{
+    display:flex;
+    justify-content:center;
+    align-items:flex-end;
+    margin:0;
+  }
+  .card-cta > *:last-child{
+    align-self:end;
+    justify-self:center;
+  }
+
+  /* ===== Modal confirmación (abrir partido) ===== */
+  .backdrop{position:fixed; inset:0; display:none; z-index:1001; background:rgba(1,18,34,.65);}
+  .dialog{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    color:var(--text);
+    width:min(560px, 94vw); margin:8vh auto; border-radius:14px;
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 70px rgba(0,0,0,.5); overflow:hidden;
+  }
+  .dialog-header{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.10);}
+  .dialog-title{margin:0; font-size:1.02rem; font-weight:800;}
+  .dialog-body{padding:14px;}
+  .dialog-footer{padding:12px 14px; border-top:1px solid rgba(255,255,255,.10); display:flex; gap:8px; justify-content:flex-end; background:rgba(0,0,0,.18);}
+  .close-btn{background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:6px 10px; cursor:pointer; color:var(--text);}
+</style>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h1 class="hero-title">UPLAY</h1>
+      <p class="hero-tag">Vos jugás, Vos ascendés!</p>
+    </div>
+
+    
+      <div class="hero-actions">
+        <a class="btn" href="/login">Iniciar sesión</a>
+        <a class="btn-ghost btn-slim" href="/alta">Pedir el alta</a>
+      </div>
+    
+  </div>
+
+  
+    <p class="muted" style="margin:10px 0 0;">Iniciá sesión para crear o unirte a partidos, y sumar puntos al ranking.</p>
+  
+</div>
+
+<!-- ===== CONTENIDO PRINCIPAL ===== -->
+
+  <!-- Primera vez / público -->
+  <div class="card" style="margin-top:12px;">
+    <p style="margin:0;">
+      Podés <strong>iniciar sesión</strong> para crear o unirte a partidos, o ver el <strong>ranking</strong>.
+    </p>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+      <a href="/login" class="btn">Iniciar sesión</a>
+      <a href="/alta" class="btn-ghost">Pedir el alta</a>
+      <a href="/ranking" class="btn-ghost">Ver ranking</a>
+      <a href="/categorias" class="btn-ghost">Categorías</a>
+    </div>
+  </div>
+
+  <div class="card" style="border-style:dashed; margin-top:10px;">
+    <h3 style="margin:0 0 6px;">¿Primera vez?</h3>
+    <ol style="margin:0; padding-left:18px;">
+      <li>Pedí el <strong>alta</strong> al organizador.</li>
+      <li>Entrá por <em>Iniciar sesión</em> con tu nombre y PIN.</li>
+      <li>Creá un <strong>partido abierto</strong> o unite a uno existente.</li>
+      <li>Jugá y cargá el resultado para sumar al ranking.</li>
+    </ol>
+  </div>
+
+
+<!-- Atajos -->
+<div class="shortcuts">
+  <h3>Atajos útiles</h3>
+  <div class="links">
+    <a href="/partidos" class="btn btn-ghost">Partidos</a>
+    <a href="/desafios" class="btn btn-ghost">Desafíos</a>
+    <a href="/torneos" class="btn btn-ghost">Torneos</a>
+  </div>
+</div>
+
+<!-- ===== Modal Confirmación: Abrir partido ===== -->
+<div class="backdrop" id="backdropOpen" aria-hidden="true">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="openTitle">
+    <div class="dialog-header">
+      <h3 class="dialog-title" id="openTitle">Confirmar: Abrir partido</h3>
+      <button type="button" class="close-btn" id="openClose">Cerrar</button>
+    </div>
+    <div class="dialog-body">
+      <p style="margin:0 0 8px;">Estás por <strong>crear un partido abierto</strong> en tu categoría.</p>
+      <ul style="margin:0 0 8px 18px; padding:0;">
+        <li>Se abre un cupo para completar jugadores.</li>
+        <li>Se suman <strong>3 jugadores</strong> de tu categoría además de vos.</li>
+        <li>Compartí el link para que se sumen.</li>
+      </ul>
+      <p class="muted" style="margin:0;">Si ya tenés compañero y rivales definidos, usá <strong>Partido nuevo</strong>.</p>
+    </div>
+    <div class="dialog-footer">
+      <button type="button" class="btn-ghost" id="openCancel">Cancelar</button>
+      <button type="button" class="btn" id="openConfirm">Crear partido abierto</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    // Confirmación al "Abrir partido"
+    const btn = document.getElementById('btnAbrirPartido');
+    const form = document.getElementById('formAbrirPartido');
+    const backdrop = document.getElementById('backdropOpen');
+    const closeBtn = document.getElementById('openClose');
+    const cancelBtn = document.getElementById('openCancel');
+    const confirmBtn = document.getElementById('openConfirm');
+
+    function openDialog(){
+      backdrop.style.display='block';
+      backdrop.setAttribute('aria-hidden','false');
+      setTimeout(()=> confirmBtn.focus(), 10);
+    }
+    function closeDialog(){
+      backdrop.style.display='none';
+      backdrop.setAttribute('aria-hidden','true');
+      btn && btn.focus();
+    }
+
+    if(btn){ btn.addEventListener('click', (e)=>{ e.preventDefault(); openDialog(); }); }
+    closeBtn.addEventListener('click', closeDialog);
+    cancelBtn.addEventListener('click', closeDialog);
+    backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeDialog(); });
+    window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeDialog(); });
+
+    confirmBtn.addEventListener('click', ()=>{
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      if(meta && !form.querySelector('input[name="csrf_token"]')){
+        const i=document.createElement('input');
+        i.type='hidden'; i.name='csrf_token'; i.value=meta.content;
+        form.appendChild(i);
+      }
+      form.submit();
+    });
+  })();
+</script>
+
+  </div>
+
+  <!-- FAB de Ayuda -->
+  <button class="help-fab" id="helpFab" aria-label="Ayuda" title="Ayuda">❔</button>
+
+  <!-- Modal de Ayuda -->
+  <div class="help-backdrop" id="helpBackdrop" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-header">
+        <h3 class="help-title" id="helpTitle">¿Cómo usar UPLAY?</h3>
+        <button class="help-close" id="helpClose" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="help-body">
+        
+<section class="help-section">
+  <h4 style="margin:0 0 8px;">¿Qué puedo hacer en <strong>Inicio</strong>?</h4>
+
+  <ul style="margin:0 0 10px 18px; padding:0; line-height:1.3;">
+    <li><strong>Partido nuevo</strong>: armá el partido con tu compañero y rivales.</li>
+    <li><strong>Abrir partido</strong>: creá un abierto para que se sumen jugadores de tu categoría.</li>
+    <li><strong>Unirme a un partido</strong>: buscá y anotate en abiertos disponibles.</li>
+    <li><strong>Ranking</strong>: mirá posiciones y puntos.</li>
+    <li><strong>Atajos</strong>: acceso rápido a Partidos, Desafíos y Torneos.</li>
+  </ul>
+
+  <div style="margin:10px 0 0; font-size:.95rem; opacity:.95;">
+    <strong>Tip:</strong> si ya tenés los 4 jugadores definidos, usá <em>Partido nuevo</em>. Si te falta gente, usá <em>Abrir partido</em>.
+  </div>
+
+  
+  <div style="margin:8px 0 0; font-size:.95rem; opacity:.95;">
+    <strong>Primera vez:</strong> pedí el alta, iniciá sesión con tu nombre + PIN y ¡listo para jugar!
+  </div>
+  
+</section>
+
+          <div class="help-grid">
+            <section class="help-section">
+              <h4>Menú principal</h4>
+              <p>
+                <strong>Ranking:</strong> tu posición y categoría.<br>
+                <strong>Desafíos:</strong> crear/aceptar retos.<br>
+                <strong>Partidos abiertos:</strong> anotate cuando haya cupos.<br>
+                <strong>Mi Panel:</strong> tus propuestas, confirmaciones y estado.
+              </p>
+            </section>
+            <section class="help-section">
+              <h4>Resultados y confirmaciones</h4>
+              <p>Una pareja propone el resultado, la otra confirma. Si pasan 12h sin respuesta, se cierra automático.</p>
+            </section>
+            <section class="help-section">
+              <h4>Estados de partido</h4>
+              <p>
+                <span class="badge">PENDIENTE</span> invitación/confirmación ·
+                <span class="badge badge-warn">PROPUESTO</span> esperando confirmación ·
+                <span class="badge badge-ok">JUGADO</span> cerrado.
+              </p>
+            </section>
+          </div>
+        
+
+        <div class="help-links" style="margin-top:10px;">
+          <a href="/ranking">Ir al Ranking</a>
+          <a href="/desafios">Ver Desafíos</a>
+          <a href="/abiertos">Partidos Abiertos</a>
+          
+        </div>
+      </div>
+      <div class="help-footer">
+        <a class="btn btn-ghost" href="mailto:bogadoacademia@gmail.com">Soporte</a>
+        <button class="btn" id="helpOk">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const fab = document.getElementById('helpFab');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const okBtn = document.getElementById('helpOk');
+
+      function openHelp(){ backdrop.style.display='block'; backdrop.setAttribute('aria-hidden','false'); setTimeout(()=> closeBtn.focus(), 10); }
+      function closeHelp(){ backdrop.style.display='none'; backdrop.setAttribute('aria-hidden','true'); fab.focus(); }
+
+      fab.addEventListener('click', openHelp);
+      closeBtn.addEventListener('click', closeHelp);
+      okBtn.addEventListener('click', closeHelp);
+      backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeHelp(); });
+      window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeHelp(); });
+    })();
+
+    // CSRF auto-injection
+    (function addCsrfToForms(){
+      const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+      if(!tokenMeta) return;
+      const token = tokenMeta.content;
+      document.querySelectorAll('form[method="post"]').forEach(f=>{
+        if(!f.querySelector('input[name="csrf_token"]')){
+          const i=document.createElement('input'); i.type='hidden'; i.name='csrf_token'; i.value=token; f.appendChild(i);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

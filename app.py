@@ -7705,6 +7705,48 @@ def admin_torneos_new():
     # GET -> usar tu template existente
     return render_template('admin_torneos_form.html', categorias=categorias)
 
+@app.route('/admin/torneos/new_playoff', methods=['GET', 'POST'])
+@admin_required
+def admin_torneo_new_playoff():
+    categorias = Categoria.query.all()
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        categoria_id = request.form.get('categoria_id', type=int)
+        fase_inicial = (request.form.get('fase_inicial') or '32avos').upper()
+
+        if not nombre or not categoria_id:
+            flash('Completá nombre y categoría.', 'error')
+            return redirect(url_for('admin_torneo_new_playoff'))
+
+        cat = db.session.get(Categoria, categoria_id)
+        if not cat:
+            flash('Categoría inválida.', 'error')
+            return redirect(url_for('admin_torneo_new_playoff'))
+
+        # Crear torneo
+        torneo = Torneo(
+            nombre=nombre,
+            categoria_id=cat.id,
+            formato='DOBLES',
+            modalidad='PLAYOFF',
+            permite_playoff_desde=fase_inicial
+        )
+        db.session.add(torneo)
+        db.session.commit()
+
+        # Generar cuadro inicial
+        try:
+            generar_playoff_directo(torneo.id)
+            flash('✅ Torneo Playoff creado y cuadro inicial generado.', 'ok')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'⚠️ Error al generar cuadro: {e}', 'error')
+
+        return redirect(url_for('admin_torneo_ver', tid=torneo.id))
+
+    # GET → Mostrar formulario
+    return render_template('admin_torneo_new_playoff.html', categorias=categorias)
 
 
 @app.route('/admin/torneos/<int:tid>', methods=['GET'])

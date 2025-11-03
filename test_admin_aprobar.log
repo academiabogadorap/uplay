@@ -1,0 +1,11 @@
+=======================================
+== 🧭 Paso 1: Login como admin ==
+=======================================
+[OK] CSRF token de login obtenido: IjhjNTNjNGM3NjM4MWI1ZmIwMDViNTc5MGJjMjAwNTZjMWI3MTJhNmIi.aQaLTA.78jG0S1xWnRNI1DYQr3qWDDFq4E
+[WARN] No se detectó 'Cerrar sesión' en HTML (puede estar redirigido).
+=======================================
+== 🔎 Paso 2: Buscar solicitud pendiente ==
+=======================================
+[SEED] ADMIN_NOMBRE/ADMIN_PIN no configurados; seed omitido
+[OK] �ltima solicitud pendiente: ID=20 | Nombre=TESTER CURL COMPLETO | Email=test_1762034814@ejemplo.com
+[ERROR] No hay ID de solicitud pendiente. Creá una nueva solicitud en /alta.
