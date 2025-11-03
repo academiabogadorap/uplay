@@ -240,6 +240,18 @@ def send_mail(
     except Exception:
         current_app = None
 
+    # --- MODO DEBUG LOCAL (solo imprime) ---
+    if os.getenv("RENDER") is None:  # si no estamos en Render
+        print("\n==================== EMAIL DEBUG UPLAY ====================")
+        print(f"🧾 Asunto: {subject}")
+        print(f"📤 Para: {to}")
+        if html_body:
+            print("💬 HTML:\n", html_body)
+        elif body:
+            print("💬 Texto:\n", body)
+        print("===========================================================\n")
+        return True
+
     # Logger seguro
     try:
         logger = current_app.logger  # type: ignore[union-attr]
@@ -392,6 +404,7 @@ def send_mail(
     except Exception as e:
         logger.exception("SMTP error inesperado: %s", e)
         return False
+
 
 
 
@@ -2866,19 +2879,19 @@ def alta_publica():
     categorias = Categoria.query.order_by(Categoria.puntos_min.desc()).all()
 
     if request.method == 'POST':
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        import logging, os
+
         nombre = (request.form.get('nombre_completo') or '').strip()
-        email = (request.form.get('email') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()  # compatibilidad
+        email = (request.form.get('email') or '').strip().lower()
+        telefono = (request.form.get('telefono') or '').strip()
         categoria_id = request.form.get('categoria_id', type=int)
         mensaje = (request.form.get('mensaje') or '').strip()
-
-        # NUEVO: campos opcionales de teléfono separados
-        tel_cc = (request.form.get('tel_cc') or '').strip() or '54'   # AR por defecto
+        tel_cc = (request.form.get('tel_cc') or '').strip() or '54'
         tel_local = (request.form.get('tel_local') or '').strip()
 
-        # ===== NUEVO: Datos personales opcionales =====
-        # Helpers locales para normalizar/parsear sin tocar el resto de la app
-        from datetime import datetime  # (local por si en tu módulo ya está importado)
+        # === Datos personales opcionales ===
         def _safe_title(s: str | None):
             if not s:
                 return None
@@ -2896,23 +2909,19 @@ def alta_publica():
         provincia = _safe_title(request.form.get('provincia'))
         ciudad = _safe_title(request.form.get('ciudad'))
         fecha_nacimiento = _parse_date_yyyy_mm_dd(request.form.get('fecha_nacimiento'))
-        # ==============================================
 
-        # --- Validaciones obligatorias ---
+        # === Validaciones básicas ===
         if not nombre:
             flash('El nombre es obligatorio.', 'error')
             return redirect(url_for('alta_publica'))
         if not categoria_id:
             flash('La categoría es obligatoria.', 'error')
             return redirect(url_for('alta_publica'))
-        if not email:
-            flash('El email es obligatorio.', 'error')
-            return redirect(url_for('alta_publica'))
-        if '@' not in email or len(email) < 6:
+        if not email or '@' not in email or len(email) < 6:
             flash('Ingresá un email válido.', 'error')
             return redirect(url_for('alta_publica'))
 
-        # Armar teléfono final (prioriza tel_cc + tel_local; si no, usa "telefono")
+        # === Validación de teléfono ===
         def only_digits(s: str) -> str:
             return ''.join(ch for ch in s if ch.isdigit())
 
@@ -2921,52 +2930,48 @@ def alta_publica():
             cc_digits = only_digits(tel_cc)
             local_digits = only_digits(tel_local)
             if len(local_digits) < 7:
-                flash('Ingresá un teléfono válido (al menos 7 dígitos en el número local).', 'error')
+                flash('Ingresá un teléfono válido (mínimo 7 dígitos en el número local).', 'error')
                 return redirect(url_for('alta_publica'))
             if not cc_digits:
                 flash('Ingresá un código de país válido.', 'error')
                 return redirect(url_for('alta_publica'))
             telefono_final = f'+{cc_digits}{local_digits}'
         else:
-            # Compatibilidad: usar el campo "telefono" tal como estaba
             if not telefono:
                 flash('El teléfono es obligatorio.', 'error')
                 return redirect(url_for('alta_publica'))
             tel_digits = only_digits(telefono)
             if len(tel_digits) < 7:
-                flash('Ingresá un teléfono válido (al menos 7 dígitos).', 'error')
+                flash('Ingresá un teléfono válido (mínimo 7 dígitos).', 'error')
                 return redirect(url_for('alta_publica'))
-            # Normalizar: si ya viene con +, preservamos + y dígitos; si no, asumimos CC por defecto
             if telefono.strip().startswith('+'):
                 telefono_final = '+' + tel_digits
             else:
-                # Construimos con el CC por defecto (AR 54) si no vino tel_cc/tel_local
                 telefono_final = f'+54{tel_digits}'
 
-        cat = db.session.get(Categoria, int(categoria_id)) if categoria_id is not None else None
+        cat = db.session.get(Categoria, int(categoria_id)) if categoria_id else None
         if not cat:
             flash('Categoría inválida.', 'error')
             return redirect(url_for('alta_publica'))
 
-        # Duplicado por solicitud pendiente (mismo email)
+        # === Validaciones de duplicado ===
         existe_pend = (db.session.query(SolicitudAlta)
                        .filter(SolicitudAlta.email == email,
                                SolicitudAlta.estado == 'PENDIENTE')
                        .first())
         if existe_pend:
-            flash('Ya hay una solicitud pendiente con ese email. Te contactaremos pronto.', 'ok')
+            flash('Ya hay una solicitud pendiente con ese email. Te contactaremos pronto.', 'error')
             return redirect(url_for('alta_publica'))
 
-        # Ya existe un jugador con ese email (activo o inactivo)
         existe_jugador = db.session.query(Jugador).filter(Jugador.email == email).first()
         if existe_jugador:
             flash('Ese email ya está registrado como jugador. Probá iniciar sesión o contactá al organizador.', 'error')
             return redirect(url_for('alta_publica'))
 
-        # --- Normalizar nombre a MAYÚSCULAS (mantiene acentos) ---
+        # === Normalizar nombre ===
         nombre_upper = nombre.upper()
 
-        # Crear solicitud (se agregan los nuevos campos)
+        # === Crear nueva solicitud ===
         s = SolicitudAlta(
             nombre_completo=nombre_upper,
             email=email,
@@ -2974,7 +2979,6 @@ def alta_publica():
             categoria_id=cat.id,
             mensaje=mensaje or None,
             estado='PENDIENTE',
-            # ===== NUEVOS CAMPOS =====
             pais=pais,
             provincia=provincia,
             ciudad=ciudad,
@@ -2983,43 +2987,36 @@ def alta_publica():
         db.session.add(s)
         db.session.commit()
 
-        # ==== Aviso por email a administradores (usando send_mail) ====
+        # === Envío de notificación a admins ===
         try:
-            from zoneinfo import ZoneInfo  # (local por si ya lo tenés importado arriba)
             admin_emails = [e.strip() for e in (os.getenv('ADMIN_EMAILS') or '').split(',') if e.strip()]
             if admin_emails:
                 ahora_ar = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).strftime('%Y-%m-%d %H:%M')
-                # armamos líneas opcionales limpias
-                linea_loc = f"Ubicación: {pais or '-'} / {provincia or '-'} / {ciudad or '-'}\n"
-                # blindaje: si fecha_nacimiento es None, mostramos '-'
                 fn_str = fecha_nacimiento.strftime('%Y-%m-%d') if fecha_nacimiento else '-'
-                linea_fn  = f"Fecha de nacimiento: {fn_str}\n"
-
                 body = (
-                    "Se recibió una nueva solicitud de ALTA.\n\n"
-                    f"Nombre:   {nombre_upper}\n"
-                    f"Email:    {email}\n"
-                    f"Teléfono: {telefono_final}\n"
-                    f"Categoría solicitada: {cat.nombre} (id {cat.id})\n"
-                    f"{linea_loc}"
-                    f"{linea_fn}"
-                    f"Mensaje:  {mensaje or '-'}\n"
-                    f"Fecha/Hora (AR): {ahora_ar}\n\n"
-                    "Revisar en: /admin/solicitudes"
+                    "📥 NUEVA SOLICITUD DE ALTA\n\n"
+                    f"👤 Nombre: {nombre_upper}\n"
+                    f"✉️ Email: {email}\n"
+                    f"📞 Teléfono: {telefono_final}\n"
+                    f"🏆 Categoría solicitada: {cat.nombre} (ID {cat.id})\n"
+                    f"🌎 Ubicación: {pais or '-'} / {provincia or '-'} / {ciudad or '-'}\n"
+                    f"🎂 Fecha de nacimiento: {fn_str}\n"
+                    f"💬 Mensaje: {mensaje or '-'}\n"
+                    f"🕓 Fecha/Hora (AR): {ahora_ar}\n\n"
+                    "Revisar en el panel: /admin/solicitudes"
                 )
-
                 ok = send_mail(
                     subject=f'Nueva solicitud de alta: {nombre_upper}',
                     body=body,
                     to=admin_emails
                 )
-                current_app.logger.info("Aviso de alta a admins send_mail=%s to=%s", ok, admin_emails)
+                current_app.logger.info(f"Notificación enviada a admins={admin_emails}, send_mail={ok}")
             else:
                 logging.warning('ADMIN_EMAILS vacío; no se envía aviso de alta.')
-        except Exception:
+        except Exception as e:
             logging.exception('Fallo enviando email de notificación de nueva solicitud de alta.')
 
-        flash('Solicitud enviada. Un administrador la revisará.', 'ok')
+        flash('✅ Solicitud enviada correctamente. Un administrador la revisará en breve.', 'success')
         return redirect(url_for('home'))
 
     # GET
@@ -4204,7 +4201,7 @@ def partidos_new():
             flash('Todos los jugadores deben estar activos.', 'error')
             return redirect(url_for('partidos_new'))
 
-        # Misma categoría del creador
+        # Misma categoría
         if not (companero.categoria_id == cat.id and r1.categoria_id == cat.id and r2.categoria_id == cat.id):
             flash('Todos deben pertenecer a tu misma categoría.', 'error')
             return redirect(url_for('partidos_new'))
@@ -4227,23 +4224,76 @@ def partidos_new():
             pareja1_id=pareja_mia.id,
             pareja2_id=pareja_rival.id,
             fecha=fecha,
-            estado='PENDIENTE',     # queda pendiente hasta que acepten
-            # --- campos de invitación ---
+            estado='PENDIENTE',
             creador_id=creador.id,
             companero_id=companero.id,
             rival1_id=r1.id,
             rival2_id=r2.id,
-            rival1_acepto=None,     # sin responder
-            rival2_acepto=None      # sin responder
+            rival1_acepto=None,
+            rival2_acepto=None
         )
         db.session.add(partido)
         db.session.commit()
 
-        flash(f'Partido #{partido.id} creado.', 'ok')
+        # =================== ✉️ EMAIL UPLAY ===================
+        from flask import current_app
+        from datetime import datetime
+
+        enlace = url_for('partidos_list', _external=True)
+        asunto = f"🎾 Nuevo partido creado en UPLAY #{partido.id}"
+
+        mensaje_html = f"""
+        <div style="font-family:'Poppins',Arial,sans-serif;background:#f3f4f8;padding:32px 0;">
+          <div style="max-width:620px;margin:auto;background:white;border-radius:16px;overflow:hidden;
+                      box-shadow:0 4px 16px rgba(0,0,0,0.12);">
+            <div style="text-align:center;padding:30px 0;background:linear-gradient(135deg,#7B68EE,#9b8df3);color:white;">
+              <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg" alt="UPLAY"
+                   style="height:70px;margin-bottom:10px;">
+              <h2 style="margin:0;font-size:1.5rem;">Nuevo partido creado en UPLAY</h2>
+            </div>
+            <div style="padding:28px;color:#222;line-height:1.6;">
+              <p style="font-size:1.05rem;">
+                <strong>{creador.nombre_completo}</strong> creó un nuevo partido y te agregó como jugador.
+              </p>
+              <p style="margin:10px 0 18px 0;">
+                <b>Compañero:</b> {companero.nombre_completo}<br>
+                <b>Rivales:</b> {r1.nombre_completo} y {r2.nombre_completo}
+              </p>
+              <p style="margin-bottom:22px;">
+                Ingresá a UPLAY para confirmar tu participación o revisar los detalles del partido.
+              </p>
+              <div style="text-align:center;">
+                <a href="{enlace}" style="background:#7B68EE;color:white;padding:14px 26px;font-weight:600;
+                   border-radius:10px;text-decoration:none;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+                   ⚡ Ver partido en UPLAY
+                </a>
+              </div>
+            </div>
+            <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:16px;">
+              <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
+              <p style="font-size:0.8rem;color:#aaa;margin:0;">Este mensaje fue enviado automáticamente por el sistema UPLAY.</p>
+            </div>
+          </div>
+        </div>
+        """
+
+        # Enviar a todos los involucrados
+        for jugador in [companero, r1, r2]:
+            try:
+                if jugador.email:
+                    send_mail(
+                        subject=asunto,
+                        body="Nuevo partido en UPLAY",
+                        to=jugador.email,
+                        html_body=mensaje_html
+                    )
+            except Exception as e:
+                current_app.logger.warning(f"[UPLAY] Error al enviar mail a {jugador.email}: {e}")
+
+        flash(f'Partido #{partido.id} creado y notificaciones enviadas.', 'ok')
         return redirect(url_for('partidos_list'))
 
     # GET -> armar combos
-    # Todos los jugadores activos de mi categoría, excepto yo
     jugadores_mi_cat = (
         db.session.query(Jugador)
         .filter(
@@ -4255,8 +4305,8 @@ def partidos_new():
         .all()
     )
 
-    candidatos_companero = jugadores_mi_cat  # cualquier otro de mi categoría
-    candidatos_rivales   = jugadores_mi_cat  # idem (se filtrará en el front para no repetir)
+    candidatos_companero = jugadores_mi_cat
+    candidatos_rivales   = jugadores_mi_cat
 
     return render_template(
         'partidos_form.html',
@@ -4264,6 +4314,8 @@ def partidos_new():
         candidatos_companero=candidatos_companero,
         candidatos_rivales=candidatos_rivales
     )
+
+
 
 # =========================
 # RUTA: PROPONER RESULTADO (vista de carga / edición de propuesta)
@@ -4468,6 +4520,57 @@ def partidos_responder(partido_id):
         if ambos_ok:
             p.estado = 'ACEPTADO'
             msg = 'Ambos rivales aceptaron. El partido está listo para jugar.'
+
+            # ✉️ Enviar notificación al creador
+            try:
+                from flask import current_app
+                from datetime import datetime
+
+                creador = p.creador
+                companero = p.companero
+                r1 = db.session.get(Jugador, int(p.rival1_id))
+                r2 = db.session.get(Jugador, int(p.rival2_id))
+                enlace = url_for('partidos_list', _external=True)
+                asunto = f"✅ Tu partido #{p.id} fue confirmado por todos en UPLAY"
+
+                mensaje_html = f"""
+                <div style="font-family:'Poppins',Arial,sans-serif;background:#f6f6f9;padding:30px 0;">
+                  <div style="max-width:600px;margin:auto;background:white;border-radius:12px;overflow:hidden;
+                              box-shadow:0 4px 10px rgba(0,0,0,0.08);">
+                    <div style="text-align:center;padding:25px 0;background:linear-gradient(135deg,#7B68EE,#9b8df3);color:white;">
+                      <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg" alt="UPLAY" style="height:68px;margin-bottom:6px;">
+                      <h2 style="margin:0;">🎾 ¡Tu partido fue confirmado!</h2>
+                    </div>
+                    <div style="padding:22px;color:#222;line-height:1.6;">
+                      <p>Todos los jugadores confirmaron su participación en el partido <b>#{p.id}</b>.</p>
+                      <p>
+                        <b>Compañero:</b> {companero.nombre_completo}<br>
+                        <b>Rivales:</b> {r1.nombre_completo} y {r2.nombre_completo}
+                      </p>
+                      <div style="text-align:center;margin-top:20px;">
+                        <a href="{enlace}" style="background:#7B68EE;color:white;padding:12px 22px;border-radius:8px;
+                           text-decoration:none;display:inline-block;">Ver mis partidos en UPLAY</a>
+                      </div>
+                    </div>
+                    <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:12px;">
+                      <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
+                      <p style="font-size:0.8rem;color:#aaa;margin:0;">Este es un mensaje automático del sistema.</p>
+                    </div>
+                  </div>
+                </div>
+                """
+
+                if creador.email:
+                    send_mail(
+                        subject=asunto,
+                        body="Tu partido fue confirmado",
+                        to=creador.email,
+                        html_body=mensaje_html
+                    )
+                    current_app.logger.info(f"[UPLAY] Email enviado al creador {creador.email} confirmando el partido #{p.id}")
+            except Exception as e:
+                current_app.logger.warning(f"[UPLAY] Error al enviar mail de confirmación al creador: {e}")
+
         else:
             if p.estado not in ('PENDIENTE', 'POR_CONFIRMAR'):
                 p.estado = 'POR_CONFIRMAR'
@@ -4487,6 +4590,7 @@ def partidos_responder(partido_id):
         opciones_companero=opciones_companero,
         yo_acepto=yo_acepto
     )
+
 
 
 # =========================
@@ -5444,15 +5548,93 @@ def abiertos_new():
         flash('El creador debe pertenecer a la categoría elegida.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    pa = PartidoAbierto(categoria_id=cat.id, creador_id=creador.id, nota=nota or None, estado='ABIERTO')
+    # Crear partido abierto
+    pa = PartidoAbierto(
+        categoria_id=cat.id,
+        creador_id=creador.id,
+        nota=nota or None,
+        estado='ABIERTO'
+    )
     db.session.add(pa)
-    db.session.flush()  # obtener id
+    db.session.flush()  # obtener id antes del commit
 
     db.session.add(PartidoAbiertoJugador(pa_id=pa.id, jugador_id=creador.id))
     db.session.commit()
 
-    flash('Partido abierto creado. Compartí el link para que se sumen.', 'ok')
+    # =================== ✉️ EMAIL MASIVO UPLAY ===================
+    from flask import current_app
+    from datetime import datetime
+
+    try:
+        # Obtener todos los jugadores activos de la categoría (menos el creador)
+        jugadores_misma_cat = (
+            db.session.query(Jugador)
+            .filter(
+                Jugador.activo.is_(True),
+                Jugador.categoria_id == cat.id,
+                Jugador.id != creador.id
+            )
+            .all()
+        )
+
+        if jugadores_misma_cat:
+            asunto = f"🎾 ¡Nuevo partido abierto en tu categoría ({cat.nombre})!"
+            enlace = url_for('abiertos_list', _external=True)
+
+            mensaje_html = f"""
+            <div style="font-family:'Poppins',Arial,sans-serif;background:#f6f6f9;padding:30px 0;">
+              <div style="max-width:600px;margin:auto;background:white;border-radius:12px;
+                          box-shadow:0 3px 10px rgba(0,0,0,0.08);overflow:hidden;">
+                <div style="text-align:center;padding:24px 0;border-bottom:1px solid #eee;">
+                  <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg"
+                       alt="UPLAY" style="height:64px;margin-bottom:8px;">
+                  <h2 style="color:#7B68EE;margin:0;font-size:1.3rem;">¡Nuevo partido abierto en tu categoría!</h2>
+                </div>
+                <div style="padding:24px;color:#222;line-height:1.5;">
+                  <p><strong>{creador.nombre_completo}</strong> abrió un partido y busca compañero y rivales.</p>
+                  {"<p><em>Nota del creador:</em> " + nota + "</p>" if nota else ""}
+                  <p>Si querés sumarte, podés hacerlo desde UPLAY:</p>
+                  <div style="text-align:center;margin-top:18px;">
+                    <a href="{enlace}" style="background:#7B68EE;color:white;padding:12px 22px;
+                       border-radius:8px;text-decoration:none;display:inline-block;">
+                       Ver partidos abiertos en UPLAY
+                    </a>
+                  </div>
+                </div>
+                <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:12px;">
+                  <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
+                  <p style="font-size:0.8rem;color:#aaa;margin:0;">Este es un mensaje automático del sistema.</p>
+                </div>
+              </div>
+            </div>
+            """
+
+            # Enviar a todos los jugadores de la categoría
+            for jugador in jugadores_misma_cat:
+                if jugador.email:
+                    try:
+                        send_mail(
+                            subject=asunto,
+                            body="Nuevo partido abierto en UPLAY",
+                            to=jugador.email,
+                            html_body=mensaje_html
+                        )
+                    except Exception as e:
+                        current_app.logger.warning(
+                            f"[UPLAY] Error enviando mail a {jugador.email}: {e}"
+                        )
+
+            current_app.logger.info(
+                f"[UPLAY] Mails enviados a {len(jugadores_misma_cat)} jugadores de la categoría {cat.nombre}"
+            )
+
+    except Exception as e:
+        current_app.logger.exception(f"[UPLAY] Error general al enviar notificación masiva: {e}")
+    # ===============================================================
+
+    flash('Partido abierto creado y notificaciones enviadas a tu categoría.', 'ok')
     return redirect(url_for('abiertos_list'))
+
 
 @app.route('/abiertos/<int:pa_id>/unirse', methods=['POST'])
 def abiertos_join(pa_id):
@@ -6957,22 +7139,31 @@ def admin_home():
 @app.route('/admin/solicitudes')
 @admin_required
 def admin_solicitudes_list():
-    pend = (db.session.query(SolicitudAlta)
-            .filter_by(estado='PENDIENTE')
-            .order_by(SolicitudAlta.creado_en.desc())
-            .all())
-    hist = (db.session.query(SolicitudAlta)
-            .filter(SolicitudAlta.estado != 'PENDIENTE')
-            .order_by(SolicitudAlta.creado_en.desc())
-            .limit(50).all())
+    from sqlalchemy import func
+
+    pend = (
+        db.session.query(SolicitudAlta)
+        .filter(func.trim(func.upper(SolicitudAlta.estado)) == 'PENDIENTE')
+        .order_by(SolicitudAlta.creado_en.desc())
+        .all()
+    )
+
+    hist = (
+        db.session.query(SolicitudAlta)
+        .filter(func.trim(func.upper(SolicitudAlta.estado)) != 'PENDIENTE')
+        .order_by(SolicitudAlta.creado_en.desc())
+        .limit(50)
+        .all()
+    )
+
     return render_template('admin_solicitudes.html', pendientes=pend, historial=hist)
 
 @app.route('/admin/solicitudes/<int:sid>/aprobar', methods=['GET', 'POST'])
 @admin_required
 def admin_solicitudes_aprobar(sid):
-    from sqlalchemy import text as T
+    """Aprobación de solicitud de alta — crea jugador, asigna PIN y notifica por email."""
     from datetime import datetime, timezone
-    import secrets, string
+    import secrets, string, logging
 
     s = get_or_404(SolicitudAlta, sid)
     if s.estado != 'PENDIENTE':
@@ -6981,9 +7172,8 @@ def admin_solicitudes_aprobar(sid):
 
     if request.method == 'POST':
         puntos = request.form.get('puntos', type=int)
-        _pin_ignorado = (request.form.get('pin') or '').strip()  # compat: el form lo manda vacío
+        _pin_ignorado = (request.form.get('pin') or '').strip()
 
-        # Validaciones básicas
         cat = s.categoria
         if not cat:
             flash('La categoría de la solicitud no es válida.', 'error')
@@ -6994,17 +7184,16 @@ def admin_solicitudes_aprobar(sid):
             return redirect(url_for('admin_solicitudes_aprobar', sid=s.id))
 
         email_norm = (s.email or '').strip().lower()
-        if not email_norm:
+        if not email_norm or '@' not in email_norm:
             flash('La solicitud no tiene email válido.', 'error')
             return redirect(url_for('admin_solicitudes_list'))
 
-        # Evitar duplicar email en Jugadores
-        ya = db.session.query(Jugador).filter(Jugador.email == email_norm).first()
-        if ya:
-            flash(f'Ya existe un jugador con el email {email_norm}. No se puede duplicar.', 'error')
+        # Verificar duplicados
+        if db.session.query(Jugador).filter(Jugador.email == email_norm).first():
+            flash(f'Ya existe un jugador con el email {email_norm}.', 'error')
             return redirect(url_for('admin_solicitudes_list'))
 
-        # Crear jugador activo (PIN PERMANENTE se genera abajo)
+        # --- Crear jugador ---
         j = Jugador(
             nombre_completo=s.nombre_completo,
             email=email_norm,
@@ -7012,162 +7201,70 @@ def admin_solicitudes_aprobar(sid):
             puntos=puntos,
             categoria_id=s.categoria_id,
             activo=True,
-            # Campos extra copiados desde la solicitud (si existen en tu modelo)
             pais=getattr(s, 'pais', None),
             provincia=getattr(s, 'provincia', None),
             ciudad=getattr(s, 'ciudad', None),
             fecha_nacimiento=getattr(s, 'fecha_nacimiento', None),
-            # pin se setea luego
         )
         db.session.add(j)
-        db.session.flush()  # obtener j.id si hiciera falta
+        db.session.flush()  # obtiene j.id
 
-        # Marcar solicitud como aprobada
+        # --- Marcar solicitud ---
         s.estado = 'APROBADA'
         try:
             s.resuelto_en = datetime.now(timezone.utc)
         except Exception:
             s.resuelto_en = datetime.utcnow()
 
-        # === Generar PIN PERMANENTE (4–6 dígitos) y setear en el jugador ===
+        # --- PIN permanente ---
         def _pin_perm(long_min=4, long_max=6):
             L = secrets.choice(range(long_min, long_max + 1))
             return ''.join(secrets.choice(string.digits) for _ in range(L))
-
-        pin_permanente = _pin_perm(4, 6)
+        pin_permanente = _pin_perm()
         j.pin = pin_permanente
 
         db.session.commit()
 
-        # URL de login para el mail
+        # --- Generar PIN one-time (login rápido) ---
+        try:
+            codigo = emitir_codigo(j.email)  # se guarda en tabla de códigos
+            current_app.logger.info(f"PIN one-time emitido para {j.email}: {codigo}")
+        except Exception as e:
+            logging.exception("No se pudo emitir código temporal")
+            codigo = None
+
+        # --- Construir email ---
         try:
             login_url = url_for('login', _external=True)
         except Exception:
             login_url = (request.url_root.rstrip('/') + '/login')
 
-        subject = "¡Bienvenido a UPLAY! Tu PIN de acceso (permanente)"
-
-        def _fmt_loc(_s):
-            p = getattr(_s, 'pais', None) or '-'
-            pr = getattr(_s, 'provincia', None) or '-'
-            c = getattr(_s, 'ciudad', None) or '-'
-            return f"Ubicación: {p} / {pr} / {c}\n"
-
-        def _fmt_fn(_s):
-            fn = getattr(_s, 'fecha_nacimiento', None)
-            try:
-                return f"Fecha de nacimiento: {fn.strftime('%Y-%m-%d')}\n" if fn else "Fecha de nacimiento: -\n"
-            except Exception:
-                return "Fecha de nacimiento: -\n"
-
-        # Texto plano
         body = (
             f"Hola {j.nombre_completo},\n\n"
-            "¡Tu alta fue aprobada! Este es tu PIN de acceso (permanente):\n\n"
-            f"PIN: {pin_permanente}\n\n"
-            f"Para ingresar, andá a: {login_url}\n"
-            "Elegí tu nombre y poné este PIN. Podés cambiarlo luego desde tu perfil (Mi PIN).\n\n"
-            f"Categoría inicial: {j.categoria.nombre if j.categoria else '-'}\n"
-            f"Puntos iniciales: {j.puntos}\n"
-            + _fmt_loc(s)
-            + _fmt_fn(s)
-            + "\n— Equipo UPLAY"
+            "¡Tu alta fue aprobada!\n\n"
+            f"PIN permanente: {pin_permanente}\n"
+            + (f"PIN temporal (válido por minutos): {codigo}\n\n" if codigo else "") +
+            f"Ingresá desde: {login_url}\n\n"
+            f"Categoría: {j.categoria.nombre if j.categoria else '-'}\n"
+            f"Puntos iniciales: {j.puntos}\n\n"
+            "— Equipo UPLAY"
         )
 
-        # HTML (opcional)
-        html_extra = []
-        if getattr(s, 'pais', None):      html_extra.append(f"<li>País: {s.pais}</li>")
-        if getattr(s, 'provincia', None): html_extra.append(f"<li>Provincia/Estado: {s.provincia}</li>")
-        if getattr(s, 'ciudad', None):    html_extra.append(f"<li>Ciudad: {s.ciudad}</li>")
-        fn_text = None
-        try:
-            if getattr(s, 'fecha_nacimiento', None):
-                fn_text = s.fecha_nacimiento.strftime('%Y-%m-%d')
-        except Exception:
-            fn_text = None
-        if fn_text:
-            html_extra.append(f"<li>Fecha de nacimiento: {fn_text}</li>")
-
-        html_body = f"""\
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Bienvenido a UPLAY</title>
-  <style>
-    @media (prefers-color-scheme: dark) {{
-      body {{ background:#111111 !important; color:#ECECEC !important; }}
-      .card {{ background:#1B1B1B !important; color:#ECECEC !important; }}
-      .muted {{ color:#B5B9C0 !important; }}
-    }}
-  </style>
-</head>
-<body style="margin:0;padding:0;background:#F3F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0F172A;">
-  <table role="presentation" width="100%" style="width:100%;background:#F3F5F7;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" style="max-width:560px;">
-          <tr>
-            <td align="center" style="padding:8px 0 16px;">
-              <img src="cid:uplay-logo" alt="UPLAY" width="120" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0;outline:0;">
-            </td>
-          </tr>
-          <tr>
-            <td class="card" style="background:#ffffff;border-radius:14px;padding:24px 22px;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
-              <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;">¡Bienvenido/a a UPLAY!</h1>
-              <p style="margin:0 0 12px;color:#334155;">Hola <strong>{j.nombre_completo}</strong>, tu alta fue aprobada. Este es tu <strong>PIN de acceso permanente</strong>:</p>
-              <div style="margin:8px 0 16px;font-size:24px;letter-spacing:4px;font-weight:700;text-align:center;background:#EEF2FF;color:#0F172A;border-radius:10px;padding:12px 16px;border:1px solid #E3E8EF;">
-                {pin_permanente}
-              </div>
-              <div style="text-align:center;margin-bottom:16px;">
-                <a href="{login_url}" style="display:inline-block;background:#2563EB;color:#ffffff;font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;text-decoration:none;">
-                  Iniciar sesión
-                </a>
-              </div>
-
-              <hr style="border:none;border-top:1px solid #E5E7EB;margin:12px 0 16px;">
-
-              <p style="margin:0 0 6px;color:#334155;">Datos iniciales</p>
-              <ul style="margin:0 0 10px 18px;padding:0;color:#334155;">
-                <li>Categoría: {j.categoria.nombre if j.categoria else '-'}</li>
-                <li>Puntos: {j.puntos}</li>
-                {''.join(html_extra)}
-              </ul>
-
-              <p class="muted" style="margin:0;font-size:12px;color:#64748B;">Si el botón no funciona, copiá y pegá este enlace: {login_url}</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:16px 6px;">
-              <p class="muted" style="margin:0;font-size:12px;color:#94A3B8;">© {datetime.utcnow().year} UPLAY</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-"""
-
-        # Enviar email (si tenés SMTP). No rompe si falla.
         try:
             send_mail(
-                subject=subject,
+                subject="¡Bienvenido a UPLAY!",
                 body=body,
-                html_body=html_body,
                 to=[j.email],
-                inline_images={"uplay-logo": "static/logo/uplay.png"}  # opcional
+                html_body=None,
             )
-            flash(f'Jugador creado y notificado por email: {j.nombre_completo}.', 'ok')
-        except Exception as e:
-            current_app.logger.exception("Fallo enviando email al aprobar solicitud %s", sid)
-            flash(f'Jugador creado. No se pudo enviar email: {e}', 'warning')
+            flash(f'Jugador creado y notificado: {j.nombre_completo}', 'ok')
+        except Exception:
+            logging.exception("Fallo al enviar email de bienvenida")
+            flash(f'Jugador creado, pero no se envió el email.', 'warning')
 
         return redirect(url_for('admin_solicitudes_list'))
 
-    # GET -> sugerir puntos = puntos_max de la categoría
+    # GET
     puntos_sugeridos = s.categoria.puntos_max if s.categoria else 0
     return render_template('admin_solicitudes_aprobar.html', sol=s, puntos_sugeridos=puntos_sugeridos)
 

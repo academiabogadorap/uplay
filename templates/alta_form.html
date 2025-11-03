@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  /* ===== Hero / cabecera (mismo que index/login) ===== */
+  /* ===== Hero / cabecera ===== */
   .hero{
     position:relative; overflow:hidden;
     border-radius:16px; padding:14px;
@@ -13,6 +13,7 @@
       linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
     border:1px solid rgba(255,255,255,.12);
     box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:12px;
   }
   .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
   .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
@@ -25,56 +26,53 @@
   }
   .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
 
-  /* ===== Chips / stats ===== */
-  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
-  .chip{
-    display:inline-flex; align-items:center; gap:8px;
-    padding:6px 10px; border-radius:999px;
-    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
-    font-weight:700;
+  /* ===== Flash messages ===== */
+  .flash-msg{
+    border-radius:10px; padding:10px 14px; margin:8px 0;
+    font-weight:600; text-align:center;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    animation:fadeIn .3s ease, fadeOut 6s ease forwards;
   }
-  .chip .dot{width:8px; height:8px; border-radius:50%;}
-  .dot-green{background:var(--neon);} .dot-yellow{background:var(--yellow);}
-  .dot-blue{background:#6EA8FF;}
+  .flash-success{
+    background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.45); color:var(--neon);
+  }
+  .flash-error{
+    background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.45); color:#f87171;
+  }
+  .flash-msg svg{ flex-shrink:0; }
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:none;}}
+  @keyframes fadeOut{to{opacity:0;transform:translateY(-6px);} }
 
-  /* ===== Layout de contenido ===== */
+  /* ===== Layout general ===== */
   .page-wrap{ display:grid; gap:10px; margin-top:12px; grid-template-columns: minmax(280px, 1fr); }
-
-  /* Tarjeta */
   .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
          background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
-  .card-form{ max-width: 720px; }
+  .card-form{ max-width:720px; }
 
-  /* ===== Inputs/Selects ===== */
+  /* ===== Inputs ===== */
   .form-row{ display:block; }
-  .form-label{ display:block; margin-bottom:4px; color:var(--muted); }
+  .form-label{ display:block; margin-bottom:4px; color:var(--muted); font-weight:600; }
   .form-input, .form-select{
-    width:100%;
-    border-radius:10px;
-    padding:10px 12px;
+    width:100%; border-radius:10px; padding:10px 12px;
     background:rgba(255,255,255,.06);
-    border:1px solid rgba(255,255,255,.14);
-    color:#fff;
-    outline:none;
+    border:1px solid rgba(255,255,255,.14); color:#fff; outline:none;
+    transition:border-color .2s, box-shadow .2s;
   }
   .form-input:focus, .form-select:focus{
     border-color: rgba(16,185,129,.45);
     box-shadow: 0 0 0 3px rgba(16,185,129,.18);
   }
-
   .form-select{
-    -webkit-appearance:none; -moz-appearance:none; appearance:none;
+    -webkit-appearance:none; appearance:none;
     padding-right:38px;
-    background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-repeat:no-repeat; background-position: right 10px center; background-size: 18px 18px;
+    background-image:url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23FFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 10px center; background-size:18px;
   }
   .form-select option{ color:#111; background:#fff; }
-  .form-select option[disabled]{ color:#9aa3af; }
-  .form-select::-ms-expand{ display:none; }
-
   .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
   .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
-  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; }
+  .btn{ background:rgba(255,255,255,.95); color:#111; border:1px solid rgba(255,255,255,.95); border-radius:12px; font-weight:800; padding:10px 14px; transition:all .2s; }
+  .btn:hover{ background:var(--yellow); border-color:var(--yellow); transform:scale(1.02); }
   .btn:focus{ outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 
   .help-note{ color:var(--muted); margin:6px 0 0; font-size:.92rem; }
@@ -91,65 +89,72 @@
       <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Volver a Iniciar sesión</a>
     </div>
   </div>
-  <p class="muted" style="margin:10px 0 0;">Completá tus datos y un administrador aprobará tu acceso. Al aprobar, te enviamos un <strong>PIN de 6 dígitos</strong> por email.</p>
+  <p class="muted" style="margin:10px 0 0;">Completá tus datos y un administrador aprobará tu acceso. Al aprobar, te enviaremos un <strong>PIN de 6 dígitos</strong> por email.</p>
 </div>
+
+<!-- ===== FLASH MESSAGES ===== -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div style="margin-top:10px;">
+    {% for category, message in messages %}
+      <div class="flash-msg flash-{{ category }}">
+        {% if category == 'success' %}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
+        {% elif category == 'error' %}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        {% endif %}
+        <span>{{ message }}</span>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
 
 <!-- ===== CONTENIDO ===== -->
 <div class="page-wrap">
-
   <div class="card card-form">
-    <!-- Hacemos explícito el action hacia la ruta correcta -->
     <form method="post" action="{{ url_for('alta_publica') }}" style="display:grid; gap:10px;" novalidate>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <!-- Nombre completo -->
       <div class="form-row">
         <label for="nombre_completo" class="form-label">Nombre completo</label>
         <input id="nombre_completo" name="nombre_completo" required placeholder="EJ: JUAN PÉREZ" class="form-input" autocomplete="name" autofocus>
         <small class="muted">Se guardará en mayúsculas.</small>
       </div>
 
+      <!-- Email -->
       <div class="form-row">
         <label for="email" class="form-label">Email</label>
-        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email" inputmode="email">
+        <input id="email" name="email" type="email" required placeholder="tucorreo@ejemplo.com" class="form-input" autocomplete="email">
         <small class="help-note">Asegurate de escribirlo bien: ahí te llegará el <strong>PIN</strong> cuando te aprueben.</small>
       </div>
 
-      <!-- Teléfono dividido: código de país + número local -->
+      <!-- Teléfono -->
       <div class="form-row">
         <label class="form-label">Teléfono</label>
         <div style="display:flex; gap:8px; align-items:center;">
           <div style="min-width:110px;">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span class="form-label" style="margin:0; color:var(--muted)">País</span>
-              <!-- CC: 1–4 dígitos, por defecto 54 -->
-              <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric"
-                     pattern="[0-9]{1,4}" maxlength="4" value="54" autocomplete="tel-country-code"
-                     class="form-input" style="width:90px;" aria-label="Código de país"
-                     placeholder="Ej: 54"
-                     title="Ingresá solo dígitos (1 a 4). Ej: 54 para Argentina">
-            </div>
+            <label for="tel_cc" class="form-label" style="margin:0; color:var(--muted)">País</label>
+            <input id="tel_cc" name="tel_cc" type="text" inputmode="numeric" pattern="[0-9]{1,4}" maxlength="4" value="54"
+                   class="form-input" style="width:90px;" aria-label="Código de país" placeholder="Ej: 54">
           </div>
           <div style="flex:1;">
-            <!-- Local: 7–15 dígitos (sin +). Backend exige mínimo 7 -->
-            <input id="tel_local" name="tel_local" type="text" inputmode="numeric"
-                   pattern="[0-9]{7,15}" maxlength="18" required
-                   placeholder="Ej: 11 12345678" aria-label="Número con característica (sin +)"
-                   class="form-input" autocomplete="tel-national"
-                   title="Ingresá solo dígitos (7 a 15). Ej: 1112345678">
+            <input id="tel_local" name="tel_local" type="text" inputmode="numeric" pattern="[0-9]{7,15}" maxlength="18" required
+                   placeholder="Ej: 11 12345678" class="form-input" autocomplete="tel-national">
           </div>
         </div>
-        <small class="help-note">Ingresá solo números. Ejemplo AR: País <strong>54</strong> y Local <strong>1112345678</strong> → se guarda como <code>+541112345678</code>.</small>
-        <!-- Compat backend anterior: lo dejamos vacío (el server usa tel_cc+tel_local) -->
+        <small class="help-note">Ejemplo AR: País <strong>54</strong> y Local <strong>1112345678</strong> → se guarda como <code>+541112345678</code>.</small>
         <input type="hidden" name="telefono" id="telefono_compat" value="">
       </div>
 
-      <!-- ====== Datos personales ====== -->
+      <!-- ===== Datos personales ===== -->
       <div class="form-row" style="margin-top:6px;">
         <label class="form-label" style="font-weight:800;">Datos personales</label>
         <div style="display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
-          <!-- País -->
           <div>
             <label for="pais" class="form-label">País</label>
-            <select id="pais" name="pais" class="form-select" autocomplete="country-name">
+            <select id="pais" name="pais" class="form-select">
               <option value="">-- Seleccioná --</option>
               <option value="Argentina" selected>Argentina</option>
               <option value="Brasil">Brasil</option>
@@ -160,31 +165,28 @@
             </select>
           </div>
 
-          <!-- Provincia / Estado -->
           <div>
             <label for="provincia" class="form-label">Provincia / Estado</label>
-            <select id="provincia" name="provincia" class="form-select" autocomplete="address-level1">
+            <select id="provincia" name="provincia" class="form-select">
               <option value="">-- Seleccioná --</option>
             </select>
-            <small class="help-note" id="provincia-ayuda">Si tu país no es Argentina, podés dejarlo vacío o indicar tu estado en “Ciudad”.</small>
+            <small class="help-note">Si tu país no es Argentina, podés dejarlo vacío.</small>
           </div>
 
-          <!-- Ciudad -->
           <div>
             <label for="ciudad" class="form-label">Ciudad</label>
-            <input id="ciudad" name="ciudad" type="text" placeholder="Ej: Viedma" class="form-input" autocomplete="address-level2" />
+            <input id="ciudad" name="ciudad" type="text" placeholder="Ej: Viedma" class="form-input">
           </div>
 
-          <!-- Fecha de nacimiento -->
           <div>
             <label for="fecha_nacimiento" class="form-label">Fecha de nacimiento</label>
-            <input id="fecha_nacimiento" name="fecha_nacimiento" type="date" class="form-input" />
+            <input id="fecha_nacimiento" name="fecha_nacimiento" type="date" class="form-input">
             <small class="help-note">Usamos esta info para categorías y reportes (opcional).</small>
           </div>
         </div>
       </div>
-      <!-- ====== /Datos personales ====== -->
 
+      <!-- Categoría -->
       <div class="form-row">
         <label for="categoria_id" class="form-label">Categoría</label>
         <select id="categoria_id" name="categoria_id" required class="form-select">
@@ -195,15 +197,16 @@
         </select>
       </div>
 
+      <!-- Mensaje -->
       <div class="form-row">
         <label for="mensaje" class="form-label">Mensaje (opcional)</label>
         <input id="mensaje" name="mensaje" placeholder="Ej: juego los martes a la noche." class="form-input" autocomplete="off">
       </div>
 
-      <!-- Preferencia para recibir PIN por email al aprobar -->
-      <div class="form-row" style="display:flex; align-items:center; gap:8px; margin-top:2px;">
+      <!-- Preferencia de PIN -->
+      <div class="form-row" style="display:flex; align-items:center; gap:8px;">
         <input id="prefiere_pin_email" name="prefiere_pin_email" type="checkbox" checked>
-        <label for="prefiere_pin_email" class="form-label" style="margin:0;">Quiero recibir mi <strong>PIN por email</strong> cuando aprueben mi alta.</label>
+        <label for="prefiere_pin_email" class="form-label" style="margin:0;">Quiero recibir mi <strong>PIN por email</strong>.</label>
       </div>
 
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
@@ -211,9 +214,7 @@
         <a href="{{ url_for('login') }}" class="btn-ghost btn-slim">Cancelar</a>
       </div>
 
-      <p class="help-note">
-        Al enviar, aceptás que un administrador vea tus datos para validar el alta.
-      </p>
+      <p class="help-note">Al enviar, aceptás que un administrador vea tus datos para validar el alta.</p>
     </form>
   </div>
 
@@ -222,55 +223,40 @@
     <h3 style="margin:0 0 6px;">¿Cómo sigue?</h3>
     <ol style="margin:0; padding-left:18px;">
       <li>Un admin revisa tu solicitud.</li>
-      <li>Si todo está OK, se aprueba y te asignamos un <strong>PIN de 6 dígitos</strong>.</li>
-      <li>Te llega el PIN por email y ya podés <em>Iniciar sesión</em>.</li>
+      <li>Si todo está OK, te asignamos un <strong>PIN de 6 dígitos</strong>.</li>
+      <li>Te llega por email y ya podés <em>Iniciar sesión</em>.</li>
     </ol>
   </div>
-
 </div>
 
-<!-- JS: mayúsculas en nombre + sanitizar teléfono + provincias AR + límite fecha + evitar doble submit + email en minúsculas -->
+<!-- ===== JS ===== -->
 <script>
-  // Nombre en MAYÚSCULAS (mantiene acentos)
+  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
   const $nombre = document.getElementById('nombre_completo');
   if ($nombre){
     $nombre.addEventListener('input', () => {
       const pos = $nombre.selectionStart;
       $nombre.value = ($nombre.value || '').toUpperCase();
       try { $nombre.setSelectionRange(pos, pos); } catch(_){}
-    }, { passive: true });
+    });
   }
 
-  // Email en minúsculas
   const $email = document.getElementById('email');
   if ($email){
     $email.addEventListener('input', () => {
-      const pos = $email.selectionStart;
       $email.value = ($email.value || '').toLowerCase().trim();
-      try { $email.setSelectionRange(pos, pos); } catch(_){}
-    }, { passive: true });
+    });
   }
 
-  // Teléfono: permitir solo dígitos en tel_cc y tel_local
-  const onlyDigits = (s) => (s || '').replace(/\D+/g, '');
   function sanitizeNumericInput(el, maxLen){
     if (!el) return;
     el.addEventListener('input', () => {
-      const raw = el.value;
-      const digits = onlyDigits(raw).slice(0, maxLen || 32);
-      if (raw !== digits) el.value = digits;
-    }, { passive: true });
+      el.value = onlyDigits(el.value).slice(0, maxLen || 32);
+    });
   }
-  const $cc = document.getElementById('tel_cc');
-  const $local = document.getElementById('tel_local');
-  sanitizeNumericInput($cc, 4);
-  sanitizeNumericInput($local, 18);
+  sanitizeNumericInput(document.getElementById('tel_cc'), 4);
+  sanitizeNumericInput(document.getElementById('tel_local'), 18);
 
-  // Compat: mantener hidden "telefono" vacío
-  const $compat = document.getElementById('telefono_compat');
-  if ($compat) $compat.value = '';
-
-  // Evitar doble submit
   (function(){
     const $form = document.querySelector('form[action="{{ url_for("alta_publica") }}"]');
     const $btn = document.getElementById('btn-submit');
@@ -282,23 +268,20 @@
     }
   })();
 
-  // ===== Provincias (Argentina) + límite de fecha de nacimiento =====
   (function(){
     const $pais = document.getElementById('pais');
     const $prov = document.getElementById('provincia');
     const $dob  = document.getElementById('fecha_nacimiento');
-
     const PROVINCIAS_AR = [
       "Buenos Aires","CABA","Catamarca","Chaco","Chubut","Córdoba","Corrientes",
       "Entre Ríos","Formosa","Jujuy","La Pampa","La Rioja","Mendoza","Misiones",
       "Neuquén","Río Negro","Salta","San Juan","San Luis","Santa Cruz",
       "Santa Fe","Santiago del Estero","Tierra del Fuego","Tucumán"
     ];
-
-    function cargarProvincias(paisActual){
+    function cargarProvincias(pais){
       if (!$prov) return;
       $prov.innerHTML = '<option value="">-- Seleccioná --</option>';
-      if (paisActual === 'Argentina'){
+      if (pais === 'Argentina'){
         PROVINCIAS_AR.forEach(p => {
           const o = document.createElement('option');
           o.value = p; o.textContent = p;
@@ -306,17 +289,13 @@
         });
       }
     }
-
-    if ($pais) {
+    if ($pais){
       cargarProvincias($pais.value);
       $pais.addEventListener('change', () => cargarProvincias($pais.value));
     }
-
     if ($dob){
       const hoy = new Date();
-      const yyyy = hoy.getFullYear();
-      const mm = String(hoy.getMonth() + 1).padStart(2,'0');
-      const dd = String(hoy.getDate()).padStart(2,'0');
+      const yyyy = hoy.getFullYear(), mm = String(hoy.getMonth()+1).padStart(2,'0'), dd = String(hoy.getDate()).padStart(2,'0');
       $dob.max = `${yyyy}-${mm}-${dd}`;
       $dob.min = `1900-01-01`;
     }
@@ -325,122 +304,5 @@
 {% endblock %}
 
 {% block help_content %}
-<style>
-  /* ==== Ayuda consistente con index ==== */
-  .help-container{ display:flex; justify-content:center; width:100%; }
-  .help-wrap{
-    width: min(800px, 90vw);
-    margin: 0 auto;
-    max-height: 62dvh; max-height: 62vh;
-    overflow: auto; overscroll-behavior: contain; position: relative; background: transparent;
-  }
-  .help-head{
-    position: sticky; top: 0; z-index: 2;
-    display:flex; align-items:center; gap:6px;
-    padding:6px 6px; margin-bottom:4px;
-    background: var(--bg, rgba(10,12,20,.96));
-    border-bottom:1px solid rgba(255,255,255,.06);
-  }
-  .help-title{ margin:0; font-size: clamp(.9rem, 2vw, 1rem); }
-  .help-sub{   margin:0; color:var(--muted,#98a2b3); font-size: clamp(.76rem, 1.6vw, .86rem); }
-  .help-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap:8px; }
-  .help-card{ background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:6px; }
-  .help-card h4{ display:flex; align-items:center; gap:6px; margin:0 0 4px; font-size: clamp(.86rem, 1.8vw, .94rem); }
-  .help-card p, .help-card li{ margin:3px 0; font-size: clamp(.76rem, 1.5vw, .84rem); line-height:1.28; }
-  .help-ul, .help-ol{ padding-left:16px; margin:4px 0; }
-  .chip{ display:inline-block; padding:2px 6px; border-radius:999px; font-size:.74rem; border:1px solid #2a2f45; background:#1b2138; margin-right:6px;}
-  .chip.ok{ background:#1b3b2a; border-color:#1a704d;}
-  .chip.info{ background:#1b2f3b; border-color:#1a4d70;}
-  .chip.warn{ background:#3b2f1b; border-color:#704d1a;}
-  .help-visual{ display:flex; align-items:center; justify-content:center; background: rgba(255,255,255,.03);
-    border:1px dashed rgba(255,255,255,.12); border-radius:10px; padding:6px;}
-  @media (max-width:540px){
-    .help-grid{ grid-template-columns: 1fr; }
-    .help-card h4 svg{ display:none; }
-  }
-</style>
-
-<div class="help-container">
-  <div class="help-wrap">
-    <div class="help-head">
-      <h3 class="help-title">Solicitud de alta — ayuda rápida</h3>
-      <p class="help-sub">Qué completar, qué pasa después y tips</p>
-    </div>
-
-    <div class="help-grid">
-      <section class="help-card">
-        <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"/>
-          </svg>
-          ¿Qué es esta solicitud?
-        </h4>
-        <p>Pedís acceso a UPLAY. Un admin revisará tus datos y, si aprueba, te enviará un <strong>PIN de 6 dígitos</strong> por email.</p>
-        <div>
-          <span class="chip info">Datos personales</span>
-          <span class="chip ok">Validación</span>
-          <span class="chip warn">Aprobación</span>
-        </div>
-      </section>
-
-      <section class="help-card">
-        <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2v20M2 12h20" stroke="currentColor"/>
-          </svg>
-          Cómo completarlo
-        </h4>
-        <ul class="help-ul">
-          <li><strong>Nombre completo</strong>: tal como querés figurar en ranking.</li>
-          <li><strong>Email</strong> y <strong>Teléfono</strong> para contacto.</li>
-          <li><strong>País</strong>, <strong>Provincia/Estado</strong>, <strong>Ciudad</strong>.</li>
-          <li><strong>Fecha de nacimiento</strong> (opcional) para estadísticas/categorías.</li>
-          <li><strong>Categoría</strong> según tu nivel. <em>Mensaje</em> con info útil.</li>
-        </ul>
-      </section>
-
-      <section class="help-card">
-        <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M6 6h12v12H6z" stroke="currentColor"/>
-          </svg>
-          ¿Qué pasa luego?
-        </h4>
-        <ol class="help-ol">
-          <li>Un admin revisa tu solicitud.</li>
-          <li>Si todo está OK, se aprueba y te asignamos un <strong>PIN</strong>.</li>
-          <li>Te llega el PIN por email y ya podés <em>Iniciar sesión</em>.</li>
-        </ol>
-      </section>
-
-      <section class="help-card">
-        <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="9" stroke="currentColor"/>
-          </svg>
-          Privacidad y cambios
-        </h4>
-        <ul class="help-ul">
-          <li>Solo admins ven tu solicitud.</li>
-          <li>Podés <strong>actualizar tu PIN</strong> luego desde <em>Editar jugador</em>.</li>
-          <li>Si te equivocaste de categoría, un admin puede corregirla.</li>
-        </ul>
-      </section>
-
-      <section class="help-card">
-        <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5 20l2-7L1 9h7l4-7z" stroke="currentColor"/>
-          </svg>
-          Tips rápidos
-        </h4>
-        <ul class="help-ul">
-          <li>Si no sabés tu categoría, indicá tu nivel aproximado en el mensaje.</li>
-          <li>Dejá un teléfono que uses en WhatsApp para coordinar partidos.</li>
-        </ul>
-      </section>
-    </div>
-  </div>
-</div>
 {{ super() }}
 {% endblock %}
