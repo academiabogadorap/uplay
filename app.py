@@ -4235,46 +4235,91 @@ def partidos_new():
         db.session.add(partido)
         db.session.commit()
 
-        # =================== ✉️ EMAIL UPLAY ===================
+        # =================== ✉️ EMAIL UPLAY PREMIUM ===================
         from flask import current_app
         from datetime import datetime
 
         enlace = url_for('partidos_list', _external=True)
         asunto = f"🎾 Nuevo partido creado en UPLAY #{partido.id}"
 
+        club = getattr(partido, 'club', '1114 Pádel Club')
+        horario = partido.fecha.strftime('%A %H:%M hs') if partido.fecha else 'A confirmar'
+        nota = getattr(partido, 'nota', '')
+
         mensaje_html = f"""
-        <div style="font-family:'Poppins',Arial,sans-serif;background:#f3f4f8;padding:32px 0;">
-          <div style="max-width:620px;margin:auto;background:white;border-radius:16px;overflow:hidden;
-                      box-shadow:0 4px 16px rgba(0,0,0,0.12);">
-            <div style="text-align:center;padding:30px 0;background:linear-gradient(135deg,#7B68EE,#9b8df3);color:white;">
-              <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg" alt="UPLAY"
-                   style="height:70px;margin-bottom:10px;">
-              <h2 style="margin:0;font-size:1.5rem;">Nuevo partido creado en UPLAY</h2>
+        <!DOCTYPE html>
+        <html lang="es">
+        <head><meta charset="UTF-8"><title>{asunto}</title></head>
+        <body style="margin:0;font-family:'Poppins',Arial,sans-serif;
+                     background:linear-gradient(135deg,#0e0b1a,#1a1333,#2b2560);
+                     padding:40px 0;color:#fff;">
+          <div style="max-width:620px;margin:auto;background:rgba(255,255,255,0.06);
+                      border-radius:16px;overflow:hidden;
+                      backdrop-filter:blur(8px);
+                      box-shadow:0 8px 28px rgba(0,0,0,0.6);
+                      border:1px solid rgba(255,255,255,0.08);">
+            
+            <div style="background:linear-gradient(135deg,#7B68EE,#A78BFA);
+                        text-align:center;padding:28px 20px;
+                        border-bottom:1px solid rgba(255,255,255,0.15);">
+              <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg"
+                   alt="UPLAY" style="height:78px;margin-bottom:10px;
+                   filter:drop-shadow(0 2px 5px rgba(0,0,0,0.3));">
+              <h2 style="margin:0;font-size:1.5rem;font-weight:600;">
+                ¡Nuevo partido creado en UPLAY!
+              </h2>
+              <p style="margin:6px 0 0;font-size:0.95rem;opacity:0.9;">
+                Tu red de pádel, más conectada que nunca
+              </p>
             </div>
-            <div style="padding:28px;color:#222;line-height:1.6;">
-              <p style="font-size:1.05rem;">
-                <strong>{creador.nombre_completo}</strong> creó un nuevo partido y te agregó como jugador.
+
+            <div style="padding:30px;color:#f2f2f2;line-height:1.7;background:rgba(255,255,255,0.03);">
+              <p style="font-size:1.05rem;margin-top:0;">
+                🎾 <strong style="color:#A78BFA;">{creador.nombre_completo}</strong> creó un nuevo partido.
               </p>
-              <p style="margin:10px 0 18px 0;">
-                <b>Compañero:</b> {companero.nombre_completo}<br>
-                <b>Rivales:</b> {r1.nombre_completo} y {r2.nombre_completo}
+
+              <div style="background:rgba(255,255,255,0.08);
+                          border-left:4px solid #A78BFA;
+                          border-radius:8px;padding:14px 18px;margin:20px 0;">
+                <table style="width:100%;font-size:0.95rem;color:#ddd;">
+                  <tr><td style="padding:6px 0;width:110px;"><strong>🏟️ Club:</strong></td><td>{club}</td></tr>
+                  <tr><td style="padding:6px 0;"><strong>🕓 Horario:</strong></td><td>{horario}</td></tr>
+                  {f'<tr><td style="padding:6px 0;"><strong>💬 Nota:</strong></td><td>{nota}</td></tr>' if nota else ''}
+                </table>
+              </div>
+
+              <p style="margin:10px 0 6px;font-size:0.95rem;">
+                <strong style="color:#7B68EE;">👥 Compañero:</strong> {companero.nombre_completo}
               </p>
-              <p style="margin-bottom:22px;">
-                Ingresá a UPLAY para confirmar tu participación o revisar los detalles del partido.
+              <p style="margin:4px 0;font-size:0.95rem;">
+                <strong style="color:#7B68EE;">⚔️ Rivales:</strong> {r1.nombre_completo} y {r2.nombre_completo}
               </p>
-              <div style="text-align:center;">
-                <a href="{enlace}" style="background:#7B68EE;color:white;padding:14px 26px;font-weight:600;
-                   border-radius:10px;text-decoration:none;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
-                   ⚡ Ver partido en UPLAY
+
+              <div style="text-align:center;margin-top:28px;">
+                <a href="{enlace}"
+                   style="background:#A78BFA;color:white;padding:14px 30px;
+                   border-radius:10px;text-decoration:none;display:inline-block;
+                   font-weight:600;font-size:1rem;
+                   box-shadow:0 6px 14px rgba(167,139,250,0.5);
+                   transition:transform 0.2s ease;">
+                   🔗 Ver partido en UPLAY
                 </a>
               </div>
             </div>
-            <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:16px;">
-              <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
-              <p style="font-size:0.8rem;color:#aaa;margin:0;">Este mensaje fue enviado automáticamente por el sistema UPLAY.</p>
+
+            <div style="background:rgba(255,255,255,0.08);text-align:center;
+                        padding:18px 12px;
+                        border-top:1px solid rgba(255,255,255,0.12);">
+              <p style="font-size:0.9rem;color:#bbb;margin:4px 0;">
+                © {datetime.now().year} <strong style="color:#A78BFA;">UPLAY</strong>
+              </p>
+              <p style="font-size:0.8rem;color:#888;margin:0;">
+                Este es un mensaje automático del sistema UPLAY.
+              </p>
             </div>
           </div>
-        </div>
+        </body>
+        </html>
         """
 
         # Enviar a todos los involucrados
@@ -5561,12 +5606,12 @@ def abiertos_new():
     db.session.add(PartidoAbiertoJugador(pa_id=pa.id, jugador_id=creador.id))
     db.session.commit()
 
-    # =================== ✉️ EMAIL MASIVO UPLAY ===================
+    # =================== ✉️ EMAIL MASIVO UPLAY PREMIUM ===================
     from flask import current_app
     from datetime import datetime
 
     try:
-        # Obtener todos los jugadores activos de la categoría (menos el creador)
+        # Jugadores activos de la categoría (menos el creador)
         jugadores_misma_cat = (
             db.session.query(Jugador)
             .filter(
@@ -5582,34 +5627,78 @@ def abiertos_new():
             enlace = url_for('abiertos_list', _external=True)
 
             mensaje_html = f"""
-            <div style="font-family:'Poppins',Arial,sans-serif;background:#f6f6f9;padding:30px 0;">
-              <div style="max-width:600px;margin:auto;background:white;border-radius:12px;
-                          box-shadow:0 3px 10px rgba(0,0,0,0.08);overflow:hidden;">
-                <div style="text-align:center;padding:24px 0;border-bottom:1px solid #eee;">
+            <!DOCTYPE html>
+            <html lang="es">
+            <head><meta charset="UTF-8"><title>{asunto}</title></head>
+            <body style="margin:0;font-family:'Poppins',Arial,sans-serif;
+                         background:linear-gradient(135deg,#0e0b1a,#1a1333,#2b2560);
+                         padding:40px 0;color:#fff;">
+              <div style="max-width:620px;margin:auto;background:rgba(255,255,255,0.06);
+                          border-radius:16px;overflow:hidden;
+                          backdrop-filter:blur(8px);
+                          box-shadow:0 8px 28px rgba(0,0,0,0.6);
+                          border:1px solid rgba(255,255,255,0.08);">
+                
+                <div style="background:linear-gradient(135deg,#7B68EE,#A78BFA);
+                            text-align:center;padding:28px 20px;
+                            border-bottom:1px solid rgba(255,255,255,0.15);">
                   <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg"
-                       alt="UPLAY" style="height:64px;margin-bottom:8px;">
-                  <h2 style="color:#7B68EE;margin:0;font-size:1.3rem;">¡Nuevo partido abierto en tu categoría!</h2>
+                       alt="UPLAY" style="height:78px;margin-bottom:10px;
+                       filter:drop-shadow(0 2px 5px rgba(0,0,0,0.3));">
+                  <h2 style="margin:0;font-size:1.5rem;font-weight:600;">
+                    ¡Nuevo partido abierto en tu categoría!
+                  </h2>
+                  <p style="margin:6px 0 0;font-size:0.95rem;opacity:0.9;">
+                    Unite al partido y compartí cancha con tus compañeros de categoría
+                  </p>
                 </div>
-                <div style="padding:24px;color:#222;line-height:1.5;">
-                  <p><strong>{creador.nombre_completo}</strong> abrió un partido y busca compañero y rivales.</p>
-                  {"<p><em>Nota del creador:</em> " + nota + "</p>" if nota else ""}
-                  <p>Si querés sumarte, podés hacerlo desde UPLAY:</p>
-                  <div style="text-align:center;margin-top:18px;">
-                    <a href="{enlace}" style="background:#7B68EE;color:white;padding:12px 22px;
-                       border-radius:8px;text-decoration:none;display:inline-block;">
-                       Ver partidos abiertos en UPLAY
+
+                <div style="padding:30px;color:#f2f2f2;line-height:1.7;background:rgba(255,255,255,0.03);">
+                  <p style="font-size:1.05rem;margin-top:0;">
+                    🎾 <strong style="color:#A78BFA;">{creador.nombre_completo}</strong> abrió un nuevo partido en <strong>{cat.nombre}</strong>.
+                  </p>
+
+                  <div style="background:rgba(255,255,255,0.08);
+                              border-left:4px solid #A78BFA;
+                              border-radius:8px;padding:14px 18px;margin:20px 0;">
+                    <p style="margin:0;font-size:0.95rem;color:#ddd;">
+                      <strong>💬 Nota del creador:</strong><br>
+                      {nota if nota else "— Sin nota —"}
+                    </p>
+                  </div>
+
+                  <p style="margin-bottom:20px;">
+                    Si querés sumarte, podés hacerlo directamente desde la sección de <strong>Partidos Abiertos</strong> en UPLAY.
+                  </p>
+
+                  <div style="text-align:center;margin-top:28px;">
+                    <a href="{enlace}"
+                       style="background:#A78BFA;color:white;padding:14px 30px;
+                       border-radius:10px;text-decoration:none;display:inline-block;
+                       font-weight:600;font-size:1rem;
+                       box-shadow:0 6px 14px rgba(167,139,250,0.5);
+                       transition:transform 0.2s ease;">
+                       🚀 Ver partidos abiertos
                     </a>
                   </div>
                 </div>
-                <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:12px;">
-                  <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
-                  <p style="font-size:0.8rem;color:#aaa;margin:0;">Este es un mensaje automático del sistema.</p>
+
+                <div style="background:rgba(255,255,255,0.08);text-align:center;
+                            padding:18px 12px;
+                            border-top:1px solid rgba(255,255,255,0.12);">
+                  <p style="font-size:0.9rem;color:#bbb;margin:4px 0;">
+                    © {datetime.now().year} <strong style="color:#A78BFA;">UPLAY</strong>
+                  </p>
+                  <p style="font-size:0.8rem;color:#888;margin:0;">
+                    Este es un mensaje automático del sistema UPLAY.
+                  </p>
                 </div>
               </div>
-            </div>
+            </body>
+            </html>
             """
 
-            # Enviar a todos los jugadores de la categoría
+            # Enviar correo a todos los jugadores de la categoría
             for jugador in jugadores_misma_cat:
                 if jugador.email:
                     try:
@@ -5636,22 +5725,19 @@ def abiertos_new():
     return redirect(url_for('abiertos_list'))
 
 
+
 @app.route('/abiertos/<int:pa_id>/unirse', methods=['POST'])
 def abiertos_join(pa_id):
     pa = get_or_404(PartidoAbierto, pa_id)
-
-    # Debe haber sesión iniciada
     j = get_current_jugador()
     if not j:
         flash('Iniciá sesión para unirte.', 'error')
         return redirect(url_for('login'))
 
-    # Validar estado del abierto
     if pa.estado not in ('ABIERTO', 'LLENO'):
         flash('Este partido no acepta inscripciones.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    # Validar categoría y estado del jugador
     if not j.activo:
         flash('No se puede unir un jugador inactivo.', 'error')
         return redirect(url_for('abiertos_list'))
@@ -5660,15 +5746,11 @@ def abiertos_join(pa_id):
         flash('Solo pueden unirse jugadores de la misma categoría.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    # Capacidad (consulta directa a DB para evitar desfasajes)
-    cupo = (db.session.query(PartidoAbiertoJugador)
-            .filter_by(pa_id=pa.id)
-            .count())
+    cupo = db.session.query(PartidoAbiertoJugador).filter_by(pa_id=pa.id).count()
     if cupo >= 4:
         flash('Este partido ya tiene 4 inscriptos.', 'error')
         return redirect(url_for('abiertos_list'))
 
-    # Ya inscripto
     existe = PartidoAbiertoJugador.query.filter_by(pa_id=pa.id, jugador_id=j.id).first()
     if existe:
         flash('Ya estás inscripto en este partido abierto.', 'ok')
@@ -5678,12 +5760,7 @@ def abiertos_join(pa_id):
     pref_id = request.form.get('partner_pref_id', type=int)
     partner_pref_id = None
     if pref_id:
-        # aseguramos que la preferencia apunte a alguien ya inscripto
-        ids_inscriptos = {
-            it.jugador_id
-            for it in db.session.query(PartidoAbiertoJugador)
-                                 .filter_by(pa_id=pa.id).all()
-        }
+        ids_inscriptos = {it.jugador_id for it in db.session.query(PartidoAbiertoJugador).filter_by(pa_id=pa.id).all()}
         if pref_id == j.id:
             flash('No podés elegirte a vos mismo como compañero.', 'error')
             return redirect(url_for('abiertos_list'))
@@ -5692,35 +5769,89 @@ def abiertos_join(pa_id):
             return redirect(url_for('abiertos_list'))
         partner_pref_id = pref_id
 
-    # Inscribir (y limpiar suplencia si la tuviera en este abierto)
-    db.session.add(PartidoAbiertoJugador(
-        pa_id=pa.id,
-        jugador_id=j.id,
-        partner_pref_id=partner_pref_id
-    ))
+    db.session.add(PartidoAbiertoJugador(pa_id=pa.id, jugador_id=j.id, partner_pref_id=partner_pref_id))
 
-    # Si estaba como suplente en este mismo abierto, lo quitamos
-    sup = (db.session.query(PartidoAbiertoSuplente)
-           .filter_by(pa_id=pa.id, jugador_id=j.id)
-           .first())
+    sup = db.session.query(PartidoAbiertoSuplente).filter_by(pa_id=pa.id, jugador_id=j.id).first()
     if sup:
         db.session.delete(sup)
 
-    # Actualizar estado si corresponde
     cupo += 1
     if cupo >= 4:
         pa.estado = 'LLENO'
 
     db.session.commit()
 
+    # =================== ✉️ EMAIL: partido completo ===================
+    if cupo >= 4:
+        from flask import current_app
+        from datetime import datetime
+
+        try:
+            cat = db.session.get(Categoria, pa.categoria_id)
+            inscriptos = db.session.query(PartidoAbiertoJugador).filter_by(pa_id=pa.id).all()
+            jugadores = [ix.jugador for ix in inscriptos]
+            creador = db.session.get(Jugador, pa.creador_id)
+            nota_html = f"<p><em>Nota del creador:</em> {pa.nota}</p>" if pa.nota else ""
+
+            enlace = url_for('abiertos_list', _external=True)
+            asunto = f"🎉 Partido abierto completo ({cat.nombre}) – UPLAY"
+
+            mensaje_html = f"""
+            <div style="font-family:'Poppins',Arial,sans-serif;background:#f3f4f8;padding:32px 0;">
+              <div style="max-width:620px;margin:auto;background:white;border-radius:16px;overflow:hidden;
+                          box-shadow:0 4px 16px rgba(0,0,0,0.12);">
+                <div style="text-align:center;padding:30px 0;background:linear-gradient(135deg,#7B68EE,#9b8df3);color:white;">
+                  <img src="https://uplay-gev5.onrender.com/static/logo/uplay-logo.svg" alt="UPLAY"
+                       style="height:70px;margin-bottom:10px;">
+                  <h2 style="margin:0;font-size:1.5rem;">🎾 ¡El partido abierto está completo!</h2>
+                </div>
+                <div style="padding:28px;color:#222;line-height:1.6;">
+                  <p><strong>{creador.nombre_completo}</strong> abrió un partido en la categoría <b>{cat.nombre}</b>, y ya se completaron los 4 jugadores ✅</p>
+                  {nota_html}
+                  <p><b>Jugadores inscriptos:</b><br>
+                  {"<br>".join(j.nombre_completo for j in jugadores)}</p>
+                  <p>Coordiná con tus compañeros y rivales el horario y lugar del partido.</p>
+                  <div style="text-align:center;margin-top:20px;">
+                    <a href="{enlace}" style="background:#7B68EE;color:white;padding:14px 26px;font-weight:600;
+                       border-radius:10px;text-decoration:none;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+                       ⚡ Ver partido en UPLAY
+                    </a>
+                  </div>
+                </div>
+                <div style="background:#fafafa;border-top:1px solid #eee;text-align:center;padding:16px;">
+                  <p style="font-size:0.85rem;color:#666;margin:4px 0;">© {datetime.now().year} UPLAY</p>
+                  <p style="font-size:0.8rem;color:#aaa;margin:0;">Este mensaje fue enviado automáticamente por el sistema UPLAY.</p>
+                </div>
+              </div>
+            </div>
+            """
+
+            for jugador in jugadores:
+                if jugador.email:
+                    send_mail(
+                        subject=asunto,
+                        body="Partido abierto completo en UPLAY",
+                        to=jugador.email,
+                        html_body=mensaje_html
+                    )
+
+            current_app.logger.info(f"[UPLAY] Mails enviados a {len(jugadores)} jugadores del partido abierto #{pa.id}")
+        except Exception as e:
+            current_app.logger.exception(f"[UPLAY] Error enviando mail de partido completo: {e}")
+    # ================================================================
+
     msg = 'Te uniste al partido abierto.'
     if partner_pref_id:
         msg += ' Preferencia de compañero guardada.'
     if sup:
         msg += ' (Se eliminó tu suplencia en este abierto).'
+    if cupo >= 4:
+        msg += ' El partido quedó completo. Se notificó a todos los jugadores.'
 
     flash(msg, 'ok')
     return redirect(url_for('abiertos_list'))
+
+
 
 
 
