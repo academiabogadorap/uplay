@@ -2,9 +2,9 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Iniciar sesión</title>
+  <title>Torneos (admin)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="csrf-token" content="ImQ3NTYxNjAyNjQ5M2MyN2RiOGZhOWJjN2U1OTcxY2VhNzM2NDNlYjUi.aQn6Dw.uftpsFT41EUN_SjFpup7ZfAN8q4" />
+  <meta name="csrf-token" content="ImQ3NTYxNjAyNjQ5M2MyN2RiOGZhOWJjN2U1OTcxY2VhNzM2NDNlYjUi.aQn6EQ.5NzTkBdWyQg6ProKIRJkfu0QjR8" />
 
   <!-- Tipografía -->
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,7 +78,7 @@
         <a href="/mi" class="btn-ghost btn-slim">Mi panel (ADMINISTRADOR)</a>
         <form method="post" action="/logout" style="display:inline;">
           
-          <input type="hidden" name="csrf_token" value="ImQ3NTYxNjAyNjQ5M2MyN2RiOGZhOWJjN2U1OTcxY2VhNzM2NDNlYjUi.aQn6Dw.uftpsFT41EUN_SjFpup7ZfAN8q4">
+          <input type="hidden" name="csrf_token" value="ImQ3NTYxNjAyNjQ5M2MyN2RiOGZhOWJjN2U1OTcxY2VhNzM2NDNlYjUi.aQn6EQ.5NzTkBdWyQg6ProKIRJkfu0QjR8">
           <button type="submit" class="btn btn-slim">Salir</button>
         </form>
       
@@ -105,387 +105,144 @@
 
     
 <style>
-  /* ===== Hero / cabecera (igual que index) ===== */
+  /* ===== Hero ===== */
   .hero{
     position:relative; overflow:hidden;
-    border-radius:16px; padding:14px;
+    border-radius:16px; padding:14px; margin-bottom:10px;
     background:
       radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
       radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
       linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
     border:1px solid rgba(255,255,255,.12);
     box-shadow:0 14px 40px rgba(0,0,0,.28);
-    margin-bottom:10px;
   }
-  .hero-top{
-    display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;
-  }
+  .hero-top{ display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
   .hero-title{ margin:0; font-family:"Poppins",system-ui; font-weight:800; letter-spacing:.3px; }
-  .hero-tag{
-    margin:0; text-transform:uppercase; font-weight:800; letter-spacing:.14em; line-height:1;
-    font-size:clamp(.78rem, 1.6vw, .92rem);
-    background: linear-gradient(90deg, var(--yellow), var(--neon));
-    -webkit-background-clip:text; background-clip:text; color:transparent;
-    filter: drop-shadow(0 0 .15em rgba(0,0,0,.25)); opacity:.95;
-  }
-  .hero-actions{display:flex; gap:10px; flex-wrap:wrap;}
-
-  /* ===== Chips / info ===== */
-  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
-  .chip{
+  .hero-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pill{
     display:inline-flex; align-items:center; gap:8px;
-    padding:6px 10px; border-radius:999px;
-    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16);
-    font-weight:700;
+    padding:8px 12px; border-radius:999px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
+    font-weight:800; text-decoration:none;
+    color:#f2f7ff !important; text-shadow:0 1px 0 rgba(0,0,0,.35);
   }
-  .chip .dot{width:8px; height:8px; border-radius:50%;}
-  .dot-blue{background:#6EA8FF;}
-  .muted{ color:var(--muted,#98a2b3); }
+  .pill:hover{ background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.28); }
 
-  /* ===== Card y controles ===== */
+  /* ===== Card + tabla sticky ===== */
   .card{ border-radius:14px; border:1px solid rgba(255,255,255,.12);
          background:linear-gradient(180deg, var(--panel), var(--panel-2)); padding:10px; }
-  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
-  .btn-slim{ padding:6px 10px; border-radius:10px; font-weight:800; }
+  .card.pad-0{ padding:0; }
+  .table-wrap{ --thead-h:44px; max-height:70vh; overflow:auto; border-radius:12px;
+               mask-image:linear-gradient(to bottom, rgba(0,0,0,1) 90%, rgba(0,0,0,0)); }
+  table.t-admin{ width:100%; border-collapse:separate; border-spacing:0; margin:0; }
+  .t-admin thead th{
+    position:sticky; top:0; z-index:3;
+    background:#0d1b2a; color:#dbe2ef; text-align:left;
+    padding:10px 8px; height:var(--thead-h); line-height:1.1;
+    text-transform:uppercase; letter-spacing:.02em; font-size:.86rem;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);
+  }
+  .t-admin tbody td{ padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:middle; }
+  .t-admin tbody tr:nth-child(odd){ background:rgba(255,255,255,.02); }
+  .t-admin tbody tr:hover{ background:rgba(138,232,12,.05); }
 
-  /* Accesibilidad de estado del buscador */
-  #buscar-estado{ min-height:1.2em; }
+  /* ===== Badges por estado ===== */
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem;
+          background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); }
+  .badge-draft{ background:#1b2f3b; border-color:#1a4d70; }   /* BORRADOR / INSCRIPCION */
+  .badge-live { background:#3b2f1b; border-color:#704d1a; }   /* EN_JUEGO */
+  .badge-done { background:#153c2a; border-color:#2a8b5f; }   /* FINALIZADO */
+
+  /* ===== Botones ===== */
+  .btn-ghost{ background:transparent; border:1px solid rgba(255,255,255,.22); }
+  .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:800; }
+
+  /* Responsive: ocultar columnas menos críticas */
+  @media (max-width:960px){
+    .t-admin thead th:nth-child(3), .t-admin tbody td:nth-child(3){ display:none; } /* Formato */
+  }
+  @media (max-width:760px){
+    .t-admin thead th:nth-child(6), .t-admin tbody td:nth-child(6){ display:none; } /* Inicio */
+  }
 </style>
 
 <!-- ===== HERO ===== -->
 <div class="hero">
   <div class="hero-top">
     <div>
-      <h1 class="hero-title">Iniciar sesión</h1>
-      <p class="hero-tag">Accedé para jugar y sumar puntos</p>
+      <h1 class="hero-title">Torneos (admin)</h1>
+      <p class="muted" style="margin:.25rem 0 0;">Crear, editar y administrar</p>
     </div>
     <div class="hero-actions">
-      <a href="/alta" class="btn btn-ghost btn-slim">Pedir alta</a>
-      <a href="/ranking" class="btn btn-ghost btn-slim">Ver ranking</a>
+      <a href="/admin/torneos/new" class="pill">➕ Nuevo torneo</a>
+      <a href="/torneos" class="pill">Ver públicos</a>
     </div>
   </div>
-  <div class="chips">
-    <span class="chip"><span class="dot dot-blue"></span>Seleccioná tu nombre y PIN</span>
+</div>
+
+
+  <div class="card pad-0">
+    <div class="table-wrap">
+      <table class="t-admin">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Modalidad</th>
+            <th>Formato</th>
+            <th>Categoría</th>
+            <th>Estado</th>
+            <th>Inicio</th>
+            <th style="width:240px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          
+            
+
+            
+            
+            
+
+            
+            
+            
+
+            
+            
+            
+            
+              
+            
+
+            <tr>
+              <td>PRUEBA</td>
+              <td>INDIVIDUAL</td>
+              <td>AMERICANO</td>
+              <td>4ta CABALLEROS</td>
+              <td><span class="badge badge-live">EN_JUEGO</span></td>
+              <td>-</td>
+              <td style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <a class="btn btn-ghost btn-slim" href="/admin/torneos/1">Ver</a>
+
+                
+                <form action="/admin/torneos/1/eliminar"
+                      method="post" style="display:inline;"
+                      >
+                  <button type="submit"
+                          class="btn btn-ghost btn-slim"
+                          style="color:#b91c1c;"
+                          disabled title="Solo se elimina en BORRADOR o INSCRIPCION">
+                    Eliminar
+                  </button>
+                </form>
+              </td>
+            </tr>
+          
+        </tbody>
+      </table>
+    </div>
   </div>
-</div>
 
-<!-- ===== FORMULARIO ===== -->
-<div class="card" style="max-width:560px;">
-  <form method="post" style="display:grid; gap:10px;" novalidate>
-        <input type="hidden" name="csrf_token" value="ImQ3NTYxNjAyNjQ5M2MyN2RiOGZhOWJjN2U1OTcxY2VhNzM2NDNlYjUi.aQn6Dw.uftpsFT41EUN_SjFpup7ZfAN8q4">
-    <!-- Buscador rápido de jugador -->
-    <div>
-      <label for="buscar" class="muted" style="display:block; margin-bottom:4px;">Buscar jugador</label>
-      <input id="buscar" type="text" placeholder="Escribí para filtrar por nombre…" autocomplete="off" style="width:100%;" aria-describedby="buscar-estado">
-      <div id="buscar-estado" class="muted" style="margin:.35rem 0 0; font-size:.9rem;"></div>
-    </div>
-
-    <div>
-      <label for="jugador_id" class="muted" style="display:block; margin-bottom:4px;">Tu nombre</label>
-      <select id="jugador_id" name="jugador_id" required style="width:100%;" aria-describedby="ayuda-jugador">
-        <option value="">-- Elegí tu nombre --</option>
-        
-          <option value="1">
-            ADMINISTRADOR — 7ma CABALLEROS
-          </option>
-        
-          <option value="27">
-            CHARO — 3ra CABALLEROS
-          </option>
-        
-          <option value="24">
-            ERNESTO SABATO — 4ta CABALLEROS
-          </option>
-        
-          <option value="5">
-            JOAQUIN LUENGO — 4ta CABALLEROS
-          </option>
-        
-          <option value="6">
-            JOSE OTERMIN — 3ra CABALLEROS
-          </option>
-        
-          <option value="7">
-            JUAN CACEREZ — 4ta CABALLEROS
-          </option>
-        
-          <option value="3">
-            JUAN MARIA ORAZI — 4ta CABALLEROS
-          </option>
-        
-          <option value="32">
-            Jugador Dummy 1 — 7ma CABALLEROS
-          </option>
-        
-          <option value="41">
-            Jugador Dummy 10 — 7ma CABALLEROS
-          </option>
-        
-          <option value="42">
-            Jugador Dummy 11 — 7ma CABALLEROS
-          </option>
-        
-          <option value="43">
-            Jugador Dummy 12 — 7ma CABALLEROS
-          </option>
-        
-          <option value="44">
-            Jugador Dummy 13 — 7ma CABALLEROS
-          </option>
-        
-          <option value="45">
-            Jugador Dummy 14 — 7ma CABALLEROS
-          </option>
-        
-          <option value="46">
-            Jugador Dummy 15 — 7ma CABALLEROS
-          </option>
-        
-          <option value="47">
-            Jugador Dummy 16 — 7ma CABALLEROS
-          </option>
-        
-          <option value="33">
-            Jugador Dummy 2 — 7ma CABALLEROS
-          </option>
-        
-          <option value="34">
-            Jugador Dummy 3 — 7ma CABALLEROS
-          </option>
-        
-          <option value="35">
-            Jugador Dummy 4 — 7ma CABALLEROS
-          </option>
-        
-          <option value="36">
-            Jugador Dummy 5 — 7ma CABALLEROS
-          </option>
-        
-          <option value="37">
-            Jugador Dummy 6 — 7ma CABALLEROS
-          </option>
-        
-          <option value="38">
-            Jugador Dummy 7 — 7ma CABALLEROS
-          </option>
-        
-          <option value="39">
-            Jugador Dummy 8 — 7ma CABALLEROS
-          </option>
-        
-          <option value="40">
-            Jugador Dummy 9 — 7ma CABALLEROS
-          </option>
-        
-          <option value="29">
-            Jugador PIN Permanente — 7ma CABALLEROS
-          </option>
-        
-          <option value="19">
-            Jugador Test 10 — 4ta CABALLEROS
-          </option>
-        
-          <option value="20">
-            Jugador Test 11 — 4ta CABALLEROS
-          </option>
-        
-          <option value="21">
-            Jugador Test 12 — 4ta CABALLEROS
-          </option>
-        
-          <option value="11">
-            Jugador Test 2 — 4ta CABALLEROS
-          </option>
-        
-          <option value="12">
-            Jugador Test 3 — 4ta CABALLEROS
-          </option>
-        
-          <option value="13">
-            Jugador Test 4 — 4ta CABALLEROS
-          </option>
-        
-          <option value="14">
-            Jugador Test 5 — 4ta CABALLEROS
-          </option>
-        
-          <option value="15">
-            Jugador Test 6 — 4ta CABALLEROS
-          </option>
-        
-          <option value="16">
-            Jugador Test 7 — 4ta CABALLEROS
-          </option>
-        
-          <option value="17">
-            Jugador Test 8 — 4ta CABALLEROS
-          </option>
-        
-          <option value="18">
-            Jugador Test 9 — 4ta CABALLEROS
-          </option>
-        
-          <option value="28">
-            Jugador Test Bash — 7ma CABALLEROS
-          </option>
-        
-          <option value="2">
-            MATIAS BOGADO — 3ra CABALLEROS
-          </option>
-        
-          <option value="30">
-            TEST AUDIT 20251031_121304 — 7ma CABALLEROS
-          </option>
-        
-          <option value="26">
-            TESTER 8X5N — PRINCIPIANTES B
-          </option>
-        
-          <option value="31">
-            TESTER AUTO BASH — 7ma CABALLEROS
-          </option>
-        
-          <option value="23">
-            VICTOR MANUEL BOGADO — 4ta CABALLEROS
-          </option>
-        
-          <option value="22">
-            admin — 7ma CABALLEROS
-          </option>
-        
-      </select>
-      <p id="ayuda-jugador" class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
-        Si no aparecés, pedí el alta al organizador.
-      </p>
-
-      
-    </div>
-
-    <div>
-      <label for="pin" class="muted" style="display:block; margin-bottom:4px;">PIN</label>
-      <div style="display:flex; gap:8px;">
-        <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6"
-               required placeholder="4–6 dígitos" autocomplete="current-password" style="width:100%;">
-        <button type="button" id="togglePin" class="btn btn-ghost btn-slim" aria-pressed="false" aria-controls="pin" title="Mostrar/ocultar PIN">👁</button>
-      </div>
-      <p class="muted" style="margin:.35rem 0 0; font-size:.92rem;">
-        El PIN lo define el organizador. Podrás cambiarlo luego desde <em>Editar jugador</em>.
-      </p>
-      <p style="margin:.35rem 0 0;">
-        <a href="/olvide-pin" class="btn btn-ghost btn-slim">Olvidé mi PIN</a>
-      </p>
-    </div>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;">
-      <button type="submit" class="btn">Entrar</button>
-      <a href="/alta" class="btn btn-ghost">No figuro, pedir alta</a>
-      <a href="/ranking" class="btn btn-ghost">Ver ranking</a>
-    </div>
-  </form>
-</div>
-
-<div class="card" style="border-style:dashed; margin-top:10px; max-width:560px;">
-  <p style="margin:0;">
-    ¿Problemas para ingresar? Verificá que tu nombre esté en la lista y que el PIN sea correcto.
-  </p>
-</div>
-
-<script>
-  // --- Utilidades
-  const normalizar = (s) => (s || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim();
-
-  const buscar = document.getElementById('buscar');
-  const select = document.getElementById('jugador_id');
-  const estado = document.getElementById('buscar-estado');
-  const pin = document.getElementById('pin');
-  const toggle = document.getElementById('togglePin');
-
-  if (buscar && select) {
-    // Clonamos opciones originales para rearmar la lista rápido
-    const optsOriginales = Array.from(select.options).map(o => o.cloneNode(true));
-    const optBase = optsOriginales[0];           // "-- Elegí tu nombre --"
-    const optResto = optsOriginales.slice(1);    // jugadores
-
-    // Render helper
-    function renderLista(coincidentes) {
-      // Limpio y vuelvo a poner la base
-      select.innerHTML = '';
-      select.appendChild(optBase.cloneNode(true));
-
-      if (coincidentes.length === 0) {
-        const vacio = document.createElement('option');
-        vacio.disabled = true;
-        vacio.textContent = '— Sin resultados —';
-        select.appendChild(vacio);
-        estado.textContent = 'Sin resultados.';
-        select.selectedIndex = 0;
-        return;
-      }
-
-      // Agrego coincidencias
-      coincidentes.forEach(o => select.appendChild(o.cloneNode(true)));
-
-      // Auto-seleccionar primera coincidencia
-      select.selectedIndex = 1;
-
-      // Estado accesible
-      estado.textContent = `${coincidentes.length} resultado${coincidentes.length === 1 ? '' : 's'}.`;
-    }
-
-    // Filtro (tokeniza para búsquedas "nombre apellido")
-    function filtrar(qRaw) {
-      const q = normalizar(qRaw);
-      if (!q) {
-        // Reset
-        renderLista(optResto);
-        estado.textContent = '';
-        select.selectedIndex = 0;
-        return;
-      }
-      const tokens = q.split(/\s+/).filter(Boolean);
-      const coincide = (texto) => {
-        const t = normalizar(texto);
-        return tokens.every(tok => t.includes(tok));
-      };
-      const match = optResto.filter(o => coincide(o.textContent || o.innerText || ''));
-      renderLista(match);
-    }
-
-    // Eventos
-    buscar.addEventListener('input', () => filtrar(buscar.value));
-
-    // Enter desde el buscador: si hay UNA coincidencia, confirmo y voy a PIN
-    buscar.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        const total = select.options.length;
-        // Base + (1) única coincidencia = 2 opciones totales
-        if (total === 2 && !select.options[1].disabled) {
-          select.selectedIndex = 1;
-          pin && pin.focus();
-        } else {
-          if (total > 1) {
-            select.selectedIndex = 1;
-            pin && pin.focus();
-          }
-        }
-      }
-    });
-  }
-
-  // --- Mostrar/Ocultar PIN
-  if (pin && toggle){
-    toggle.addEventListener('click', () => {
-      const isPass = pin.type === 'password';
-      pin.type = isPass ? 'text' : 'password';
-      toggle.setAttribute('aria-pressed', String(isPass));
-    });
-  }
-</script>
 
   </div>
 
@@ -501,21 +258,6 @@
       </div>
       <div class="help-body">
         
-<section class="help-section">
-  <h4 style="margin:0 0 8px;">¿Qué puedo hacer en <strong>Iniciar sesión</strong>?</h4>
-
-  <ul style="margin:0 0 10px 18px; padding:0; line-height:1.3;">
-    <li><strong>Buscar tu nombre</strong> con el filtro y seleccionarlo en la lista.</li>
-    <li><strong>Ingresar tu PIN</strong> (4–6 dígitos).</li>
-    <li>Si no estás en la lista, <strong>pedí el alta</strong> al organizador.</li>
-    <li>Si te olvidaste el PIN, usá <strong>Olvidé mi PIN</strong>.</li>
-  </ul>
-
-  <div style="margin:10px 0 0; font-size:.95rem; opacity:.95;">
-    <strong>Tip:</strong> escribí nombre y apellido para filtrar más rápido; con Enter se selecciona la primera coincidencia.
-  </div>
-</section>
-
           <div class="help-grid">
             <section class="help-section">
               <h4>Menú principal</h4>
@@ -540,7 +282,6 @@
             </section>
           </div>
         
-
         <div class="help-links" style="margin-top:10px;">
           <a href="/ranking">Ir al Ranking</a>
           <a href="/desafios">Ver Desafíos</a>

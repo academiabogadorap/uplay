@@ -7857,9 +7857,20 @@ def admin_torneo_ver_roundrobin(tid):
 @app.route('/admin/torneos/<int:tid>', methods=['GET'])
 @admin_required
 def admin_torneos_view(tid):
+    # Importar modelos necesarios al inicio (evita UnboundLocalError)
+    from app import (
+        Torneo,
+        TorneoInscripcion,
+        TorneoPartido,
+        TorneoPartidoLado,
+        TorneoPartidoResultado,
+        TorneoPartidoResultadoPropuesto,
+        Jugador
+    )
+
     t = get_or_404(Torneo, tid)
 
-    # Inscripciones (como ya lo tenías)
+    # === INSCRIPCIONES ===
     insc = (
         db.session.query(TorneoInscripcion)
         .filter(TorneoInscripcion.torneo_id == t.id)
@@ -7870,7 +7881,7 @@ def admin_torneos_view(tid):
         .all()
     )
 
-    # Partidos del torneo (como ya lo tenías)
+    # === PARTIDOS ===
     partidos = (
         db.session.query(TorneoPartido)
         .filter(TorneoPartido.torneo_id == t.id)
@@ -7882,7 +7893,7 @@ def admin_torneos_view(tid):
         .all()
     )
 
-    # Resultados existentes (dict por partido_id) — como lo tenías
+    # === RESULTADOS EXISTENTES ===
     res_list = (
         db.session.query(TorneoPartidoResultado)
         .join(TorneoPartido, TorneoPartidoResultado.partido_id == TorneoPartido.id)
@@ -7891,7 +7902,7 @@ def admin_torneos_view(tid):
     )
     resultados = {r.partido_id: r for r in res_list}
 
-    # ==== PRO-PUESTOS (si el modelo existe) ====
+    # === PROPUESTAS ===
     propuestas = {}
     try:
         from app import TorneoPartidoResultadoPropuesto as TPRP
@@ -7908,7 +7919,7 @@ def admin_torneos_view(tid):
             )
             propuestas = {x.partido_id: x for x in prps}
 
-    # ==== JUGADORES POR PARTIDO (A/B) usando helpers del proyecto ====
+    # === JUGADORES POR PARTIDO ===
     helper_torneo = globals().get('_jugadores_del_lado_torneo')
     helper_generico = globals().get('_jugadores_del_lado')
 
@@ -7925,14 +7936,12 @@ def admin_torneos_view(tid):
                 elif helper_generico:
                     ids = helper_generico(p, lado) or []
             except TypeError:
-                # Por si algún helper tiene firma distinta
                 ids = []
-            # normalizar y filtrar nulos/ceros
             ids = [int(x) for x in ids if x]
             jugadores_por_partido_ids[p.id][lado] = ids
             all_ids.update(ids)
 
-    # ➕ AÑADIDO: incluir confirmador (resultado definitivo) y proponente (resultado propuesto)
+    # Agregar confirmadores y proponentes
     for r in res_list:
         cid = getattr(r, 'confirmado_por_jugador_id', None)
         if cid:
@@ -7949,10 +7958,9 @@ def admin_torneos_view(tid):
             except (TypeError, ValueError):
                 pass
 
-    # Mapear id -> Jugador y reemplazar por objetos
+    # === MAPEAR ID → OBJETO JUGADOR ===
     jug_map = {}
     if all_ids:
-        from app import Jugador
         rows = (
             db.session.query(Jugador)
             .filter(Jugador.id.in_(list(all_ids)))
@@ -7967,6 +7975,105 @@ def admin_torneos_view(tid):
             'B': [jug_map.get(jid) for jid in lados.get('B', []) if jug_map.get(jid)],
         }
 
+    # ==========================================================
+    # 🧮 TABLAS DE POSICIONES POR ZONA (Round Robin / Zonas)
+    # ==========================================================
+    from collections import defaultdict
+
+    tablas_zonas = defaultdict(lambda: defaultdict(lambda: {
+        'nombre': '',
+        'pj': 0, 'pg': 0, 'pp': 0,
+        'sets_ganados': 0, 'sets_perdidos': 0,
+        'dif_sets': 0, 'puntos': 0
+    }))
+
+    # Función para obtener nombre de pareja
+    def nombre_pareja(insc_obj):
+        if not insc_obj:
+            return "Pareja desconocida"
+        try:
+            j1 = insc_obj.jugador_1.nombre_completo if insc_obj.jugador_1 else ""
+            j2 = insc_obj.jugador_2.nombre_completo if insc_obj.jugador_2 else ""
+            return f"{j1} / {j2}".strip(" /")
+        except Exception:
+            return f"Pareja #{insc_obj.id}"
+
+    # Pre-cargar inscripciones
+    inscripciones_map = {i.id: i for i in insc}
+
+    for partido in partidos:
+        if not partido.grupo_id:
+            continue
+        r = resultados.get(partido.id)
+        if not r:
+            continue
+
+        lados = db.session.query(TorneoPartidoLado).filter_by(partido_id=partido.id).all()
+        if len(lados) != 2:
+            continue
+
+        ladoA, ladoB = lados
+        inscA = inscripciones_map.get(ladoA.insc1_id)
+        inscB = inscripciones_map.get(ladoB.insc1_id)
+
+        nombreA = nombre_pareja(inscA)
+        nombreB = nombre_pareja(inscB)
+        zona = partido.grupo_id
+
+        # Inicializar si no existe
+        for nombre in (nombreA, nombreB):
+            tablas_zonas[zona][nombre]['nombre'] = nombre
+
+        # Parse sets_text (ejemplo "6-4 2-6 10-8")
+        def contar_sets(sets_text):
+            ganadosA = ganadosB = 0
+            if not sets_text:
+                return ganadosA, ganadosB
+            for set_str in sets_text.split():
+                try:
+                    a, b = map(int, set_str.split('-'))
+                    if a > b:
+                        ganadosA += 1
+                    else:
+                        ganadosB += 1
+                except Exception:
+                    pass
+            return ganadosA, ganadosB
+
+        setsA, setsB = contar_sets(r.sets_text)
+
+        tablas_zonas[zona][nombreA]['pj'] += 1
+        tablas_zonas[zona][nombreB]['pj'] += 1
+        tablas_zonas[zona][nombreA]['sets_ganados'] += setsA
+        tablas_zonas[zona][nombreA]['sets_perdidos'] += setsB
+        tablas_zonas[zona][nombreB]['sets_ganados'] += setsB
+        tablas_zonas[zona][nombreB]['sets_perdidos'] += setsA
+
+        if r.ganador_lado == 'A':
+            tablas_zonas[zona][nombreA]['pg'] += 1
+            tablas_zonas[zona][nombreB]['pp'] += 1
+            tablas_zonas[zona][nombreA]['puntos'] += 2
+            tablas_zonas[zona][nombreB]['puntos'] += 1
+        elif r.ganador_lado == 'B':
+            tablas_zonas[zona][nombreB]['pg'] += 1
+            tablas_zonas[zona][nombreA]['pp'] += 1
+            tablas_zonas[zona][nombreB]['puntos'] += 2
+            tablas_zonas[zona][nombreA]['puntos'] += 1
+
+    # Calcular diferencia de sets
+    for zona, data in tablas_zonas.items():
+        for p in data.values():
+            p['dif_sets'] = p['sets_ganados'] - p['sets_perdidos']
+
+    # Ordenar por puntos, dif, sets_ganados, nombre
+    tablas_zonas_ordenadas = {}
+    for zona, data in tablas_zonas.items():
+        tablas_zonas_ordenadas[zona] = sorted(
+            data.values(),
+            key=lambda x: (-x['puntos'], -x['dif_sets'], -x['sets_ganados'], x['nombre'])
+        )
+
+    # === RENDER FINAL ===
     return render_template(
         'admin_torneos_view.html',
         t=t,
@@ -7975,12 +8082,9 @@ def admin_torneos_view(tid):
         resultados=resultados,
         propuestas=propuestas,
         jugadores_por_partido=jugadores_por_partido_obj,
-        jugadores_by_id=jug_map,   # << para mostrar nombres de proponente/confirmador
+        jugadores_by_id=jug_map,
+        tablas_zonas=tablas_zonas_ordenadas,  # 👈 NUEVO
     )
-
-
-
-
 
 
 

@@ -21,7 +21,7 @@
   .dot{width:8px; height:8px; border-radius:50%;}
   .dot.g{ background:var(--neon); } .dot.y{ background:var(--yellow); } .dot.b{ background:#6EA8FF; }
 
-  /* ===== Badges de estado ===== */
+  /* ===== Badges ===== */
   .badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:.8rem;
           border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#e6edf3; }
   .state-BORRADOR{ background:#2a2431; border-color:#5a4678; color:#e9d7ff; }
@@ -31,70 +31,21 @@
   .state-EN_JUEGO{ background:#1b3b2a; border-color:#1a704d; color:#d7ffe9; }
   .state-FINALIZADO{ background:#212121; border-color:#464646; color:#e6e6e6; }
 
-  /* ===== Botones y pills ===== */
+  /* ===== Botones ===== */
   .btn{ cursor:pointer; }
   .btn-slim{ height:36px; padding:6px 10px; border-radius:10px; font-weight:700; }
   .btn-ghost{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); }
-  .btn-danger{ background:#3b1b1b; border:1px solid #701a1a; }
-  .pill{
-    display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px;
-    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
-    font-size:.86rem; color:#e6edf3;
-  }
-  .pill *{ color:inherit; }
 
-  /* ===== Cards / info ===== */
-  .torneo-info.card{ padding:10px 12px; }
-  .info-grid{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap:8px;
-    margin-top:6px;
-  }
-  .info-item{ background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:8px; }
-  .info-item strong{ display:block; font-weight:800; font-size:.86rem; color:#cfe1ff; }
-  .info-item span{ display:block; margin-top:2px; }
-  .notes{
-    margin-top:8px; padding:8px; border-radius:10px;
-    background: rgba(255,255,255,.03); border:1px dashed rgba(255,255,255,.14);
-    color:var(--muted,#9fb3c8);
-    white-space:pre-wrap;
-  }
-
-  /* ===== Acciones ===== */
-  .actions.card{ padding:10px; }
-  .actions-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .seg{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .seg label{ font-weight:700; color:var(--muted,#9fb3c8); font-size:.9rem; }
-  .seg select{
-    height:36px; padding:6px 8px; border-radius:10px;
-    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16); color:var(--text);
-    max-width:220px;
-  }
-  .spacer{ flex:1; }
-
-  /* ===== Tabla de partidos ===== */
-  .card.section{ padding:10px 12px; margin-top:12px; }
-  .section h3{ margin:0 0 8px; font-size:1.05rem; }
-  .table{ width:100%; border-collapse:collapse; }
-  .table th, .table td{
-    padding:8px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:top;
-  }
-  .table th{ text-align:left; font-size:.85rem; color:var(--muted,#9fb3c8); font-weight:700; }
+  /* ===== Tabla de posiciones ===== */
+  .zona-card{ border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); padding:10px; margin-top:10px; }
+  .zona-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  table.posiciones{ width:100%; border-collapse:collapse; margin-top:6px; }
+  table.posiciones th, table.posiciones td{ padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:center; font-size:.9rem; }
+  table.posiciones th{ color:var(--muted,#9fb3c8); font-weight:700; background:rgba(255,255,255,.03); }
+  table.posiciones td:first-child{ text-align:left; }
+  table.posiciones tr:first-child td{ border-top:1px solid rgba(255,255,255,.08); }
   .muted{ color:var(--muted,#9fb3c8); }
   .mini{ font-size:.86rem; }
-  .nowrap{ white-space:nowrap; }
-  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
-  .edit-form{ display:none; padding:8px; margin-top:6px; border-radius:8px;
-    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
-  }
-  .edit-form .field{ display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
-  .chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); }
-  .winner{ color:#b7ffcf; font-weight:700; }
-  .loser{ color:#ffb7b7; }
-  @media (max-width:700px){
-    .hide-sm{ display:none; }
-  }
 </style>
 
 <!-- ===== HERO ===== -->
@@ -103,7 +54,7 @@
     <div>
       <h2 class="hero-title">{{ t.nombre }}</h2>
       <div class="chips">
-        <span class="chip"><span class="dot b"></span> Estado: <span class="badge state-{{ t.estado }}" style="margin-left:6px;">{{ t.estado }}</span></span>
+        <span class="chip"><span class="dot b"></span> Estado: <span class="badge state-{{ t.estado }}">{{ t.estado }}</span></span>
         {% set raw_mod = (t.modalidad or t.formato or '') %}
         {% set mod_up = raw_mod.upper() %}
         <span class="chip"><span class="dot g"></span> {{ 'INDIVIDUAL' if mod_up == 'SINGLES' else 'PAREJAS' if mod_up == 'DOBLES' else (raw_mod or 'Modalidad -') }}</span>
@@ -112,12 +63,6 @@
               else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
               else 'PLAYOFF' if tipo_up == 'PLAYOFF'
               else (t.tipo or 'Formato -') }}</span>
-        {% if t.categoria %}
-          <span class="chip"><span class="dot b"></span> Cat: {{ t.categoria.nombre }}</span>
-        {% endif %}
-        {% if t.fecha_inicio %}
-          <span class="chip"><span class="dot g"></span> Inicio: {{ t.fecha_inicio }}</span>
-        {% endif %}
       </div>
     </div>
     <div class="hero-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -127,9 +72,9 @@
   </div>
 </div>
 
-<!-- ===== Info del Torneo ===== -->
+<!-- INFO -->
 <div class="card torneo-info">
-  <div class="info-grid" role="list">
+  <div class="info-grid">
     <div class="info-item"><strong>Modalidad</strong><span>{{ t.modalidad or '-' }}</span></div>
     <div class="info-item"><strong>Formato</strong><span>{{ t.tipo or '-' }}</span></div>
     <div class="info-item"><strong>Categoría</strong><span>{{ t.categoria.nombre if t.categoria else '-' }}</span></div>
@@ -140,48 +85,26 @@
   {% if t.notas %}<div class="notes"><em>{{ t.notas }}</em></div>{% endif %}
 </div>
 
-<!-- ===== Acciones ===== -->
-<div class="card actions" style="margin-top:10px;">
+<!-- ACCIONES -->
+<div class="card actions">
   <div class="actions-row">
-    {% if t.estado in ('BORRADOR','CANCELADO') %}
-      <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
-        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-        <button type="submit" class="btn btn-slim">Abrir inscripción</button>
-      </form>
-      <span class="pill">Generar fixture (bloqueado)</span>
-
-    {% elif t.estado == 'INSCRIPCION' %}
-      <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
-        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-        <button type="submit" class="btn btn-ghost btn-slim">Cerrar inscripción</button>
-      </form>
-      <span class="pill">Generar fixture (bloqueado)</span>
-
-    {% elif t.estado in ('INSCRIPCION_CERRADA', 'EN_JUEGO') %}
-      {% if t.estado == 'INSCRIPCION_CERRADA' %}
-        <span class="pill">Inscripción cerrada</span>
-      {% else %}
-        <span class="pill">Fixture en juego</span>
-      {% endif %}
-
+    {% if t.estado in ('INSCRIPCION_CERRADA','EN_JUEGO') %}
       <form method="post" action="{{ url_for('admin_torneos_generar_fixture', tid=t.id) }}" class="seg">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <label for="modo">Modo</label>
         <select name="modo" id="modo">
-          <option value="AMERICANO">Americano (liga completa)</option>
+          <option value="AMERICANO">Americano</option>
           <option value="ROUND_ROBIN">Round Robin (por zonas)</option>
           <option value="ZONAS_LLAVE">Zonas (1v2 / 3v4 → Ganadores y Perdedores)</option>
-          <option value="PLAYOFF">Playoff (crear 1ª ronda)</option>
-          <option value="PLAYOFF_NEXT">Siguiente ronda de Playoff</option>
+          <option value="PLAYOFF">Playoff</option>
+          <option value="PLAYOFF_NEXT">Siguiente ronda</option>
         </select>
-
         <label for="zonas">Zonas</label>
         <select name="zonas" id="zonas">
           {% for z in range(1, 17) %}
             <option value="{{ z }}" {{ 'selected' if z == 1 else '' }}>{{ z }}</option>
           {% endfor %}
         </select>
-
         <div id="grupo-roundrobin" style="display:none;">
           <label for="parejas_por_zona">Parejas por zona</label>
           <select name="parejas_por_zona" id="parejas_por_zona">
@@ -190,24 +113,13 @@
             {% endfor %}
           </select>
         </div>
-
-        <label for="ida_y_vuelta">Ida y vuelta</label>
-        <select name="ida_y_vuelta" id="ida_y_vuelta">
-          <option value="0" selected>No</option>
-          <option value="1">Sí</option>
-        </select>
-
         <button type="submit" class="btn btn-slim">Generar fixture</button>
       </form>
 
-      <!-- 🔥 Nuevo botón para crear Playoff desde Zonas -->
       <form method="post" action="{{ url_for('admin_torneos_generar_playoff_desde_zonas', tid=t.id) }}" class="seg">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn btn-ghost btn-slim">Generar Playoff desde Zonas</button>
       </form>
-
-    {% elif t.estado == 'FINALIZADO' %}
-      <span class="pill">Torneo finalizado</span>
     {% endif %}
   </div>
 </div>
@@ -215,11 +127,9 @@
 <!-- PARTIDOS -->
 <div class="card section">
   <h3>Partidos y resultados</h3>
-  {% if partidos and partidos|length > 0 %}
+  {% if partidos %}
     <table class="table">
-      <thead>
-        <tr><th>#</th><th>Ronda</th><th>Partido</th><th>Estado</th><th>Resultado</th></tr>
-      </thead>
+      <thead><tr><th>#</th><th>Ronda</th><th>Partido</th><th>Estado</th></tr></thead>
       <tbody>
         {% for p in partidos %}
           <tr>
@@ -227,7 +137,6 @@
             <td>{{ p.ronda }}</td>
             <td>{{ p.participante_a_id }} vs {{ p.participante_b_id }}</td>
             <td>{{ p.estado }}</td>
-            <td>{{ resultados[p.id].sets_text if resultados and p.id in resultados else '-' }}</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -236,6 +145,42 @@
     <p class="muted">No hay partidos generados todavía.</p>
   {% endif %}
 </div>
+
+<!-- 🔥 NUEVA SECCIÓN: TABLAS DE POSICIONES POR ZONA -->
+{% if tablas_zonas %}
+  <div class="card section">
+    <h3>Tabla de posiciones por zonas</h3>
+    {% for zona, tabla in tablas_zonas.items() %}
+      <div class="zona-card">
+        <div class="zona-header">
+          <h4>Zona {{ zona }}</h4>
+          <span class="muted">{{ tabla|length }} parejas</span>
+        </div>
+        <table class="posiciones">
+          <thead>
+            <tr>
+              <th>Pareja</th><th>PJ</th><th>PG</th><th>PP</th><th>Sets+</th><th>Sets−</th><th>Dif</th><th>Pts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for fila in tabla %}
+              <tr>
+                <td>{{ fila.nombre }}</td>
+                <td>{{ fila.pj }}</td>
+                <td>{{ fila.pg }}</td>
+                <td>{{ fila.pp }}</td>
+                <td>{{ fila.sets_ganados }}</td>
+                <td>{{ fila.sets_perdidos }}</td>
+                <td>{{ fila.dif_sets }}</td>
+                <td><strong>{{ fila.puntos }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
 
 <script>
   const modoSelect = document.getElementById('modo');

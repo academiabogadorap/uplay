@@ -127,3 +127,112 @@
 
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Torneo Demo - Academia Bogado</title>
+<style>
+  body{background:#0b0c10; color:#e6edf3; font-family:"Poppins",system-ui; margin:20px;}
+  .hero{
+    position:relative; overflow:hidden; border-radius:16px; padding:14px;
+    background:
+      radial-gradient(700px 260px at 0% 0%, rgba(138,232,12,.25), transparent 60%),
+      radial-gradient(700px 260px at 100% 100%, rgba(246,201,14,.18), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.10));
+    border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.28);
+    margin-bottom:16px;
+  }
+  .hero-top{display:flex; gap:12px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap;}
+  .hero-title{margin:0; font-size:1.8rem; font-weight:800;}
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+        background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); font-weight:700; font-size:.9rem;}
+  .dot{width:8px; height:8px; border-radius:50%;}
+  .dot.g{background:#8ae80c;} .dot.y{background:#f6c90e;} .dot.b{background:#6EA8FF;}
+  .badge{padding:3px 9px; border-radius:999px; background:#1b3b2a; border:1px solid #1a704d; color:#d7ffe9; font-size:.8rem;}
+  .card{border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); padding:10px; margin-top:12px;}
+  .info-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px;}
+  .info-item{border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:6px;}
+  .info-item strong{display:block; color:#cfe1ff; font-size:.85rem;}
+  .info-item span{font-size:.9rem;}
+  h3{margin-top:14px;}
+  .zona-card{border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); padding:10px; margin-top:10px;}
+  .zona-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  table.posiciones{width:100%; border-collapse:collapse; margin-top:6px;}
+  table.posiciones th,table.posiciones td{padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:center; font-size:.9rem;}
+  table.posiciones th{color:#9fb3c8; background:rgba(255,255,255,.03);}
+  table.posiciones td:first-child{text-align:left;}
+  table.posiciones tr:first-child td{border-top:1px solid rgba(255,255,255,.08);}
+  .muted{color:#9fb3c8;} .btn{cursor:pointer; height:36px; padding:6px 12px; border-radius:10px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.16); color:#e6edf3; font-weight:700;}
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-top">
+    <div>
+      <h2 class="hero-title">Torneo Apertura 2025</h2>
+      <div class="chips">
+        <span class="chip"><span class="dot b"></span> Estado: <span class="badge">EN JUEGO</span></span>
+        <span class="chip"><span class="dot g"></span> Parejas</span>
+        <span class="chip"><span class="dot y"></span> Zonas + Playoff</span>
+      </div>
+    </div>
+    <div><button class="btn">Ver página pública</button></div>
+  </div>
+</div>
+
+<!-- INFO -->
+<div class="card">
+  <div class="info-grid">
+    <div class="info-item"><strong>Modalidad</strong><span>Dobles</span></div>
+    <div class="info-item"><strong>Categoría</strong><span>6ta Caballeros</span></div>
+    <div class="info-item"><strong>Inicio</strong><span>01/11/2025</span></div>
+    <div class="info-item"><strong>Sede</strong><span>1114 Pádel Club</span></div>
+    <div class="info-item"><strong>Cupo máximo</strong><span>16 parejas</span></div>
+  </div>
+</div>
+
+<!-- TABLA DE POSICIONES -->
+<div class="card">
+  <h3>Tabla de posiciones por zonas</h3>
+
+  <div class="zona-card">
+    <div class="zona-header">
+      <h4>Zona A</h4>
+      <span class="muted">4 parejas</span>
+    </div>
+    <table class="posiciones">
+      <thead>
+        <tr><th>Pareja</th><th>PJ</th><th>PG</th><th>PP</th><th>Sets+</th><th>Sets−</th><th>Dif</th><th>Pts</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Juan / Pedro</td><td>3</td><td>2</td><td>1</td><td>5</td><td>3</td><td>+2</td><td><strong>5</strong></td></tr>
+        <tr><td>Martín / Luis</td><td>3</td><td>1</td><td>2</td><td>4</td><td>5</td><td>-1</td><td><strong>4</strong></td></tr>
+        <tr><td>Leo / Nico</td><td>3</td><td>1</td><td>2</td><td>3</td><td>5</td><td>-2</td><td><strong>4</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="zona-card">
+    <div class="zona-header">
+      <h4>Zona B</h4>
+      <span class="muted">4 parejas</span>
+    </div>
+    <table class="posiciones">
+      <thead>
+        <tr><th>Pareja</th><th>PJ</th><th>PG</th><th>PP</th><th>Sets+</th><th>Sets−</th><th>Dif</th><th>Pts</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Carlos / Diego</td><td>3</td><td>3</td><td>0</td><td>6</td><td>1</td><td>+5</td><td><strong>6</strong></td></tr>
+        <tr><td>Andrés / Fabián</td><td>3</td><td>1</td><td>2</td><td>4</td><td>6</td><td>-2</td><td><strong>4</strong></td></tr>
+        <tr><td>Julián / Mauro</td><td>3</td><td>0</td><td>3</td><td>2</td><td>6</td><td>-4</td><td><strong>3</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>
