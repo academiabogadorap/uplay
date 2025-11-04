@@ -787,6 +787,96 @@ def generar_playoff_directo(torneo_id: int) -> int:
     db.session.commit()
     return partidos_creados
 
+def generar_zonas_con_llave(torneo_id: int, zonas: int, parejas_por_zona: int = 4) -> int:
+    """
+    Genera una fase de grupos tipo 'mini llave' (1v2, 3v4 → ganadores y perdedores)
+    para varios grupos (zonas). Cada zona genera 2 partidos iniciales.
+    """
+    from sqlalchemy import func
+    t = db.session.get(Torneo, torneo_id)
+    if not t:
+        raise RuntimeError("Torneo no encontrado")
+
+    participantes = (
+        db.session.query(TorneoParticipante)
+        .filter_by(torneo_id=torneo_id)
+        .order_by(TorneoParticipante.id.asc())
+        .all()
+    )
+    total = len(participantes)
+    if total < zonas * parejas_por_zona:
+        raise RuntimeError(f"No hay suficientes inscripciones para {zonas} zonas de {parejas_por_zona} parejas (total={total}).")
+
+    creados = 0
+    for i in range(zonas):
+        grupo = _get_or_create_grupo(t, None, f"Zona {chr(65+i)}", i+1)
+        subset = participantes[i*parejas_por_zona:(i+1)*parejas_por_zona]
+        if len(subset) < 4:
+            continue
+
+        a, b, c, d = subset
+
+        # Ronda 1 - cruces iniciales
+        db.session.add(TorneoPartido(
+            torneo_id=torneo_id, grupo_id=grupo.id,
+            participante_a_id=a.id, participante_b_id=b.id,
+            ronda=1, estado='PENDIENTE'
+        ))
+        db.session.add(TorneoPartido(
+            torneo_id=torneo_id, grupo_id=grupo.id,
+            participante_a_id=c.id, participante_b_id=d.id,
+            ronda=1, estado='PENDIENTE'
+        ))
+        creados += 2
+
+    db.session.commit()
+    return creados
+
+
+def generar_partidos_ganadores_perdedores(torneo_id: int) -> int:
+    """
+    Crea los partidos de ganadores vs ganadores y perdedores vs perdedores
+    para cada zona que ya tenga disputados los cruces iniciales.
+    """
+    from sqlalchemy import func
+
+    partidos = (
+        db.session.query(TorneoPartido)
+        .filter(TorneoPartido.torneo_id == torneo_id)
+        .filter(TorneoPartido.ronda == 1)
+        .all()
+    )
+
+    creados = 0
+    zonas = {}
+    for p in partidos:
+        zonas.setdefault(p.grupo_id, []).append(p)
+
+    for grupo_id, lista in zonas.items():
+        if len(lista) != 2:
+            continue
+        p1, p2 = lista
+        if not (p1.ganador_id and p2.ganador_id and p1.perdedor_id and p2.perdedor_id):
+            continue
+
+        # Partido de ganadores
+        db.session.add(TorneoPartido(
+            torneo_id=torneo_id, grupo_id=grupo_id,
+            participante_a_id=p1.ganador_id, participante_b_id=p2.ganador_id,
+            ronda=2, estado='PENDIENTE'
+        ))
+        # Partido de perdedores
+        db.session.add(TorneoPartido(
+            torneo_id=torneo_id, grupo_id=grupo_id,
+            participante_a_id=p1.perdedor_id, participante_b_id=p2.perdedor_id,
+            ronda=2, estado='PENDIENTE'
+        ))
+        creados += 2
+
+    db.session.commit()
+    return creados
+
+
 
 def _obtener_ganador_partido(p: 'TorneoPartido') -> int | None:
     """Devuelve el participante_id ganador si el partido está JUGADO; si no, None."""
@@ -7748,6 +7838,21 @@ def admin_torneo_new_playoff():
     # GET → Mostrar formulario
     return render_template('admin_torneo_new_playoff.html', categorias=categorias)
 
+@app.route("/admin/torneos/<int:tid>/ver_roundrobin")
+@admin_required
+def admin_torneo_ver_roundrobin(tid):
+    t = get_or_404(Torneo, tid)
+    fases = t.fases or []
+    zonas = []
+    for f in fases:
+        for g in f.grupos:
+            partidos = db.session.query(TorneoPartido).filter_by(grupo_id=g.id).all()
+            zonas.append({
+                "nombre": g.nombre,
+                "partidos": partidos
+            })
+    return render_template("admin_torneo_new_roundrobin.html", t=t, zonas=zonas)
+
 
 @app.route('/admin/torneos/<int:tid>', methods=['GET'])
 @admin_required
@@ -8096,7 +8201,7 @@ def admin_torneos_generar_fixture(tid):
     EST_INSCRIPCION_CERRADA = globals().get('EST_INSCRIPCION_CERRADA', 'INSCRIPCION_CERRADA')
     EST_EN_JUEGO            = globals().get('EST_EN_JUEGO', 'EN_JUEGO')
 
-    modo = (request.form.get('modo') or '').upper().strip()  # 'AMERICANO' | 'PLAYOFF' | 'PLAYOFF_NEXT'
+    modo = (request.form.get('modo') or '').upper().strip()  # 'AMERICANO' | 'PLAYOFF' | 'PLAYOFF_NEXT' | 'ROUND_ROBIN'
     zonas = request.form.get('zonas', type=int) or 1
     if zonas < 1:
         zonas = 1
@@ -8106,20 +8211,19 @@ def admin_torneos_generar_fixture(tid):
     def back():
         return redirect(url_for('admin_torneos_view', tid=tid))
 
-    if modo not in ('AMERICANO', 'PLAYOFF', 'PLAYOFF_NEXT'):
+    if modo not in ('AMERICANO', 'PLAYOFF', 'PLAYOFF_NEXT', 'ROUND_ROBIN'):
         flash('Modo de fixture inválido.', 'error')
         return back()
 
-    if modo in ('AMERICANO', 'PLAYOFF') and t.estado != EST_INSCRIPCION_CERRADA:
+    if modo in ('AMERICANO', 'PLAYOFF', 'ROUND_ROBIN') and t.estado != EST_INSCRIPCION_CERRADA:
         flash('Primero cerrá la inscripción para generar el fixture.', 'error')
         return back()
 
     try:
+        # =====================================================
+        # 🏁 MODO AMERICANO (liga completa)
+        # =====================================================
         if modo == 'AMERICANO':
-            # ===============================
-            # GENERADOR AMERICANO *IDEMPOTENTE*
-            # ===============================
-            # 1) Participantes del torneo (orden estable)
             participantes = (
                 db.session.query(TorneoParticipante)
                 .filter(TorneoParticipante.torneo_id == tid)
@@ -8132,18 +8236,15 @@ def admin_torneos_generar_fixture(tid):
                 flash('No hay participantes para generar fixture.', 'warning')
                 return back()
 
-            # 2) Método del círculo (round-robin). Manejo BYE si es impar.
             part_list = ids[:]
             bye_added = False
             if len(part_list) % 2 == 1:
-                part_list.append(None)  # BYE
+                part_list.append(None)
                 bye_added = True
 
             n = len(part_list)
-            num_rondas_base = n - 1  # N-1
-            rondas = []  # lista de rondas; cada ronda = lista de pares (a,b)
-
-            # Algoritmo estándar: fijás el primero y rotás el resto a la derecha
+            num_rondas_base = n - 1
+            rondas = []
             cur = part_list[:]
             for _r in range(num_rondas_base):
                 pairs = []
@@ -8151,26 +8252,16 @@ def admin_torneos_generar_fixture(tid):
                     a = cur[i]
                     b = cur[n - 1 - i]
                     if a is None or b is None:
-                        # BYE → se salta
                         continue
                     pairs.append((a, b))
                 rondas.append(pairs)
-                # rotación: deja fijo cur[0], rota el resto a la derecha
                 cur = [cur[0]] + [cur[-1]] + cur[1:-1]
 
-            # 3) Si ida_y_vuelta: duplicamos rondas invirtiendo local/visitante
             if ida_y_vuelta:
-                rondas_vuelta = []
-                for pairs in rondas:
-                    vuelta = [(b, a) for (a, b) in pairs]
-                    rondas_vuelta.append(vuelta)
-                rondas = rondas + rondas_vuelta  # primero toda la ida, luego toda la vuelta
+                rondas_vuelta = [[(b, a) for (a, b) in pairs] for pairs in rondas]
+                rondas += rondas_vuelta
 
-            # 4) Idempotencia: solo crear partidos faltantes entre cada par, sin importar el orden A/B
-            #    Si ya existe A-B o B-A, se considera existente.
             creados = 0
-
-            # Para numerar rondas sin chocar con lo previo, tomamos la ronda máxima actual y sumamos offset.
             max_ronda_actual = (
                 db.session.query(func.max(TorneoPartido.ronda))
                 .filter(TorneoPartido.torneo_id == tid)
@@ -8178,27 +8269,21 @@ def admin_torneos_generar_fixture(tid):
             )
             offset_ronda = (max_ronda_actual or 0)
 
-            # Contamos cuántos partidos existen ya por par (A,B) sin importar el orden
             def existe_partido(a, b):
                 return db.session.query(TorneoPartido.id).filter(
                     TorneoPartido.torneo_id == tid,
                     or_(
-                        and_(TorneoPartido.participante_a_id == a,
-                             TorneoPartido.participante_b_id == b),
-                        and_(TorneoPartido.participante_a_id == b,
-                             TorneoPartido.participante_b_id == a),
+                        and_(TorneoPartido.participante_a_id == a, TorneoPartido.participante_b_id == b),
+                        and_(TorneoPartido.participante_a_id == b, TorneoPartido.participante_b_id == a),
                     )
                 ).first() is not None
 
-            # Si ida_y_vuelta, permitimos hasta 2 partidos por par (A-B y B-A).
             def cantidad_existente(a, b):
                 return db.session.query(func.count(TorneoPartido.id)).filter(
                     TorneoPartido.torneo_id == tid,
                     or_(
-                        and_(TorneoPartido.participante_a_id == a,
-                             TorneoPartido.participante_b_id == b),
-                        and_(TorneoPartido.participante_a_id == b,
-                             TorneoPartido.participante_b_id == a),
+                        and_(TorneoPartido.participante_a_id == a, TorneoPartido.participante_b_id == b),
+                        and_(TorneoPartido.participante_a_id == b, TorneoPartido.participante_b_id == a),
                     )
                 ).scalar() or 0
 
@@ -8206,14 +8291,10 @@ def admin_torneos_generar_fixture(tid):
                 for idx_orden, (a, b) in enumerate(pairs, start=1):
                     if ida_y_vuelta:
                         ya = cantidad_existente(a, b)
-                        # queremos hasta 2 (ida y vuelta). Si hay 0 → creamos, si hay 1 → creamos (el inverso),
-                        # si hay 2 → nada
                         if ya >= 2:
                             continue
-                        # decidimos el orden A/B según la ronda que estamos generando (ya viene invertido en la vuelta)
                         crear_a, crear_b = a, b
                     else:
-                        # con ida sola, si ya existe (en cualquier orden), no creamos
                         if existe_partido(a, b):
                             continue
                         crear_a, crear_b = a, b
@@ -8229,7 +8310,6 @@ def admin_torneos_generar_fixture(tid):
                     creados += 1
 
             db.session.commit()
-
             extra = f" (zonas={zonas}{', ida y vuelta' if ida_y_vuelta else ''})"
             msg = f'Fixture AMERICANO generado/actualizado. Partidos nuevos: {creados}.'
             if bye_added:
@@ -8241,6 +8321,22 @@ def admin_torneos_generar_fixture(tid):
                 db.session.commit()
             return back()
 
+        # =====================================================
+        # 🌀 MODO ROUND ROBIN (por zonas)
+        # =====================================================
+        if modo == 'ROUND_ROBIN':
+            from app import generar_round_robin_zonas
+            creados = generar_round_robin_zonas(torneo_id=t.id, parejas_por_zona=4)
+            flash(f'Fixture ROUND ROBIN generado correctamente. Partidos creados: {creados}.', 'ok')
+
+            if t.estado != EST_EN_JUEGO:
+                t.estado = EST_EN_JUEGO
+                db.session.commit()
+            return back()
+
+        # =====================================================
+        # 🎯 MODO PLAYOFF DIRECTO
+        # =====================================================
         if modo == 'PLAYOFF':
             creados = generar_playoff_directo(t.id)
             if creados is not None:
@@ -8253,10 +8349,12 @@ def admin_torneos_generar_fixture(tid):
                 db.session.commit()
             return back()
 
-        # PLAYOFF_NEXT
+        # =====================================================
+        # 🔁 MODO PLAYOFF SIGUIENTE RONDA
+        # =====================================================
         creados = generar_playoff_siguiente_ronda(t.id)
         if creados == 0:
-            flash('No se creó nueva ronda (ya hay campeón o falta definir ganadores de la ronda previa).', 'info')
+            flash('No se creó nueva ronda (ya hay campeón o falta definir ganadores previos).', 'info')
         else:
             flash(f'Siguiente ronda de playoff generada: {creados} partido(s).', 'ok')
 
@@ -8266,19 +8364,249 @@ def admin_torneos_generar_fixture(tid):
         return back()
 
     except RuntimeError as e:
-        # ✅ limpiar la sesión tras errores controlados
         db.session.rollback()
         flash(str(e), 'error')
         return back()
     except Exception as e:
-        # ✅ limpiar también en errores no controlados
         db.session.rollback()
         current_app.logger.exception('Error generando fixture')
         flash(f'Error generando fixture: {e}', 'error')
         return back()
 
+# ==========================================================
+# 🧮 Generar segunda ronda: ganadores y perdedores (por zona)
+# ==========================================================
+def generar_partidos_ganadores_perdedores(torneo_id):
+    """
+    Genera la segunda ronda de cada zona:
+    - Partido de ganadores entre los ganadores de 1v2 y 3v4
+    - Partido de perdedores entre los perdedores de 1v2 y 3v4
+    Evita duplicados si ya existen partidos de R2 en esa zona.
+    Retorna la cantidad de partidos creados.
+    """
+    from app import db, Partido
+
+    partidos = (
+        db.session.query(Partido)
+        .filter(Partido.torneo_id == torneo_id)
+        .all()
+    )
+    if not partidos:
+        return 0
+
+    creados = 0
+    zonas = {}
+    for p in partidos:
+        if not p.zona:
+            continue
+        zonas.setdefault(p.zona, []).append(p)
+
+    for zona, ps in zonas.items():
+        # Evitar duplicados: si ya existen partidos de ronda 2 en esta zona, continuar
+        if any((p.ronda or '').upper() == 'R2' for p in ps):
+            continue
+
+        ronda1 = [p for p in ps if (p.ronda or '').lower() in ('r1', '1', '1ra', 'primera')]
+        if len(ronda1) < 2:
+            continue
+
+        ganadores, perdedores = [], []
+
+        for p in ronda1:
+            if not p.resultado_sets_text:
+                continue
+            try:
+                sets = [s.strip() for s in p.resultado_sets_text.split('-')]
+                if len(sets) == 2:
+                    s1, s2 = int(sets[0]), int(sets[1])
+                    ganador = p.participante_a_id if s1 > s2 else p.participante_b_id
+                    perdedor = p.participante_b_id if s1 > s2 else p.participante_a_id
+                    ganadores.append(ganador)
+                    perdedores.append(perdedor)
+            except Exception:
+                continue
+
+        # Crear partido de ganadores
+        if len(ganadores) == 2:
+            nuevo = Partido(
+                torneo_id=torneo_id,
+                ronda="R2",
+                zona=zona,
+                participante_a_id=ganadores[0],
+                participante_b_id=ganadores[1],
+                estado="pendiente",
+            )
+            db.session.add(nuevo)
+            creados += 1
+
+        # Crear partido de perdedores
+        if len(perdedores) == 2:
+            nuevo = Partido(
+                torneo_id=torneo_id,
+                ronda="R2",
+                zona=zona,
+                participante_a_id=perdedores[0],
+                participante_b_id=perdedores[1],
+                estado="pendiente",
+            )
+            db.session.add(nuevo)
+            creados += 1
+
+    db.session.commit()
+    return creados
+
+# ==========================================================
+# 🏆 Generar Playoff automáticamente desde las zonas
+# ==========================================================
+def generar_playoff_desde_zonas(torneo_id, clasificados_por_zona=2):
+    """
+    Crea el cuadro de playoff automáticamente a partir de las zonas.
+    Toma los mejores N de cada zona (por default 2).
+    """
+    from app import db, Partido
+
+    # Obtener partidos con zona
+    partidos = db.session.query(Partido).filter(Partido.torneo_id == torneo_id).all()
+    if not partidos:
+        raise RuntimeError("No hay partidos para generar playoff.")
+
+    zonas = {}
+    for p in partidos:
+        if not p.zona:
+            continue
+        zonas.setdefault(p.zona, []).append(p)
+
+    clasificados = {}
+
+    for zona, ps in zonas.items():
+        resultados = {}
+        for p in ps:
+            if not p.resultado_sets_text:
+                continue
+            try:
+                s1, s2 = map(int, p.resultado_sets_text.split('-'))
+            except Exception:
+                continue
+
+            ganador = p.participante_a_id if s1 > s2 else p.participante_b_id
+            perdedor = p.participante_b_id if s1 > s2 else p.participante_a_id
+
+            resultados.setdefault(ganador, 0)
+            resultados.setdefault(perdedor, 0)
+            resultados[ganador] += 1
+
+        # Ordenar por cantidad de victorias
+        orden = sorted(resultados.items(), key=lambda x: x[1], reverse=True)
+        top = [pid for pid, _ in orden[:clasificados_por_zona]]
+        clasificados[zona] = top
+
+    # Construir lista global
+    zonas_ordenadas = sorted(clasificados.keys())
+    lista_clasificados = []
+    for z in zonas_ordenadas:
+        for p in clasificados[z]:
+            lista_clasificados.append((z, p))
+
+    total = len(lista_clasificados)
+    if total < 4:
+        raise RuntimeError("No hay suficientes clasificados para armar el cuadro final.")
+
+    # Crear partidos según cantidad
+    cruces = []
+    if len(zonas_ordenadas) == 2:
+        # Semifinal directa: 1A vs 2B, 1B vs 2A
+        cruces = [
+            (clasificados[zonas_ordenadas[0]][0], clasificados[zonas_ordenadas[1]][1]),
+            (clasificados[zonas_ordenadas[1]][0], clasificados[zonas_ordenadas[0]][1]),
+        ]
+    elif len(zonas_ordenadas) == 4:
+        # Cuartos: 1A vs 2B, 1B vs 2A, 1C vs 2D, 1D vs 2C
+        cruces = [
+            (clasificados['A'][0], clasificados['B'][1]),
+            (clasificados['B'][0], clasificados['A'][1]),
+            (clasificados['C'][0], clasificados['D'][1]),
+            (clasificados['D'][0], clasificados['C'][1]),
+        ]
+    else:
+        # Fallback: simplemente emparejar de a 2
+        ids = [pid for _, pid in lista_clasificados]
+        cruces = [(ids[i], ids[i + 1]) for i in range(0, len(ids), 2)]
+
+    for a, b in cruces:
+        db.session.add(Partido(
+            torneo_id=torneo_id,
+            participante_a_id=a,
+            participante_b_id=b,
+            ronda="Playoff R1",
+            estado="pendiente",
+        ))
+
+    db.session.commit()
+    return len(cruces)
 
 
+# ==========================================================
+# 🔗 Ruta Flask: generar playoff desde zonas
+# ==========================================================
+@app.route('/admin/torneos/<int:tid>/generar_playoff_desde_zonas', methods=['POST'])
+@admin_required
+def admin_torneos_generar_playoff_desde_zonas(tid):
+    from app import db, Torneo
+    t = get_or_404(Torneo, tid)
+    EST_EN_JUEGO = globals().get('EST_EN_JUEGO', 'EN_JUEGO')
+
+    def back():
+        return redirect(url_for('admin_torneos_view', tid=tid))
+
+    try:
+        creados = generar_playoff_desde_zonas(t.id)
+        if creados:
+            flash(f'Playoff generado automáticamente desde zonas ({creados} partidos).', 'ok')
+        else:
+            flash('No se generaron partidos (verificá resultados de zonas).', 'warning')
+
+        if t.estado != EST_EN_JUEGO:
+            t.estado = EST_EN_JUEGO
+            db.session.commit()
+        return back()
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error generando playoff: {e}', 'error')
+        return back()
+
+
+
+# ==========================================================
+# 🏆 Ruta para generar segunda ronda desde el panel admin
+# ==========================================================
+@app.route('/admin/torneos/<int:tid>/generar_segunda_ronda', methods=['POST'])
+@admin_required
+def admin_torneos_generar_segunda_ronda(tid):
+    from app import db, Torneo
+    t = get_or_404(Torneo, tid)
+    EST_EN_JUEGO = globals().get('EST_EN_JUEGO', 'EN_JUEGO')
+
+    def back():
+        return redirect(url_for('admin_torneos_view', tid=tid))
+
+    try:
+        creados = generar_partidos_ganadores_perdedores(t.id)
+        if creados > 0:
+            flash(f'Segunda ronda generada: {creados} partidos (ganadores y perdedores).', 'ok')
+        else:
+            flash('No se generaron nuevos partidos (ya existen o faltan resultados en R1).', 'info')
+
+        if t.estado != EST_EN_JUEGO:
+            t.estado = EST_EN_JUEGO
+            db.session.commit()
+        return back()
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('Error generando segunda ronda')
+        flash(f'Error generando segunda ronda: {e}', 'error')
+        return back()
 
 @app.route('/admin/torneos/partidos/<int:pid>/resultado', methods=['POST'])
 @admin_required

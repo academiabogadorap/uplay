@@ -97,7 +97,7 @@
   }
 </style>
 
-<!-- ===== HERO (como /mi) ===== -->
+<!-- ===== HERO ===== -->
 <div class="hero">
   <div class="hero-top">
     <div>
@@ -106,9 +106,7 @@
         <span class="chip"><span class="dot b"></span> Estado: <span class="badge state-{{ t.estado }}" style="margin-left:6px;">{{ t.estado }}</span></span>
         {% set raw_mod = (t.modalidad or t.formato or '') %}
         {% set mod_up = raw_mod.upper() %}
-        <span class="chip"><span class="dot g"></span> {{ 'INDIVIDUAL' if mod_up == 'SINGLES'
-              else 'PAREJAS' if mod_up == 'DOBLES'
-              else (raw_mod or 'Modalidad -') }}</span>
+        <span class="chip"><span class="dot g"></span> {{ 'INDIVIDUAL' if mod_up == 'SINGLES' else 'PAREJAS' if mod_up == 'DOBLES' else (raw_mod or 'Modalidad -') }}</span>
         {% set tipo_up = (t.tipo or '')|upper %}
         <span class="chip"><span class="dot y"></span> {{ 'AMERICANO' if tipo_up == 'AMERICANO'
               else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
@@ -132,67 +130,32 @@
 <!-- ===== Info del Torneo ===== -->
 <div class="card torneo-info">
   <div class="info-grid" role="list">
-    <div class="info-item" role="listitem">
-      <strong>Modalidad</strong>
-      {% set raw_mod = (t.modalidad or t.formato or '') %}
-      {% set mod_up = raw_mod.upper() %}
-      <span>{{ 'INDIVIDUAL' if mod_up == 'SINGLES'
-              else 'PAREJAS' if mod_up == 'DOBLES'
-              else (raw_mod or '-') }}</span>
-    </div>
-    <div class="info-item" role="listitem">
-      <strong>Formato</strong>
-      {% set tipo_up = (t.tipo or '')|upper %}
-      <span>{{ 'AMERICANO' if tipo_up == 'AMERICANO'
-              else 'ZONAS + PLAYOFF' if tipo_up in ['ZONAS+PLAYOFF','ZONAS + PLAYOFF']
-              else 'PLAYOFF' if tipo_up == 'PLAYOFF'
-              else (t.tipo or '-') }}</span>
-    </div>
-    <div class="info-item" role="listitem">
-      <strong>Categoría</strong>
-      <span>{{ t.categoria.nombre if t.categoria else '-' }}</span>
-    </div>
-    <div class="info-item" role="listitem">
-      <strong>Inicio</strong>
-      <span>{{ t.fecha_inicio or '-' }}</span>
-    </div>
-    <div class="info-item" role="listitem">
-      <strong>Sede</strong>
-      <span>{{ t.sede or '-' }}</span>
-    </div>
-    <div class="info-item" role="listitem">
-      {% set is_dobles = (t.es_dobles() if t.es_dobles is defined else ((t.modalidad or '')|upper == 'DOBLES')) %}
-      {% if is_dobles %}
-        <strong>Límite parejas</strong>
-      {% else %}
-        <strong>Límite jugadores</strong>
-      {% endif %}
-      <span>{{ t.cupo_max or 'Sin límite' }}</span>
-    </div>
+    <div class="info-item"><strong>Modalidad</strong><span>{{ t.modalidad or '-' }}</span></div>
+    <div class="info-item"><strong>Formato</strong><span>{{ t.tipo or '-' }}</span></div>
+    <div class="info-item"><strong>Categoría</strong><span>{{ t.categoria.nombre if t.categoria else '-' }}</span></div>
+    <div class="info-item"><strong>Inicio</strong><span>{{ t.fecha_inicio or '-' }}</span></div>
+    <div class="info-item"><strong>Sede</strong><span>{{ t.sede or '-' }}</span></div>
+    <div class="info-item"><strong>Cupo máximo</strong><span>{{ t.cupo_max or 'Sin límite' }}</span></div>
   </div>
-
-  {% if t.notas %}
-    <div class="notes"><em>{{ t.notas }}</em></div>
-  {% endif %}
+  {% if t.notas %}<div class="notes"><em>{{ t.notas }}</em></div>{% endif %}
 </div>
 
 <!-- ===== Acciones ===== -->
 <div class="card actions" style="margin-top:10px;">
   <div class="actions-row">
-
     {% if t.estado in ('BORRADOR','CANCELADO') %}
       <form method="post" action="{{ url_for('admin_torneo_abrir_inscripcion', tid=t.id) }}">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn btn-slim">Abrir inscripción</button>
       </form>
-      <span class="pill" title="Disponible cuando cierre la inscripción">Generar fixture (bloqueado)</span>
+      <span class="pill">Generar fixture (bloqueado)</span>
 
     {% elif t.estado == 'INSCRIPCION' %}
       <form method="post" action="{{ url_for('admin_torneo_cerrar_inscripcion', tid=t.id) }}">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <button type="submit" class="btn btn-ghost btn-slim">Cerrar inscripción</button>
       </form>
-      <span class="pill" title="Primero cerrá inscripción">Generar fixture (bloqueado)</span>
+      <span class="pill">Generar fixture (bloqueado)</span>
 
     {% elif t.estado in ('INSCRIPCION_CERRADA', 'EN_JUEGO') %}
       {% if t.estado == 'INSCRIPCION_CERRADA' %}
@@ -201,279 +164,70 @@
         <span class="pill">Fixture en juego</span>
       {% endif %}
 
-      <form method="post" action="{{ url_for('admin_torneos_generar_fixture', tid=t.id) }}"
-            class="seg" aria-label="Generar fixture">
+      <form method="post" action="{{ url_for('admin_torneos_generar_fixture', tid=t.id) }}" class="seg">
         {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-
         <label for="modo">Modo</label>
-        <select name="modo" id="modo" aria-describedby="desc-modo">
-          <option value="AMERICANO" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
-            Americano (liga / por zonas)
-          </option>
-          <option value="PLAYOFF" {{ 'disabled' if t.estado != 'INSCRIPCION_CERRADA' else '' }}>
-            Playoff (crear 1ª ronda)
-          </option>
+        <select name="modo" id="modo">
+          <option value="AMERICANO">Americano (liga completa)</option>
+          <option value="ROUND_ROBIN">Round Robin (por zonas)</option>
+          <option value="ZONAS_LLAVE">Zonas (1v2 / 3v4 → Ganadores y Perdedores)</option>
+          <option value="PLAYOFF">Playoff (crear 1ª ronda)</option>
           <option value="PLAYOFF_NEXT">Siguiente ronda de Playoff</option>
         </select>
 
         <label for="zonas">Zonas</label>
-        <select name="zonas" id="zonas" title="Solo aplica a AMERICANO">
+        <select name="zonas" id="zonas">
           {% for z in range(1, 17) %}
             <option value="{{ z }}" {{ 'selected' if z == 1 else '' }}>{{ z }}</option>
           {% endfor %}
         </select>
 
+        <div id="grupo-roundrobin" style="display:none;">
+          <label for="parejas_por_zona">Parejas por zona</label>
+          <select name="parejas_por_zona" id="parejas_por_zona">
+            {% for n in range(2, 9) %}
+              <option value="{{ n }}" {{ 'selected' if n == 4 else '' }}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
         <label for="ida_y_vuelta">Ida y vuelta</label>
-        <select name="ida_y_vuelta" id="ida_y_vuelta" title="Solo aplica a AMERICANO">
+        <select name="ida_y_vuelta" id="ida_y_vuelta">
           <option value="0" selected>No</option>
           <option value="1">Sí</option>
         </select>
 
         <button type="submit" class="btn btn-slim">Generar fixture</button>
-        <small id="desc-modo" class="muted" style="margin-left:2px;">
-          AMERICANO/PLAYOFF habilitados al cerrar inscripción. PLAYOFF_NEXT disponible en juego.
-        </small>
+      </form>
+
+      <!-- 🔥 Nuevo botón para crear Playoff desde Zonas -->
+      <form method="post" action="{{ url_for('admin_torneos_generar_playoff_desde_zonas', tid=t.id) }}" class="seg">
+        {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <button type="submit" class="btn btn-ghost btn-slim">Generar Playoff desde Zonas</button>
       </form>
 
     {% elif t.estado == 'FINALIZADO' %}
       <span class="pill">Torneo finalizado</span>
-
-    {% else %}
-      <span class="pill">Acciones no disponibles</span>
     {% endif %}
-
-    <div class="spacer"></div>
-
-    <form method="post"
-          action="{{ url_for('admin_torneo_eliminar', tid=t.id) }}"
-          onsubmit="return confirm('¿Seguro que querés eliminar este torneo? Esta acción no se puede deshacer.');">
-      {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <button type="submit" class="btn btn-danger btn-slim">Eliminar torneo</button>
-    </form>
   </div>
 </div>
 
-{# ======= SECCIÓN: PARTIDOS Y RESULTADOS ======= #}
+<!-- PARTIDOS -->
 <div class="card section">
   <h3>Partidos y resultados</h3>
-
   {% if partidos and partidos|length > 0 %}
-    <table class="table" aria-describedby="tabla-partidos-desc">
-      <caption id="tabla-partidos-desc" class="hide-sm" style="caption-side:bottom; text-align:left; color:var(--muted,#9fb3c8);">
-        Gestioná resultados: editar actualiza sets/ganador. Eliminar revierte ranking y deja el partido pendiente.
-      </caption>
+    <table class="table">
       <thead>
-        <tr>
-          <th class="hide-sm">#ID</th>
-          <th>Ronda</th>
-          <th>Partido</th>
-          <th class="hide-sm">Estado</th>
-          <th>Resultado</th>
-          <th class="hide-sm">Confirmado por</th>
-          <th class="nowrap">Acciones</th>
-        </tr>
+        <tr><th>#</th><th>Ronda</th><th>Partido</th><th>Estado</th><th>Resultado</th></tr>
       </thead>
       <tbody>
         {% for p in partidos %}
-          {% set r = resultados.get(p.id) if resultados is defined else None %}
-          <tr id="row-{{ p.id }}">
-            <td class="hide-sm mini">#{{ p.id }}</td>
-            <td class="mini">
-              {{ p.ronda if p.ronda is not none else '-' }}
-              <div class="muted mini">Orden: {{ p.orden if p.orden is not none else '-' }}</div>
-            </td>
-            <td>
-              {% set A = p.participante_a if p.participante_a is defined else None %}
-              {% set B = p.participante_b if p.participante_b is defined else None %}
-
-              {# ===== Macros de nombres ===== #}
-              {% macro nombre_j(j) -%}
-                {%- if not j -%}—{%- else -%}
-                  {%- set n = (
-                    (j.nombre_completo if j.nombre_completo is defined else None) or
-                    (j.display_name    if j.display_name    is defined else None) or
-                    (j.nombre          if j.nombre          is defined else None) or
-                    (j.alias           if j.alias           is defined else None) or
-                    (j.full_name       if j.full_name       is defined else None) or
-                    (j.username        if j.username        is defined else None)
-                  ) -%}
-                  {{ n if n else ('Jugador #' ~ (j.id if j.id is defined else '?')) }}
-                {%- endif -%}
-              {%- endmacro %}
-
-              {% macro jugadores_desde_insc(tp) -%}
-                {%- if not tp -%}—{%- else -%}
-                  {%- set insc = tp.inscripcion if tp.inscripcion is defined else None -%}
-                  {%- if insc -%}
-                    {%- set j1 = insc.jugador1 if insc.jugador1 is defined else None -%}
-                    {%- set j2 = insc.jugador2 if insc.jugador2 is defined else None -%}
-                    {%- set parts = [] -%}
-                    {%- if j1 %}{%- set _ = parts.append(nombre_j(j1)) -%}{%- endif -%}
-                    {%- if j2 %}{%- set _ = parts.append(nombre_j(j2)) -%}{%- endif -%}
-                    {{ parts|join(' + ') if parts|length > 0 else '—' }}
-                  {%- else -%}
-                    {%- set j1id = tp.jugador1_id if tp.jugador1_id is defined else None -%}
-                    {%- set j2id = tp.jugador2_id if tp.jugador2_id is defined else None -%}
-                    {{ ('#' ~ j1id) if j1id else '—' }}{{ (' + #' ~ j2id) if j2id else '' }}
-                  {%- endif -%}
-                {%- endif -%}
-              {%- endmacro %}
-
-              {% macro jugadores_lado(pid, lado) -%}
-                {%- set jp = jugadores_por_partido.get(pid) if jugadores_por_partido is defined else None -%}
-                {%- set lst = (jp.get(lado) if jp else []) -%}
-                {%- set parts = [] -%}
-                {%- for j in lst %}
-                  {%- set _ = parts.append(nombre_j(j)) -%}
-                {%- endfor -%}
-                {{ parts|join(' + ') if parts|length > 0 else '' }}
-              {%- endmacro %}
-
-              {% macro nom(tp) -%}
-                {%- if not tp -%}—{%- else -%}
-                  {%- set alias = (tp.alias if tp.alias is defined else None) or (tp.display_name if tp.display_name is defined else None) -%}
-                  {%- if alias -%}
-                    {{ alias }}
-                  {%- else -%}
-                    TP-{{ tp.id }}
-                  {%- endif -%}
-                {%- endif -%}
-              {%- endmacro %}
-
-              {# ===== Encabezado alias/TP ===== #}
-              <div>
-                <span class="{{ 'winner' if r and (r.ganador_lado == 'A' or (r.ganador_participante_id and A and r.ganador_participante_id == A.id)) else '' }}">{{ nom(A) }}</span>
-                <span class="muted">vs</span>
-                <span class="{{ 'winner' if r and (r.ganador_lado == 'B' or (r.ganador_participante_id and B and r.ganador_participante_id == B.id)) else '' }}">{{ nom(B) }}</span>
-              </div>
-
-              {# ===== Línea de 4 jugadores con fallback ===== #}
-              {% set a_from_lados = jugadores_lado(p.id, 'A') %}
-              {% set b_from_lados = jugadores_lado(p.id, 'B') %}
-              <div class="muted mini">
-                <strong>A:</strong>
-                {{ a_from_lados if a_from_lados else jugadores_desde_insc(A) }}
-                ·
-                <strong>B:</strong>
-                {{ b_from_lados if b_from_lados else jugadores_desde_insc(B) }}
-              </div>
-
-              <div class="muted mini">Cancha: {{ p.cancha or '-' }}</div>
-            </td>
-
-            <td class="hide-sm mini">{{ p.estado or '-' }}</td>
-
-            <td class="mini">
-              {% set rp = propuestas.get(p.id) if propuestas is defined else None %}
-
-              {% if r %}
-                <div><span class="chip">Sets:</span> {{ r.sets_text or '-' }}</div>
-                <div class="muted mini">
-                  Ganador:
-                  {% if r.ganador_lado %}
-                    {{ 'A' if r.ganador_lado == 'A' else 'B' }}
-                  {% elif r.ganador_participante_id %}
-                    {% if A and r.ganador_participante_id == A.id %}A{% elif B and r.ganador_participante_id == B.id %}B{% else %}#{{ r.ganador_participante_id }}{% endif %}
-                  {% else %}
-                    -
-                  {% endif %}
-                </div>
-
-              {% elif rp %}
-                <div><span class="chip">Propuesto:</span> {{ rp.sets_text or '-' }}</div>
-                <div class="muted mini">
-                  Ganador propuesto:
-                  {% if rp.ganador_lado %}
-                    {{ 'A' if rp.ganador_lado == 'A' else 'B' }}
-                  {% elif rp.ganador_participante_id %}
-                    {% if A and rp.ganador_participante_id == A.id %}A{% elif B and rp.ganador_participante_id == B.id %}B{% else %}#{{ rp.ganador_participante_id }}{% endif %}
-                  {% else %}
-                    -
-                  {% endif %}
-                  {% if rp.propuesto_por_jugador_id %}
-                    · por:
-                    {% set prop = jugadores_by_id.get(rp.propuesto_por_jugador_id) if jugadores_by_id is defined else None %}
-                    {% if prop %}
-                      {{ prop.nombre_completo or prop.display_name or ('Jugador #' ~ prop.id) }}
-                    {% else %}
-                      #{{ rp.propuesto_por_jugador_id }}
-                    {% endif %}
-                  {% endif %}
-                  {% if rp.created_at is defined and rp.created_at %} · {{ rp.created_at }}{% endif %}
-                </div>
-
-              {% else %}
-                <em class="muted">Sin resultado</em>
-              {% endif %}
-            </td>
-
-            <td class="hide-sm mini">
-              {% if r and r.confirmado_por_jugador_id %}
-                {% set conf = jugadores_by_id.get(r.confirmado_por_jugador_id) if jugadores_by_id is defined else None %}
-                {% if conf %}
-                  {{ conf.nombre_completo or conf.display_name or ('Jugador #' ~ conf.id) }}
-                {% else %}
-                  #{{ r.confirmado_por_jugador_id }}
-                {% endif %}
-              {% else %}
-                —
-              {% endif %}
-            </td>
-
-            <td class="nowrap">
-              <div class="row-actions">
-                {% if r %}
-                  <button type="button" class="btn btn-ghost btn-slim"
-                          aria-controls="edit-{{ p.id }}"
-                          aria-expanded="false"
-                          onclick="const el=document.getElementById('edit-{{ p.id }}'); const s=getComputedStyle(el).display; el.style.display=(s==='none'?'block':'none'); this.setAttribute('aria-expanded', s==='none');">
-                    Editar
-                  </button>
-
-                  <form method="post"
-                        action="{{ url_for('admin_torneos_partido_resultado_eliminar', pid=p.id) }}"
-                        onsubmit="return confirm('¿Eliminar el resultado de este partido? Esto también revertirá los puntos del ranking y dejará el partido en PENDIENTE.');">
-                    {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-                    <button type="submit" class="btn btn-danger btn-slim">Eliminar</button>
-                  </form>
-                {% else %}
-                  <button type="button" class="btn btn-ghost btn-slim"
-                          aria-controls="edit-{{ p.id }}"
-                          aria-expanded="false"
-                          onclick="const el=document.getElementById('edit-{{ p.id }}'); const s=getComputedStyle(el).display; el.style.display=(s==='none'?'block':'none'); this.setAttribute('aria-expanded', s==='none');">
-                    Cargar resultado
-                  </button>
-                {% endif %}
-              </div>
-
-              <form id="edit-{{ p.id }}" class="edit-form" method="post"
-                    action="{{ url_for('admin_torneos_partido_resultado_editar', pid=p.id) }}">
-                {% if csrf_token is defined %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-
-                <div class="field">
-                  <label class="mini">Ganador</label>
-                  <label><input type="radio" name="ganador_lado" value="A"
-                                {% if r and (r.ganador_lado == 'A' or (r.ganador_participante_id and A and r.ganador_participante_id == A.id)) %}checked{% endif %}> A</label>
-                  <label><input type="radio" name="ganador_lado" value="B"
-                                {% if r and (r.ganador_lado == 'B' or (r.ganador_participante_id and B and r.ganador_participante_id == B.id)) %}checked{% endif %}> B</label>
-                </div>
-
-                <div class="field">
-                  <label class="mini" for="sets-{{ p.id }}">Sets (texto)</label>
-                  <input id="sets-{{ p.id }}" type="text" name="sets_text" value="{{ r.sets_text if r else '' }}"
-                         placeholder="Ej: 6-4 3-6 10-8" style="height:34px; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.06); color:var(--text); min-width:220px;">
-                </div>
-
-                <input type="hidden" name="ganador_participante_id"
-                       value="{% if r and r.ganador_participante_id %}{{ r.ganador_participante_id }}{% else %}{% if A %}{{ A.id }}{% endif %}{% endif %}">
-
-                <div class="field">
-                  <button type="submit" class="btn btn-slim">Guardar</button>
-                  <button type="button" class="btn btn-ghost btn-slim"
-                          onclick="document.getElementById('edit-{{ p.id }}').style.display='none'">Cancelar</button>
-                </div>
-              </form>
-            </td>
+          <tr>
+            <td>{{ p.id }}</td>
+            <td>{{ p.ronda }}</td>
+            <td>{{ p.participante_a_id }} vs {{ p.participante_b_id }}</td>
+            <td>{{ p.estado }}</td>
+            <td>{{ resultados[p.id].sets_text if resultados and p.id in resultados else '-' }}</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -482,4 +236,19 @@
     <p class="muted">No hay partidos generados todavía.</p>
   {% endif %}
 </div>
+
+<script>
+  const modoSelect = document.getElementById('modo');
+  const grupoRoundRobin = document.getElementById('grupo-roundrobin');
+  function actualizarVisibilidad() {
+    if (modoSelect.value === 'ROUND_ROBIN' || modoSelect.value === 'ZONAS_LLAVE') {
+      grupoRoundRobin.style.display = 'flex';
+    } else {
+      grupoRoundRobin.style.display = 'none';
+    }
+  }
+  modoSelect.addEventListener('change', actualizarVisibilidad);
+  actualizarVisibilidad();
+</script>
+
 {% endblock %}
