@@ -11006,16 +11006,3 @@ if __name__ == "__main__":
             print(result.stderr)
     except Exception as err:
         print(f"⚠️ Error al ejecutar prueba de Flask: {err}")
-
-# ============================================================
-# 🧭 REGISTRO DE BLUEPRINTS (AUTOMÁTICO)
-# ============================================================
-from routes import main_routes, admin_routes, torneo_routes, desafio_routes, jugador_routes
-
-app.register_blueprint(main_routes.bp)
-app.register_blueprint(admin_routes.bp)
-app.register_blueprint(torneo_routes.bp)
-app.register_blueprint(desafio_routes.bp)
-app.register_blueprint(jugador_routes.bp)
-
-print("✅ Blueprints registrados correctamente.")
